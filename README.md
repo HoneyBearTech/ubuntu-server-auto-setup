@@ -27,7 +27,7 @@ git clone https://github.com/Honeyb34r/ubuntu-server-auto-setup.git
 
 Run the setup script
 ```bash
-cd ubuntu-server-setup
+cd ubuntu-server-auto-setup
 bash setup.sh
 ```
 
