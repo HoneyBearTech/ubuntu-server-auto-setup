@@ -1,6 +1,7 @@
 # ubuntu-server-auto-setup
 
-[![Build Status](https://travis-ci.org/jasonheecs/ubuntu-server-setup.svg?branch=master)](https://travis-ci.org/jasonheecs/ubuntu-server-setup)
+[![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/workflows/CI/badge.svg?event=push)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions?query=workflow%3ACI) [![Molecule CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/workflows/Molecule%20CI/badge.svg?event=push)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions?query=workflow%3A%22Molecule+CI%22)
+
 
 This is a setup script to automate the setup and provisioning of Ubuntu servers. It does the following:
 * Adds a new user account with sudo access
