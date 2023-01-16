@@ -1,0 +1,98 @@
+# This code is licensed from CircleCI to the user under the MIT license.
+# See here for details: https://circleci.com/developer/orbs/licensing
+version: 2.1
+description: |
+    Install BATS and automatically execute BATS (Bash Automated Testing System) tests in your pipeline.
+display:
+    home_url: https://github.com/bats-core/bats-core
+    source_url: https://github.com/CircleCI-Public/BATS-orb
+commands:
+    install:
+        description: |
+            Install the BATS-Core BASH Automation Testing System.
+        steps:
+            - run:
+                command: "#!/bin/bash\n\ncheckRequirements() {\n    if ! command -v git &> /dev/null\n    then\n        echo \"git is required to install BATS\"\n        exit 1\n    fi\n    # TODO: revisit if SUDO is needed. Keeping for patch compatability\n    if [[ $EUID == 0 ]]; then export SUDO=\"\"; else export SUDO=\"sudo\"; fi\n}\n\ninstallBats() {\n    checkRequirements\n    cd /tmp || exit 1\n    git clone https://github.com/bats-core/bats-core.git\n    cd /tmp/bats-core || exit 1\n    $SUDO ./install.sh /usr/local\n    if ! command -v bats &> /dev/null\n    then\n        echo \"BATS failed to install\"\n        echo \"Please open an issue at: https://github.com/CircleCI-Public/BATS-orb/issues\"\n        exit 1\n    else\n        echo \"BATS installed successfully\"\n    fi\n}\n\nsetupBats() {\n    if ! command -v bats &> /dev/null \n    then\n    # BATS is not installed\n        installBats\n    else\n    # BATS is installed\n        echo \"BATS is already available\"\n    fi\n}\n\nsetupBats\n"
+                name: Install BATS-Core
+executors:
+    default:
+        description: CircleCI's cimg/base docker image. An optimized Ubuntu 20.04 environment for CI.
+        docker:
+            - image: cimg/base:stable
+jobs:
+    run:
+        description: |
+            Automatically execute BATS tests as a job.
+        executor: <<parameters.exec_environment>>
+        parameters:
+            args:
+                default: ""
+                description: 'Additional arguments to pass to the BATS command. e.x: `--recursive --trace`'
+                type: string
+            exec_environment:
+                default: default
+                description: Set a custom executor for your BATS testing environment. By default the Docker image 'cimg/base:stable' will be used. BATS will be installed at run time.
+                type: executor
+            formatter:
+                default: tap
+                description: Formatter to use for output seen in the step UI. You can also supply a custom formatter.
+                type: string
+            output:
+                default: /tmp/bats
+                description: Write the report results to a file in this given path.
+                type: string
+            path:
+                description: 'REQUIRED: Path containing BATS test script(s)'
+                type: string
+            report_formatter:
+                default: junit
+                description: Formatter to use for test report output. By default, "junit" will be selected and parsed by CircleCI. If a non-junit compatible formatter is selected, "save_test_results" should be set to false.
+                type: string
+            save_test_results:
+                default: true
+                description: Save test results to CircleCI. Note, your formatter must be 'junit' to be parsed by CircleCI. If the report format has been changed, or if you do not wish for the test results to be displayed within CircleCI, then set this to 'false'
+                type: boolean
+            setup-steps:
+                default: []
+                description: Add additional steps prior to executing tests. Additional BATS plugins can be loaded here, or other setup scripts.
+                type: steps
+            timing:
+                default: true
+                description: Add timing information to the tests. Recommended for CircleCI test reporting.
+                type: boolean
+        steps:
+            - checkout
+            - install
+            - steps: <<parameters.setup-steps>>
+            - run:
+                command: "#!/bin/bash\n# This script is ran within the 'run' job, which will check \n#   for the existence of BATS prior to running this script.\n\n# Attempt to create the output directory\nmkdir -p \"$ORB_VAL_OUTPUT\" || { echo \"Failed to create output directory\"; exit 1; }\n\nif [ \"$ORB_VAL_TIMING\" = \"1\" ]; then\n  set -- \"$@\" --timing\nfi\n\n# Ensure this is the last argument\nif [ -n \"$ORB_VAL_ARGS\" ]; then\n  set -- \"$@\" \"$ORB_VAL_ARGS\"\nfi\n\nset -x\n#shellcheck disable=SC2086\nbats --formatter \"$ORB_VAL_FORMATTER\" --report-formatter \"$ORB_VAL_REPORT_FORMATTER\" \"$@\" --output \"$ORB_VAL_OUTPUT\" $ORB_VAL_PATH \nset +x\n"
+                environment:
+                    ORB_VAL_ARGS: <<parameters.args>>
+                    ORB_VAL_FORMATTER: <<parameters.formatter>>
+                    ORB_VAL_OUTPUT: <<parameters.output>>
+                    ORB_VAL_PATH: <<parameters.path>>
+                    ORB_VAL_REPORT_FORMATTER: <<parameters.report_formatter>>
+                    ORB_VAL_SAVE_TEST_RESULTS: <<parameters.save_test_results>>
+                    ORB_VAL_TIMING: <<parameters.timing>>
+                name: Execute BATS tests
+            - when:
+                condition: <<parameters.save_test_results>>
+                steps:
+                    - store_test_results:
+                        path: <<parameters.output>>
+examples:
+    run-bats-tests:
+        description: |
+            The "run" job provided by the BATS orb will automatically checkout your repository and execute BATS tests within the given path. Optionally, specify the 'junit' formatter and enable timing to generate a JUnit XML file for CircleCI test reporting. Junit test reports will be automatically collected.
+            See the GitHub README for more resources on creating BATS tests.
+        usage:
+            version: "2.1"
+            orbs:
+                bats: circleci/bats@1.1.0
+            workflows:
+                test-my-app:
+                    jobs:
+                        - bats/run:
+                            formatter: junit
+                            path: ./src/tests
+                            timing: true
