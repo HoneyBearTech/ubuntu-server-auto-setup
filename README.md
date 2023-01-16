@@ -23,7 +23,7 @@ sudo apt-get install git
 Clone this repository into your home directory:
 ```bash
 cd ~
-git clone https://github.com/Honeyb34r/ubuntu-server-auto-setup.git
+git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git
 ```
 
 Run the setup script
