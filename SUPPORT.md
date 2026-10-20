@@ -19,8 +19,8 @@ so this is a best-effort policy, not a contract.
 | An older release | nothing | it stopped being supported when the next release came out |
 | `main` | bug fixes and security fixes | always (it's where fixes land first) |
 
-There is no release of the Ansible version yet; until the first one (v0.1.0), `main` is the only supported
-line.
+The first release of the Ansible version is
+[v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0).
 
 - A fix is released as a new version (a patch release such as 0.1.1 for fixes only), never applied to an
   older release.
