@@ -4,7 +4,7 @@ LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 
-.PHONY: help deps lint syntax test site build-installer provision baseline keys
+.PHONY: help deps lint syntax test fuzz site build-installer provision baseline keys
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ syntax: ## Syntax-check every playbook against the example inventory
 
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
+
+fuzz: ## Atheris fuzz targets, FUZZ_SECONDS each (Linux x86-64; needs requirements-fuzz.txt)
+	tests/fuzz/run.sh
 
 site: ## Build installer, provision missing VMs, apply baseline
 	$(PLAYBOOK) playbooks/site.yml $(LIMIT_ARG) $(ARGS)

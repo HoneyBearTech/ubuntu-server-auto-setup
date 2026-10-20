@@ -1,4 +1,15 @@
 ---
+- name: Check the SSH settings
+  ansible.builtin.assert:
+    that:
+      - ssh_port | string is match('^[0-9]{1,5}\Z') and 1 <= (ssh_port | int) <= 65535
+      - ssh_allow_users | select('match', ssh_allow_users_pattern) | list | length == ssh_allow_users | length
+      - ssh_permit_root_login in ssh_permit_root_login_values
+    fail_msg: >-
+      ssh_port must be 1-65535, ssh_allow_users entries can't contain spaces or line breaks, and
+      ssh_permit_root_login must be one of {{ ssh_permit_root_login_values | join(', ') }}.
+    quiet: true
+
 - name: Check that the admin user may still log in
   ansible.builtin.assert:
     that: ssh_allow_users | length == 0 or (admin_user | default(ansible_user)) in ssh_allow_users

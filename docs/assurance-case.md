@@ -50,8 +50,8 @@ themselves; anything on the servers beyond the baseline.
 | B1 | Control node → Proxmox API | VM create/start/config/status calls, the API token | HTTPS with certificate verification (`pve_validate_certs`, default `true`); a token with a narrow role and privilege separation ([installing.md](installing.md#2-create-the-proxmox-api-token)); token handling hidden from output (`pve_hide_secrets`, `roles/proxmox_vm/tasks/`). |
 | B2 | Control node → Proxmox node (SSH as root) | ISO builds, seed files with the password hash | SSH with host key checking (`ansible.cfg`: `host_key_checking = true`); seed directory `0700`, files `0600`; seed ISO and directory deleted after the install (`roles/proxmox_vm/tasks/provision.yml`). |
 | B3 | Proxmox node → `releases.ubuntu.com` | The Ubuntu ISO and `SHA256SUMS` | HTTPS; the ISO is verified against the published SHA-256 before use, and the run stops if the release isn't listed (`roles/installer_iso/tasks/main.yml`). |
-| B4 | Control node → `github.com` | Public SSH keys | HTTPS; lines filtered to public-key formats; an empty result stops the run; JSON-encoded into the installer configuration (`roles/proxmox_vm/templates/user-data.j2`, `roles/common/tasks/ssh_keys.yml`). |
-| B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are JSON-encoded where they are free text. |
+| B4 | Control node → `github.com` | Public SSH keys | HTTPS; lines filtered to public-key formats; an empty result stops the run; written into the installer configuration (`roles/proxmox_vm/templates/user-data.j2`, `roles/common/tasks/ssh_keys.yml`). |
+| B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are written as data with `to_nice_yaml` where they are free text. |
 | B6 | Control node → new VM (first SSH contact) | The VM's host key | Trust on first use: the old `known_hosts` entry for the IP is replaced with the scanned ed25519 key (`provision_manage_known_hosts`). Later port changes use the key read over the verified connection (`roles/ssh_hardening/tasks/main.yml`). |
 | B7 | Internet / LAN → servers | SSH and whatever `ufw_allow` opens | UFW default deny with rate-limited SSH; sshd public-key only, no root, `AllowUsers` optional; Fail2Ban (`roles/firewall/`, `roles/ssh_hardening/`, `roles/fail2ban/`). |
 | B8 | Contributors → `main` → releases | Code changes, release artifacts | Protected `main` (pull request, required checks), DCO, lint and secret scanning, read-only workflow tokens, pinned actions, keyless signing and provenance (`.github/workflows/`). |
@@ -97,8 +97,12 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
 - **Limited attack surface.** Servers expose only SSH (and what you add); the installer needs no network
   service; nothing listens on the control node.
 - **Input validation with allowlists.** Required variables are asserted before provisioning starts (a
-  numeric `pve_vmid`, a static IP, a gateway, keys or a password); keys are filtered to known public-key
-  prefixes; free-text values are JSON-encoded into the installer configuration.
+  numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
+  files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
+  user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times), anchored
+  with `\Z` so a trailing line break can't slip through. Keys are split on every line break and filtered to
+  known public-key prefixes. The installer configuration is built as data and written with `to_nice_yaml`.
+  The [fuzz targets](testing.md#fuzzing) check that no accepted value can change a file's structure.
 
 ## 4. Countering common weaknesses
 
@@ -111,7 +115,7 @@ this kind:
 | **Cleartext storage of sensitive information** (CWE-312, CWE-532) | The password reaches the node only as a SHA-512 crypt hash, in root-only files that are deleted after the install; `no_log` on tasks that handle the token or the hash; ansible-lint's `no-log-password` rule. |
 | **Cleartext transmission** (CWE-319) and **improper certificate validation** (CWE-295) | HTTPS for the API, GitHub and Ubuntu downloads, with certificate verification on by default. |
 | **Download of code without integrity check** (CWE-494) | The ISO is verified against Ubuntu's SHA-256 before use; collections and packages come from Galaxy and PyPI over HTTPS (see [dependencies.md](dependencies.md)). |
-| **OS command injection** (CWE-78) and **improper neutralization in templates** (CWE-1336) | Commands run with argument lists (`ansible.builtin.command` with `argv`), never through a shell; inventory and GitHub values are JSON-encoded into the installer's YAML; key lines are filtered to public-key formats. |
+| **OS command injection** (CWE-78) and **improper neutralization in templates** (CWE-1336) | Commands run with argument lists (`ansible.builtin.command` with `argv`), never through a shell; the installer's YAML is built as data and written with `to_nice_yaml`; key lines are filtered to public-key formats. Values that reach a configuration file or a shell command are validated against allowlist patterns, and Atheris fuzz targets check the generated user-data, sshd and Fail2Ban files on every change. |
 | **Incorrect default permissions** (CWE-276) | Explicit file modes everywhere (`0600` seed files, `0440` sudoers validated with `visudo`, `0644` configuration); ansible-lint's `risky-file-permissions` rule. |
 | **Improper restriction of authentication attempts** (CWE-307) | SSH key-only, `MaxAuthTries 4`, UFW rate limit and Fail2Ban with incremental bans. |
 | **Improper privilege management** (CWE-269) | Least-privilege API token with privilege separation; no root SSH on servers. Passwordless sudo for the admin user is a documented default that can be turned off. |
@@ -130,6 +134,12 @@ this kind:
   push protection.
 - **Dependency checks**: dependency review on pull requests and Dependabot alerts on `main`
   ([dependencies.md](dependencies.md)).
+- **Fuzzing on every pull request** (and ten minutes per target weekly): Atheris targets render the real
+  templates and Jinja expressions from the roles with arbitrary inputs and check that nothing an accepted
+  value contains can add or change a setting ([testing.md](testing.md#fuzzing)). They found two bugs
+  before release, both fixed with regression tests: validation patterns anchored with `$` accepted a
+  trailing line break, and characters outside Unicode's basic plane didn't survive JSON-encoding into the
+  installer configuration.
 - **Integration tests on every pull request**: every playbook runs against containers and a mock Proxmox
   API, and the results are checked, including what must be refused (password and root logins, an empty key
   list) and the cleanup of a failed install; every playbook must change nothing on a second run, and at

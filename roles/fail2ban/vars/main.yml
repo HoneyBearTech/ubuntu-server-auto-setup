@@ -1,0 +1,8 @@
+---
+# What an ignoreip entry may contain (an address, a CIDR range or a host name): no spaces or line breaks,
+# so a value can't add other jail.local settings. tests/fuzz/ reads it from here.
+fail2ban_ignoreip_pattern: '^[A-Za-z0-9.:/_-]+\Z'
+# Time values (3600, 10m, 1h30m, 1w, -1) and ban actions (nftables[type=allports]).
+fail2ban_time_pattern: '^-?[0-9]+([a-z]+([0-9]+[a-z]+)*)?\Z'
+fail2ban_banaction_pattern: '^[A-Za-z0-9_.,=\[\]-]*\Z'
+fail2ban_sshd_modes: [normal, ddos, extra, aggressive]

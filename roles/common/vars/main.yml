@@ -1,0 +1,4 @@
+---
+# Input formats this role accepts; the admin user name ends up in a sudoers file name.
+common_username_pattern: '^[a-z_][a-z0-9_-]{0,31}\Z'
+common_hostname_pattern: '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z'

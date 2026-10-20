@@ -1,4 +1,12 @@
 ---
+- name: Check the admin user name and hostname
+  ansible.builtin.assert:
+    that:
+      - admin_user is match(common_username_pattern)
+      - not (manage_hostname | bool) or server_hostname is match(common_hostname_pattern)
+    fail_msg: admin_user must be a lowercase Linux user name and server_hostname a valid host name.
+    quiet: true
+
 - name: Check for cloud-init
   ansible.builtin.stat:
     path: /usr/bin/cloud-init

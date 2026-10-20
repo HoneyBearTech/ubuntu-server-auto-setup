@@ -1,0 +1,4 @@
+# Fuzzing engine for tests/fuzz. atheris publishes only Linux x86-64 wheels and has no dependencies, so
+# requirements-fuzz.txt pins it with the SHA-256 digests PyPI publishes for those wheels (pip-compile can't
+# resolve it on other platforms). Dependabot keeps both files current.
+atheris>=3.1
