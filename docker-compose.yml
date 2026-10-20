@@ -4,7 +4,8 @@
 # To build the image from this checkout instead of pulling it: docker compose up -d --build
 services:
   usas:
-    image: ghcr.io/honeybeartech/ubuntu-server-auto-setup:latest
+    # Docker Hub; the same image is mirrored to ghcr.io/honeybeartech/ubuntu-server-auto-setup.
+    image: honeybeartech/ubuntu-server-auto-setup:latest
     build: .
     container_name: usas
     restart: unless-stopped

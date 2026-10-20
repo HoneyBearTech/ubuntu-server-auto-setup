@@ -16,9 +16,9 @@ what you downloaded came from that workflow, unchanged:
   bundle, and `ubuntu-server-auto-setup-<version>.intoto.jsonl`, the signed in-toto envelope), saying which
   workflow run built them from which commit;
 - the **version tag** in git is signed with the maintainer's SSH key;
-- the **container image** `ghcr.io/honeybeartech/ubuntu-server-auto-setup:<version>` (from the first
+- the **container image** `docker.io/honeybeartech/ubuntu-server-auto-setup:<version>` (mirrored to `ghcr.io/honeybeartech/ubuntu-server-auto-setup`; from the first
   release with the web UI on) is signed keylessly with cosign by the same workflow, carries an SBOM and SLSA
-  provenance, and its name and digest are in `images.txt`, which `SHA256SUMS` covers.
+  provenance in both registries, and its names and digest are in `images.txt`, which `SHA256SUMS` covers.
 
 This applies to every release from the first one,
 [v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0), which the examples
@@ -56,7 +56,7 @@ Check the image's signature before you run it (`start.ps1 -Verify` does the same
 0.2.0; use the version you pull, or `latest`.
 
 ```sh
-cosign verify ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
+cosign verify docker.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
   --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -65,13 +65,14 @@ It proves the image was pushed by the release workflow on a version tag. Its bui
 GitHub attestation:
 
 ```sh
-gh attestation verify oci://ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
+gh attestation verify oci://docker.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
   --repo HoneyBearTech/ubuntu-server-auto-setup \
   --signer-workflow HoneyBearTech/ubuntu-server-auto-setup/.github/workflows/release.yml
 ```
 
 To pin exactly the image a release published, use the digest in that release's `images.txt` (after
-checking `SHA256SUMS` as above): `docker pull ghcr.io/honeybeartech/ubuntu-server-auto-setup@sha256:...`.
+checking `SHA256SUMS` as above): `docker pull honeybeartech/ubuntu-server-auto-setup@sha256:...`. The same
+commands work for the mirror: replace `docker.io/honeybeartech/ubuntu-server-auto-setup` with `ghcr.io/honeybeartech/ubuntu-server-auto-setup`.
 The image's SBOM (SPDX, of everything in the image) and its SLSA provenance are attached to it as
 attestations; `docker buildx imagetools inspect <image> --format '{{ json .SBOM }}'` (or `.Provenance`)
 shows them.

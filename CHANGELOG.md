@@ -38,10 +38,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
-- A container image, `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (linux/amd64 and linux/arm64), with
+- The image is published to Docker Hub as `honeybeartech/ubuntu-server-auto-setup` (the default in the
+  README, `docker-compose.yml` and `start.ps1`) and mirrored to GHCR, signed and with provenance in both.
+  The release workflow's Docker Hub token is held in a `release` environment that only version tags can
+  use, and the README is synced to the Docker Hub page. README badges show the Docker Hub version, image
+  size and pulls.
+- A container image, `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (linux/amd64 and linux/arm64), with
   ansible-core, the collections, the playbooks and roles, and a **web UI**, so the project runs anywhere
   Docker does, including Windows with Docker Desktop: `docker run -d -p 127.0.0.1:8080:8080 -v
-  usas-data:/data ghcr.io/honeybeartech/ubuntu-server-auto-setup`, `docker-compose.yml`, or `start.ps1` on
+  usas-data:/data honeybeartech/ubuntu-server-auto-setup`, `docker-compose.yml`, or `start.ps1` on
   Windows. See [docs/web-ui.md](docs/web-ui.md).
 - The web UI walks through the Proxmox API (with a connection test and the cluster's CA certificate), the
   UI's SSH key and the Proxmox node's host key (scanned, compared, then trusted), the defaults (with a
