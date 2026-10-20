@@ -2,8 +2,9 @@
 name: Dependabot auto-merge
 
 # Dependabot's patch and minor updates merge on their own once every required check passes: this job
-# approves them (main requires one approval) and turns on auto-merge. Major updates, and updates without a
-# semver level (such as image digests), wait for the maintainer. The job runs again on every push to the
+# approves them (main requires one approval) and turns on auto-merge. Major updates, updates without a
+# semver level, and every Docker base-image update wait for the maintainer: image tags don't follow semver
+# (python 3.12-slim to 3.15-slim is reported as "minor" but changes the interpreter the image runs). The job runs again on every push to the
 # pull request, so an approval dismissed by a rebase is renewed.
 on: pull_request  # yamllint disable-line rule:truthy
 
@@ -27,10 +28,11 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Approve and enable auto-merge for patch and minor updates
+      - name: Approve and enable auto-merge for patch and minor updates (not Docker)
         if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          steps.metadata.outputs.package-ecosystem != 'docker' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor')
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
