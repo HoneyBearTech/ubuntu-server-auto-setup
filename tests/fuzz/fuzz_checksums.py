@@ -33,7 +33,8 @@ def one_input(data):
     content = "\n".join(pieces) + fdp.PickValueInList(["", "\n"])
 
     picked = PICK.render(installer_sums={"content": content}, ubuntu_iso_name=name)
-    picked = "" if picked is None else str(picked).strip()
+    assert isinstance(picked, str), repr(picked)
+    picked = picked.strip()
     if not picked:
         return
     assert len(picked) == 64 and all(c in "0123456789abcdef" for c in picked), picked

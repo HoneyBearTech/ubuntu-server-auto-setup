@@ -1,6 +1,7 @@
 """Loads the real templates, Jinja expressions and input patterns from the roles, rendered with Ansible's own
 filters and tests, so the fuzz targets exercise exactly what the playbooks run."""
 
+import itertools
 import pathlib
 import re
 
@@ -19,9 +20,31 @@ def _setup(env):
     return env
 
 
+def _ansible_concat(values):
+    """Like Ansible 2.19+: a single-expression template returns that value unchanged (a string stays a string),
+    several parts are joined as text. Plain jinja2 native mode would turn "0000..." into the integer 0."""
+    head = list(itertools.islice(values, 2))
+    if not head:
+        return None
+    if len(head) == 1:
+        return head[0]
+    return "".join(str(v) for v in itertools.chain(head, values))
+
+
+class _AnsibleNativeTemplate(jinja2.nativetypes.NativeTemplate):
+    pass
+
+
+class _AnsibleNativeEnvironment(jinja2.nativetypes.NativeEnvironment):
+    concat = staticmethod(_ansible_concat)
+    template_class = _AnsibleNativeTemplate
+
+
+_AnsibleNativeTemplate.environment_class = _AnsibleNativeEnvironment
+
 # Ansible renders templates with trim_blocks on, and evaluates set_fact expressions to native types.
 TEXT = _setup(jinja2.Environment(undefined=jinja2.StrictUndefined, trim_blocks=True, keep_trailing_newline=True))
-NATIVE = _setup(jinja2.nativetypes.NativeEnvironment(undefined=jinja2.StrictUndefined))
+NATIVE = _setup(_AnsibleNativeEnvironment(undefined=jinja2.StrictUndefined))
 
 
 def template(role, name):
