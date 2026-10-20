@@ -53,6 +53,7 @@ release is the tagged source, packaged by `.github/workflows/release.yml` (see
 | Syntax check | every playbook parses, every role and module resolves | `make syntax` | every pull request and push to `main` (required) |
 | gitleaks | no secrets in the change or anywhere in the history | `gitleaks git .` | every pull request and push to `main` (required) |
 | CodeQL | the GitHub Actions workflows (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
+| osv-scanner | known vulnerabilities in every requirements file, including the lower bounds and what they pull in | `docker run --rm -v "$PWD:/src:ro" ghcr.io/google/osv-scanner scan source -r /src` | every pull request and push to `main` (required) |
 | Dependency review | new or changed dependencies with known vulnerabilities or disallowed licenses | n/a | every pull request |
 | DCO | every commit is signed off | `git log` | every pull request (required) |
 | Integration tests | every playbook end to end: the installer ISO is remastered, VMs are created and installed through a mock Proxmox API (including a failed install that must clean up), and the baseline is applied to an Ubuntu 26.04 container and checked (SSH settings, firewall rules, Fail2Ban jail, sudo, refused password and root logins, key sync, port change). Every playbook must change nothing on a second run, and at least 80% of role tasks must run | `make test` (needs Docker) | every pull request and push to `main` (required) |

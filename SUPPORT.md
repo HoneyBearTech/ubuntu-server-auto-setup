@@ -42,7 +42,7 @@ history only (see the README's "Previous version").
 | Installed by `provision-vms.yml` | Ubuntu Server 26.04 LTS (amd64) |
 | Hardened by `baseline.yml` | Ubuntu Server 24.04 LTS and 26.04 LTS |
 | Hypervisor | Proxmox VE 8 and 9 |
-| Control node | Linux or macOS, Python 3.11+, ansible-core 2.19 or 2.20 |
+| Control node | Linux or macOS, Python 3.11+, ansible-core 2.20 (2.20.7 or later) |
 
 A new Ubuntu LTS or Proxmox VE major version is added in a release once it has been tested; an end-of-life
 one is dropped in the next minor release, and the changelog says so.

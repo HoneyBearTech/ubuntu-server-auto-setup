@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
 [![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
 [![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
-[![ansible-core 2.19+](https://img.shields.io/badge/ansible--core-2.19%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
+[![ansible-core 2.20](https://img.shields.io/badge/ansible--core-2.20.7%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
 
 Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
 load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).

@@ -1,5 +1,8 @@
 # Control-node dependencies. Install with: pip install -r requirements.txt
-ansible-core>=2.19,<2.21
+# The lower bounds exclude versions with known vulnerabilities, so an older copy already installed in the
+# environment can't satisfy them (CI checks them with osv-scanner).
+ansible-core>=2.20.7,<2.21  # 2.20.7 fixes CVE-2026-11332
 proxmoxer>=2.3
-requests>=2.32
+requests>=2.34.2  # 2.33.0 fixes CVE-2026-25645, 2.32.4 fixes CVE-2024-47081
+idna>=3.15  # through requests; 3.15 fixes PYSEC-2026-215
 passlib>=1.7.4

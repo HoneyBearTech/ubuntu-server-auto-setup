@@ -28,7 +28,7 @@ copied into the repository ("vendored").
 
 | What | Declared in | Pinned by | Installed with |
 | --- | --- | --- | --- |
-| Control-node Python packages (ansible-core, proxmoxer, requests, passlib) | `requirements.txt` | version ranges (for example `ansible-core>=2.19,<2.21`) | `pip install -r requirements.txt` (`make deps`) |
+| Control-node Python packages (ansible-core, proxmoxer, requests, passlib) | `requirements.txt` | version ranges (for example `ansible-core>=2.20.7,<2.21`) | `pip install -r requirements.txt` (`make deps`) |
 | Lint tools (ansible-lint, yamllint) | `requirements-dev.txt` | minimum versions | `pip install -r requirements-dev.txt` (`make deps`) |
 | Ansible collections (`community.proxmox`, `community.general`, `ansible.posix`) | `requirements.yml` | version ranges | `ansible-galaxy collection install -r requirements.yml` (`make deps`) |
 | CI actions | `.github/workflows/*.yml` | full commit SHAs | GitHub Actions |
@@ -61,6 +61,9 @@ the playbooks. Hash-pinned lock files for CI are on the [roadmap](roadmap.md).
   dependency with a known vulnerability of moderate or higher severity, or with a license outside the
   allowlist.
 - **GitHub's dependency graph** and Dependabot security alerts watch the default branch between changes.
+- **osv-scanner** checks every requirements file on every pull request and push, including the lower bounds
+  in `requirements.txt` and what they pull in (the `Vulnerability scan (OSV)` check). The lower bounds are
+  kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy.
 - Every release carries an SBOM (SPDX) of the source tree, see [verifying-releases.md](verifying-releases.md).
 
 ## Policy for vulnerabilities in dependencies

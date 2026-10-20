@@ -3,7 +3,7 @@ galaxy_info:
   author: HoneyBearTech
   description: Download Ubuntu Server and remaster it for hands-off autoinstall on a Proxmox node
   license: MIT
-  min_ansible_version: "2.19"
+  min_ansible_version: "2.20"
   platforms:
     - name: Debian
       versions: [bookworm, trixie]
