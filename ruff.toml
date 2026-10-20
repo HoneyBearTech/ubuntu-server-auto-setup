@@ -1,0 +1,20 @@
+# Python coding standard (CONTRIBUTING.md#coding-standards): the web UI and the test helpers.
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "collections", ".ansible"]
+# The web UI and its smoke test; the older test helpers follow their own style for now.
+include = ["webui/**/*.py", "tests/webui_smoke.py"]
+
+[lint]
+# pycodestyle, pyflakes, bugbear, bandit (security), pyupgrade, simplify, import order.
+select = ["E", "W", "F", "B", "S", "UP", "SIM", "I"]
+ignore = [
+  "S603",  # subprocess with an argument list: the safe way, and the reason for the rule
+  "S607",  # programs by name (ssh, ssh-keyscan, ansible-playbook) from the image's PATH
+  "S104",  # binding 0.0.0.0 inside the container; the port is published on 127.0.0.1
+  "SIM105",
+]
+
+[lint.per-file-ignores]
+"webui/tests/*" = ["S101", "S105", "S106", "S108", "S311"]
+"tests/*" = ["S101", "S105", "S310", "S311"]

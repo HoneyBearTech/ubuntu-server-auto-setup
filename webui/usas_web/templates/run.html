@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field %}
+{% block title %}Run{% endblock %}
+{% block content %}
+<h1>Run a playbook</h1>
+{% set missing = steps|rejectattr(1)|list %}
+{% if missing %}
+<div class="flash flash-warning" role="status">
+  <p>Some steps aren't done yet; the run will probably fail:</p>
+  <ul>{% for label, done, href in missing %}<li><a href="{{ href }}">{{ label }}</a></li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% if current_run %}<p class="flash flash-warning" role="status">A run is going: <a href="/runs/{{ current_run.id }}">{{ current_run.action }}</a>. Only one runs at a time.</p>{% endif %}
+{% if error %}<p class="error-summary" role="alert" id="error-summary" tabindex="-1">{{ error }}</p>{% endif %}
+<p><strong>Provisioning creates VMs and the installer wipes their disks; the baseline changes SSH and the
+firewall.</strong> Run against one server first (Limit), and try check mode before a real run.</p>
+<form method="post" action="/run">
+  {{ csrf_field(csrf) }}
+  <fieldset>
+    <legend>What to run</legend>
+    {% for key, (playbook, description, extra) in playbooks.items() %}
+    <div class="check">
+      <input type="radio" id="pb-{{ key }}" name="playbook" value="{{ key }}"{% if form.get("playbook") == key or (not form.get("playbook") and loop.first) %} checked{% endif %} aria-describedby="pb-{{ key }}-help">
+      <label for="pb-{{ key }}"><strong>{{ key }}</strong></label>
+      <span class="help" id="pb-{{ key }}-help">{{ description }} (<code>{{ playbook }}{% if extra %} {{ extra|join(" ") }}{% endif %}</code>)</span>
+    </div>
+    {% endfor %}
+  </fieldset>
+  <fieldset>
+    <legend>Options</legend>
+    <div class="check">
+      <input type="checkbox" id="check" name="check" aria-describedby="check-help"{% if form.get("check") %} checked{% endif %}>
+      <label for="check">Check mode</label>
+      <span class="help" id="check-help">(<code>--check</code>) report what would change without changing it</span>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="diff" name="diff" aria-describedby="diff-help"{% if form.get("diff") %} checked{% endif %}>
+      <label for="diff">Show differences</label>
+      <span class="help" id="diff-help">(<code>--diff</code>) show file changes</span>
+    </div>
+    <div class="field">
+      <label for="limit">Limit</label>
+      <input type="text" id="limit" name="limit" list="names" value="{{ form.get('limit', '') }}" spellcheck="false" autocomplete="off" aria-describedby="limit-help">
+      <datalist id="names">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
+      <p class="help" id="limit-help">(<code>--limit</code>) servers or groups, separated by commas; empty runs on all of them. Known: {{ names|join(", ") }}.</p>
+    </div>
+  </fieldset>
+  <div class="actions"><button type="submit">Start the run</button></div>
+</form>
+{% endblock %}

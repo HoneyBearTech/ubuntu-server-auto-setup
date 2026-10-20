@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}{{ title }}{% endblock %} · ubuntu-server-auto-setup</title>
+<link rel="stylesheet" href="/static/app.css?v={{ version }}">
+<script src="/static/app.js?v={{ version }}" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="top">
+  <p class="brand"><a href="/">ubuntu-server-auto-setup</a></p>
+  {% if signed_in %}
+  <nav aria-label="Main">
+    <ul>
+    {% for href, label in nav %}
+      <li><a href="{{ href }}"{% if current == href or (href != "/" and current.startswith(href ~ "/")) %} aria-current="page"{% endif %}>{{ label }}</a></li>
+    {% endfor %}
+    </ul>
+  </nav>
+  <div class="account">
+    <a href="/account"{% if current == "/account" %} aria-current="page"{% endif %}>Account</a>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="link">Sign out</button>
+    </form>
+  </div>
+  {% endif %}
+</header>
+<main id="main" tabindex="-1">
+  {% for kind, message in flashes %}
+  <p class="flash flash-{{ kind }}" role="status">{{ message }}</p>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<footer>
+  <p>ubuntu-server-auto-setup web UI {{ version }} ·
+  <a href="https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/web-ui.md">Help</a> ·
+  <a href="https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/accessibility.md">Accessibility</a></p>
+</footer>
+</body>
+</html>

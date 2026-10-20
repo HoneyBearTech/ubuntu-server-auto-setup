@@ -33,8 +33,18 @@ that run on each pull request.
   auditd, time synchronisation settings, and limiting `sudo` to a password after provisioning.
 - Notifications (mail or a webhook) from unattended-upgrades and Fail2Ban.
 
+**The web UI and the container image**
+- Done: a container image (amd64 and arm64, signed, with an SBOM and provenance) with a web UI that lays
+  out the options, writes the inventory and the Vault, and runs the playbooks with a live log, so the
+  project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
+- Passkeys as an optional second way to sign in, for setups served under a fixed host name over HTTPS.
+- Several Proxmox nodes per inventory (choosing the node per server).
+- An automated contrast and keyboard check of the pages in CI, and a screen-reader walk-through
+  ([accessibility.md](accessibility.md)).
+
 **Supply chain**
-- Done: CI installs a hash-pinned set of Python packages (`requirements-ci.txt`).
+- Done: CI and the image install hash-pinned sets of Python packages (`requirements-ci.txt`,
+  `requirements-webui.txt`).
 - A tested list of collection versions.
 
 **Security and project health**
@@ -54,6 +64,9 @@ that run on each pull request.
   containers and their configuration belong in your own playbooks on top.
 - **Be a compliance benchmark.** It won't claim CIS or STIG conformance; optional hardening stays opt-in
   and documented.
-- **Hold your secrets.** Secrets stay in your own Ansible Vault; the project won't add a secret store, a
-  web UI or a service of its own.
+- **Hold your secrets elsewhere.** Secrets stay in an Ansible Vault you own: on your control node, or in
+  the web UI's data volume on your own machine. The project won't add a hosted service, a secret store of
+  its own, or user accounts.
+- **Become a multi-user automation platform.** The web UI is a local tool for one administrator; for teams,
+  use an Ansible UI built for that.
 - **Bring back the bash script.** The old `setup.sh` stays in the history only.

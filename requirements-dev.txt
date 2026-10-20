@@ -1,3 +1,8 @@
-# Lint tooling. Install with: pip install -r requirements-dev.txt
+# Lint tooling, and the web UI's linter and test runner. Install with: pip install -r requirements-dev.txt
 ansible-lint>=25.9
 yamllint>=1.37
+ruff>=0.14
+pytest>=9.0
+pygments>=2.20  # through pytest; 2.20.0 fixes PYSEC-2026-2987, 2.15.1 fixes PYSEC-2023-117
+pytest-cov>=7.0
+httpx2>=2.15

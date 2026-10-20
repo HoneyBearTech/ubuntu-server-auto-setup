@@ -1,8 +1,9 @@
 # External interfaces
 
 Every way people and other software interact with ubuntu-server-auto-setup, what each one expects and
-produces, and where it's specified. The project has no HTTP API, UI or daemon: its interface is the
-inventory you write and the commands you run. What should be reachable from where is described in the
+produces, and where it's specified. Its interface is the inventory you write and the commands you run;
+the container image adds a web UI that writes the same inventory and runs the same commands. There is no
+API for other programs. What should be reachable from where is described in the
 [assurance case](assurance-case.md#attack-surface).
 
 ## Interfaces the project offers
@@ -15,6 +16,9 @@ inventory you write and the commands you run. What should be reachable from wher
 | Make targets | the operator | [below](#commands); `make help` |
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
+| The web UI (HTML pages and forms on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
+| The container image and its settings (environment variables, the `/data` volume) | the operator, with Docker | [below](#the-web-ui); [web-ui.md](web-ui.md#settings) |
+| `start.ps1` | the operator, on Windows | [web-ui.md](web-ui.md#starting-it); `Get-Help .\start.ps1` |
 
 ### Inventory groups
 
@@ -163,6 +167,28 @@ and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `co
 non-zero on any failed or unreachable host. `--check --diff` is supported by the baseline (provisioning
 needs to really create the VM, so it isn't meaningful there).
 
+### The web UI
+
+The image `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (tags `X.Y.Z`, `X.Y` and `latest`, for
+`linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
+mounted at `/data`. Publish the port on `127.0.0.1` only.
+
+- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, run, history, account. Each form
+  field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
+  and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
+  [web-ui.md](web-ui.md#http-endpoints); they are HTML pages and forms, not a stable API.
+- **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
+  a limit, the same as the [commands](#commands). Exit status and logs are kept in the run history.
+- **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
+  `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS` and `USAS_PORT`
+  ([web-ui.md](web-ui.md#settings)).
+- **Files in `/data`**: `inventory/hosts.yml` and `inventory/group_vars/all/vault.yml` are an ordinary
+  inventory and Vault (the CLI can use them with `--vault-password-file /data/.vault-pass`); the UI also
+  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json` and `runs/` there
+  ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
+  (`webui_ufw_allow`, `webui_ufw_allow_host`, `webui_authorize_ui_key`).
+- **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.
+
 ## Interfaces the project uses
 
 | System | From | Protocol and authentication | What for |
@@ -173,4 +199,6 @@ needs to really create the VM, so it isn't meaningful there).
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
-| PyPI, Ansible Galaxy | control node (`make deps`) | HTTPS | Ansible, the Python packages and the collections. |
+| PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
+| GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) | The container image. |
+| The browser | the operator | HTTP on `127.0.0.1` (or HTTPS through a proxy), session cookie | The web UI. |

@@ -1,0 +1,61 @@
+{% extends "section.html" %}
+{% from "_macros.html" import csrf_field, field %}
+{% block intro %}
+<p>The Proxmox VE API and the node the VMs are created on. The token needs the privileges listed in
+<a href="https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/installing.md#2-create-the-proxmox-api-token">installing.md</a>.
+The token is stored in the encrypted Vault and never shown again.</p>
+{% endblock %}
+{% block form %}
+{% set f = fields %}
+<fieldset>
+  <legend>API</legend>
+  {% for x in f if x.name in ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id", "pve_api_token_secret", "pve_validate_certs") %}{{ field(x, values, errors, config) }}{% endfor %}
+</fieldset>
+<fieldset>
+  <legend>Placement</legend>
+  {% for x in f if x.name not in ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id", "pve_api_token_secret", "pve_validate_certs") and not x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
+  <details>
+    <summary>More settings</summary>
+    {% for x in f if x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
+  </details>
+</fieldset>
+{% endblock %}
+{% block buttons %}<button type="submit" name="action" value="test" class="secondary">Test the connection</button>{% endblock %}
+{% block after_buttons %}
+<div aria-live="polite">
+{% if test_result %}
+<p class="flash flash-ok" role="status">Connected to Proxmox VE {{ test_result.version }}. Nodes: {{ test_result.nodes|join(", ") }}.
+{% if values.pve_node and values.pve_node not in test_result.nodes %}<strong>The node name above isn't one of them.</strong>{% endif %}
+Nothing was saved yet.</p>
+{% elif test_error %}
+<p class="flash flash-error" role="alert">{{ test_error }}</p>
+{% endif %}
+</div>
+{% endblock %}
+{% block after %}
+<section aria-labelledby="ca-heading">
+<h2 id="ca-heading">Cluster CA certificate</h2>
+<p>Proxmox nodes use a certificate signed by the cluster's own CA. Add that CA here and keep certificate
+verification on: the playbooks and the connection test then trust it, and nobody on the network can
+intercept the token.</p>
+{% if ca %}
+<ul>
+{% for c in ca %}<li><strong>{{ c.subject }}</strong>, SHA-256 <code class="fp">{{ c.fingerprint }}</code>, expires {{ c.expires }}</li>{% endfor %}
+</ul>
+{% else %}<p>No CA certificate saved.</p>{% endif %}
+{% if ca_error %}<p class="flash flash-error" role="alert">{{ ca_error }}</p>{% endif %}
+<form method="post" action="/proxmox">
+  {{ csrf_field(csrf) }}
+  <div class="field">
+    <label for="ca_pem">CA certificate (PEM)</label>
+    <textarea id="ca_pem" name="ca_pem" rows="5" spellcheck="false" aria-describedby="ca-help"></textarea>
+    <p class="help" id="ca-help">Paste <code>/etc/pve/pve-root-ca.pem</code> from the node, or fetch it over the verified SSH connection (after the <a href="/ssh">SSH key</a> step).</p>
+  </div>
+  <div class="actions">
+    <button type="submit" name="action" value="save-ca">Save the certificate</button>
+    <button type="submit" name="action" value="fetch-ca" class="secondary">Fetch it from the node</button>
+    {% if ca %}<button type="submit" name="action" value="remove-ca" class="secondary">Remove it</button>{% endif %}
+  </div>
+</form>
+</section>
+{% endblock %}

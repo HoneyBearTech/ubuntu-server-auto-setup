@@ -10,8 +10,10 @@ countered) is in the [assurance case](assurance-case.md). To report a vulnerabil
 The playbooks are meant to be run by an administrator, from a control node they trust, against Proxmox VE
 nodes and Ubuntu servers they own, on a private network. The control node holds the inventory, the Vault
 and the SSH keys that reach every server and the Proxmox nodes as root, so it is as sensitive as those
-systems. The rest of this page assumes that use, with the defaults and the advice in the README's "Running
-it securely" section.
+systems. With the container image, the control node is the container: its web UI is meant for one
+administrator on the same machine (`127.0.0.1`), and its data volume holds the same secrets. The rest of
+this page assumes that use, with the defaults and the advice in the README's "Running it securely" section
+and in [web-ui.md](web-ui.md#security).
 
 ## What the project is designed to guarantee
 
@@ -64,10 +66,35 @@ it securely" section.
 - The changes are made in an order that keeps the running SSH session working: the firewall allows the SSH
   port before it is enabled, and a new SSH port is opened and verified before port 22 is closed.
 
+**The web UI** (the container image)
+
+- Every page and action except the health check needs a sign-in. The password is stored only as an
+  argon2id hash; the first one can only be set with a one-time code printed in the container's log; failed
+  attempts are slowed down exponentially (up to 15 minutes between tries).
+- Sessions are random, kept in memory, carried in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` over
+  HTTPS), renewed at sign-in and ended by sign-out, inactivity (2 hours), age (12 hours), a password
+  change (for other sessions) and a restart.
+- Every form needs the session's CSRF token, and requests that say they come from another site (`Origin`,
+  `Sec-Fetch-Site`) are refused. Only the configured host names are served, against DNS rebinding, and
+  names other than `localhost` only over HTTPS. Pages can't be framed and load only the UI's own script
+  and stylesheet (Content Security Policy).
+- The API token and the admin password are stored only in the Ansible Vault file; once saved they are never
+  sent back to the browser; run logs mask them. The SSH private key never leaves the data volume.
+- Every value the UI writes into the inventory is validated against the roles' own allowlist patterns (or
+  a stricter format of the UI's) and tagged `!unsafe`, so no value can become an Ansible template; commands
+  run with argument lists, never a shell; `--limit` takes only the inventory's own host and group names.
+- The Proxmox node's host key is trusted only after the user has compared its fingerprint, and checked on
+  every connection; certificate verification for the API stays on, with the cluster's CA added to the
+  trust store instead.
+- The container runs as an unprivileged user and writes only to `/data` (and `/tmp`); the documented
+  command publishes the port on `127.0.0.1` only.
+
 **The project itself**
 
 - Releases are signed keylessly with Sigstore cosign, with SHA-256 checksums, an SPDX SBOM and SLSA build
   provenance, and version tags are signed by the maintainer ([verifying-releases.md](verifying-releases.md)).
+  The container image is scanned for fixable high and critical vulnerabilities and smoke-tested before it
+  is pushed, and is signed with cosign, with an SBOM and SLSA provenance attached.
 - Every change is linted (yamllint, ansible-lint `production` profile), syntax-checked and scanned for
   secrets (gitleaks over the full history) before it can merge; workflows run with read-only tokens and
   pinned actions.
@@ -75,7 +102,14 @@ it securely" section.
 ## What it does not protect against
 
 - **A compromised control node.** It holds the Vault password (when you type it), the API token, your SSH
-  private keys and the inventory. Anyone who controls it controls your servers.
+  private keys and the inventory. Anyone who controls it controls your servers. With the container image,
+  that includes the Docker host and anyone who can read the data volume or run `docker exec`: the volume
+  holds the SSH key and, unless you move it out with `USAS_VAULT_PASSWORD_FILE`, the Vault password.
+- **The web UI's password, and the browser it is used from.** The UI has one password, no accounts and no
+  second factor. Whoever knows it, or controls the browser or a browser extension while a session is
+  open, can do everything the UI can. Published beyond `127.0.0.1`, the UI is exposed to password guessing
+  (slowed down, not stopped) from wherever it can be reached; over plain HTTP its traffic, password
+  included, could be read on the network, which is why it refuses other host names without HTTPS.
 - **A compromised GitHub account.** Whoever controls `github_user` decides which keys can log in to your
   servers at the next provisioning, baseline run or `make keys`. Protect the account with two-factor
   authentication, or use `admin_extra_ssh_keys` and `ssh_keys_exclusive` to depend on it less.

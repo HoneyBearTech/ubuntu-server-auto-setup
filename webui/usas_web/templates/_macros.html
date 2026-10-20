@@ -1,0 +1,67 @@
+{% macro csrf_field(csrf) %}<input type="hidden" name="csrf_token" value="{{ csrf }}">{% endmacro %}
+
+{% macro error_summary(errors) %}
+{% if errors %}
+<div class="error-summary" role="alert" tabindex="-1" id="error-summary">
+  <h2>{{ "There is a problem" if errors|length == 1 else "There are " ~ errors|length ~ " problems" }}</h2>
+  <ul>
+  {% for name, message in errors.items() %}
+    <li><a href="#f-{{ name }}">{{ message }}</a></li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro field(f, values, errors, config=None) %}
+{%- set id = "f-" ~ f.name -%}
+{%- set err = errors.get(f.name) -%}
+{%- set saved = f.kind == "secret" and config and config.secret_is_set(f.vault) -%}
+{%- set described = [id ~ "-help"] + ([id ~ "-error"] if err else []) -%}
+{%- set value = values.get(f.name) -%}
+<div class="field{% if err %} has-error{% endif %}">
+{% if f.kind == "bool" %}
+  <div class="check">
+    <input type="checkbox" id="{{ id }}" name="{{ f.name }}"{% if value %} checked{% endif %} aria-describedby="{{ described|join(' ') }}">
+    <label for="{{ id }}">{{ f.label }}</label>
+  </div>
+{% else %}
+  <label for="{{ id }}">{{ f.label }}{% if f.required and not saved %} <span class="req">(required)</span>{% endif %}</label>
+  {% if f.kind == "choice" %}
+  <select id="{{ id }}" name="{{ f.name }}" aria-describedby="{{ described|join(' ') }}"{% if err %} aria-invalid="true"{% endif %}>
+    {% for choice in f.choices %}
+    <option value="{{ choice }}"{% if choice == value|string %} selected{% endif %}>{{ choice }}</option>
+    {% endfor %}
+  </select>
+  {% elif f.kind == "list" %}
+  <textarea id="{{ id }}" name="{{ f.name }}" rows="{{ 4 if f.name in ('admin_extra_ssh_keys', 'ufw_allow') else 3 }}" spellcheck="false" aria-describedby="{{ described|join(' ') }}"{% if err %} aria-invalid="true"{% endif %}>{{ display_value(f, value) }}</textarea>
+  {% elif f.kind == "secret" %}
+  <input type="password" id="{{ id }}" name="{{ f.name }}" autocomplete="new-password" spellcheck="false" aria-describedby="{{ described|join(' ') }} {{ id }}-saved"{% if err %} aria-invalid="true"{% endif %}>
+  <p class="saved" id="{{ id }}-saved">{% if saved %}A value is saved. Leave this empty to keep it.{% else %}Not set yet.{% endif %}</p>
+  {% else %}
+  <input type="text" id="{{ id }}" name="{{ f.name }}" value="{{ display_value(f, value) }}"{% if f.kind == "int" %} inputmode="numeric"{% endif %}{% if f.name == "timezone" %} list="timezones"{% endif %} spellcheck="false" autocomplete="off" aria-describedby="{{ described|join(' ') }}"{% if err %} aria-invalid="true"{% endif %}>
+  {% endif %}
+{% endif %}
+  <p class="help" id="{{ id }}-help">{% if f.help %}{{ f.help }} {% endif %}<span class="var">Variable <code>{{ f.vault or f.name }}</code>{% if f.default not in (None, "", []) and f.kind != "secret" %}, default <code>{{ display_value(f, f.default)|replace("\n", ", ") }}</code>{% endif %}.</span></p>
+  {% if err %}<p class="error" id="{{ id }}-error"><span class="visually-hidden">Error: </span>{{ err }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro field_list(list, values, errors, config) %}
+{% for f in list if not f.advanced %}{{ field(f, values, errors, config) }}{% endfor %}
+{% set advanced = list|selectattr("advanced")|list %}
+{% if advanced %}
+<details{% for f in advanced if errors.get(f.name) %} open{% endfor %}>
+  <summary>More settings</summary>
+  {% for f in advanced %}{{ field(f, values, errors, config) }}{% endfor %}
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro status_text(status) -%}
+<span class="status status-{{ status }}">{{ {"running": "Running", "succeeded": "Succeeded", "failed": "Failed", "stopped": "Stopped", "interrupted": "Interrupted"}.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro when(ts) -%}
+<time datetime="{{ ts|int }}" data-epoch="{{ ts|int }}">{{ ts|int }}</time>
+{%- endmacro %}

@@ -5,7 +5,11 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HoneyBearTech/ubuntu-server-auto-setup/badge)](https://scorecard.dev/viewer/?uri=github.com/HoneyBearTech/ubuntu-server-auto-setup)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15740/badge)](https://www.bestpractices.dev/projects/15740)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/15740/baseline)](https://www.bestpractices.dev/projects/15740)
+[![Fuzzing](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml)
+[![Installer ISO](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml)
 [![Release](https://img.shields.io/github/v/release/HoneyBearTech/ubuntu-server-auto-setup?sort=semver)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/latest)
+[![Container image](https://img.shields.io/badge/ghcr.io-ubuntu--server--auto--setup-2496ED?logo=docker&logoColor=white)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pkgs/container/ubuntu-server-auto-setup)
+[![Platforms](https://img.shields.io/badge/runs_on-Windows_%7C_Linux_%7C_macOS-2496ED?logo=docker&logoColor=white)](docs/web-ui.md)
 [![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
 [![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
 [![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
@@ -13,6 +17,8 @@
 
 Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
 load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).
+Run them from a checkout with `make`, or from a container image with a small web UI that lays out every
+option and runs the playbooks for you, on Windows, Linux or macOS.
 
 > [!WARNING]
 > **Provisioning creates VMs, and the installer wipes the target VM's disk.** `make provision` only
@@ -22,8 +28,8 @@ load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH har
 > **The baseline changes SSH and firewall settings, and can lock you out** if your inventory variables are
 > wrong (the SSH port, the admin user, the GitHub user whose keys are installed, the firewall rules).
 >
-> Run against one host first with `LIMIT=<host>`, keep a console (the Proxmox web console) open, and try
-> `ARGS="--check --diff"` before a real run.
+> Run against one host first with `LIMIT=<host>` (in the web UI: Limit), keep a console (the Proxmox web
+> console) open, and try `ARGS="--check --diff"` (check mode) before a real run.
 
 ## Documentation
 
@@ -31,6 +37,8 @@ load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH har
   and its privileges), [upgrading and backups](docs/upgrading.md) and
   [verifying releases](docs/verifying-releases.md). The [documentation index](docs/README.md) lists
   everything.
+- [The web UI and the container image](docs/web-ui.md): starting it on Windows, Linux or macOS, what it
+  stores, and how it is secured; its [accessibility](docs/accessibility.md).
 - [Architecture](docs/architecture.md): the playbooks and roles, and how a VM goes from nothing to a
   hardened server.
 - [Security requirements](docs/security.md): what this project does and doesn't protect against, and the
@@ -75,6 +83,36 @@ three in order:
 
 ## Getting started
 
+### With Docker: the web UI (Windows, Linux, macOS)
+
+You need [Docker](https://docs.docker.com/get-started/get-docker/) (on Windows, Docker Desktop with the WSL 2
+backend), a Proxmox API token with the privileges in
+[docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token), root SSH access to the Proxmox
+node (the UI makes a key you add there), and free static IP addresses.
+
+On Windows, download [`start.ps1`](start.ps1) and run it in PowerShell; it starts the container, shows the
+setup code for the first sign-in and opens the browser:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+Anywhere else (or on Windows without the script):
+
+```sh
+docker run -d --name usas --restart unless-stopped -p 127.0.0.1:8080:8080 -v usas-data:/data \
+  ghcr.io/honeybeartech/ubuntu-server-auto-setup
+docker logs usas    # the setup code for the first sign-in
+```
+
+Then open <http://localhost:8080>, set a password, and work through the pages: Proxmox, SSH key, defaults,
+servers, hardening, run. [`docker-compose.yml`](docker-compose.yml) does the same with extra hardening.
+**The UI holds your Proxmox API token and a root SSH key: keep it on `127.0.0.1`** and read
+[exposing it](docs/web-ui.md#exposing-it-beyond-localhost) before you publish it anywhere else.
+[docs/web-ui.md](docs/web-ui.md) explains every step, where the data lives and how to back it up.
+
+### From a checkout: the command line
+
 You need:
 
 - a control node (Linux or macOS) with Python 3.11 or later and `git`;
@@ -116,10 +154,13 @@ You need:
 
 | Command | What it does |
 | --- | --- |
-| `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`) and the Ansible collections (`requirements.yml`). |
-| `make lint` | `yamllint .` and `ansible-lint`. |
+| `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`, `requirements-webui.in`) and the Ansible collections (`requirements.yml`). |
+| `make lint` | `yamllint .`, `ansible-lint` and `ruff check`. |
 | `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
 | `make test` | Run the integration tests against containers and a mock Proxmox API (needs Docker; see [docs/testing.md](docs/testing.md)). |
+| `make webui-test` | Run the web UI's unit tests with coverage. |
+| `make image`, `make smoke` | Build the container image; build it and smoke-test it against the mock Proxmox API. |
+| `make ui` | Run the web UI from the checkout on <http://localhost:8080>, with its data in `.webui-data/`. |
 | `make site` | Build the installer, provision missing VMs, apply the baseline. |
 | `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox node(s). |
 | `make provision` | Create and auto-install the VMs that don't exist yet. |
@@ -226,6 +267,10 @@ and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3 seconds) and
   install finishes, and also when a run fails part-way. Only a run killed outright (Ctrl-C, lost control
   node) can leave `seed-<host>.iso` in the node's ISO storage; delete it by hand then. The baseline removes
   the installer's own copy of the answers (`/var/log/installer/autoinstall-user-data`) from the server.
+- **Keep the web UI on localhost.** It can create VMs and change SSH and firewall settings everywhere, and
+  its data volume holds a root SSH key and the API token. The documented command publishes it on
+  `127.0.0.1` only; anyone who can reach it can try to sign in. Use a strong password, back up the volume
+  like a secret, and see [docs/web-ui.md](docs/web-ui.md#security) before exposing it.
 - What this project does and doesn't protect against is in [docs/security.md](docs/security.md).
 
 ## Previous version

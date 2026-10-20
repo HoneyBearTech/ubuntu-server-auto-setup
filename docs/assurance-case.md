@@ -11,7 +11,9 @@ The top-level claim is:
 > existing ones; they never disclose the Vault's secrets beyond the systems that need them (the Proxmox API
 > for the token, the new server's installer for the password hash); and every server they harden ends up
 > reachable only with the authorized SSH keys, behind a default-deny firewall, with automatic security
-> updates, as stated in [security.md](security.md).**
+> updates, as stated in [security.md](security.md). Run from the container image, the web UI lets only the
+> person who set its password configure and start those runs, and never hands the secrets it holds to the
+> browser or to another site.**
 
 It rests on four arguments: the threat model is understood (1), every trust boundary is mediated (2),
 the design follows secure design principles (3), and the implementation counters common weaknesses and
@@ -21,9 +23,10 @@ is continuously checked (4).
 
 **Assets**, most valuable first: root access to the servers and the Proxmox nodes (through the control
 node's SSH keys and the admin user's sudo); the Proxmox API token; the admin password (and its hash); the
-Vault password; the integrity of the installed system (the ISO, the installer configuration, the
-authorized keys); the availability of the servers (a lockout or a wiped disk); the project's release
-artifacts.
+Vault password; with the container image, the web UI's password and sessions and the data volume (which
+holds the key, the Vault and by default the Vault password); the integrity of the installed system (the
+ISO, the installer configuration, the authorized keys); the availability of the servers (a lockout or a
+wiped disk); the project's release artifacts, including the container image.
 
 **Actors and what they may try:**
 
@@ -37,9 +40,14 @@ artifacts.
 | Another Proxmox user (non-root) | Their own Proxmox permissions | Read the seed ISO with the password hash from ISO storage. |
 | Upstream supply chain | What we install | A tampered ISO, a malicious Ansible collection or Python package, a compromised GitHub Action. |
 | Malicious contributor | Opening pull requests | Smuggle a backdoor into a role (an extra key, a weakened setting), exfiltrate CI credentials. |
+| A web page open in the operator's browser | Nothing | Drive the web UI through the browser: cross-site form posts (CSRF), DNS rebinding to reach `127.0.0.1`, framing the UI (clickjacking), injecting script through stored values (XSS). |
+| Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
+| Another user or process on the Docker host | Their own account | Read the data volume or the container's memory. (Treated as trusted: see "Out of scope".) |
 
 **Out of scope** (see [security.md](security.md#what-it-does-not-protect-against)): a compromised
-control node; root on the Proxmox nodes; the GitHub account behind `github_user` being taken over;
+control node (for the image: the Docker host, its administrators and anyone who can read the data
+volume); someone who knows the web UI's password, or controls the browser it is used from; root on the
+Proxmox nodes; the GitHub account behind `github_user` being taken over;
 an operator using the playbooks to do harm; vulnerabilities in Ubuntu, Proxmox VE, OpenSSH or Ansible
 themselves; anything on the servers beyond the baseline.
 
@@ -55,6 +63,9 @@ themselves; anything on the servers beyond the baseline.
 | B6 | Control node → new VM (first SSH contact) | The VM's host key | Trust on first use: the old `known_hosts` entry for the IP is replaced with the scanned ed25519 key (`provision_manage_known_hosts`). Later port changes use the key read over the verified connection (`roles/ssh_hardening/tasks/main.yml`). |
 | B7 | Internet / LAN → servers | SSH and whatever `ufw_allow` opens | UFW default deny with rate-limited SSH; sshd public-key only, no root, `AllowUsers` optional; Fail2Ban (`roles/firewall/`, `roles/ssh_hardening/`, `roles/fail2ban/`). |
 | B8 | Contributors → `main` → releases | Code changes, release artifacts | Protected `main` (pull request, required checks), DCO, lint and secret scanning, read-only workflow tokens, pinned actions, keyless signing and provenance (`.github/workflows/`). |
+| B9 | Browser → web UI | Sign-in, form values, the API token and admin password once, run requests | Published on `127.0.0.1` only; allowed host names (DNS rebinding) and HTTPS for any other name; argon2id password with a first-run setup code and throttling; server-side sessions in an `HttpOnly`, `SameSite=Strict` cookie, renewed at sign-in; a CSRF token on every form plus `Origin`/`Sec-Fetch-Site` checks; CSP, no framing; secrets never sent back (`webui/usas_web/main.py`, `auth.py`). |
+| B10 | Web UI → inventory, Vault and `ansible-playbook` | Validated values, the run's options | Values checked against the roles' own allowlist patterns (`schema.py`, read from `roles/*/vars/main.yml`) and written with `!unsafe`; secrets only in the Vault; files `0600`; `ansible-playbook`, `ssh` and `ssh-keyscan` started with argument lists; `--limit` only from inventory names; run IDs from a fixed format (`store.py`, `runner.py`, `sshkeys.py`). |
+| B11 | Registry → the operator's Docker | The container image | Built by the release workflow from a digest-pinned base and hash-pinned packages, scanned and smoke-tested, signed keylessly with cosign, with SBOM and SLSA provenance; `start.ps1 -Verify` and [verifying-releases.md](verifying-releases.md) check the signature. |
 
 ### Attack surface
 
@@ -67,6 +78,9 @@ themselves; anything on the servers beyond the baseline.
 | Seed ISO in ISO storage | root on the node, Proxmox users with access to that storage | `0600`, short-lived, deleted after install | `roles/proxmox_vm/tasks/provision.yml` |
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
+| The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in, sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `schema.py` |
+| The data volume | the Docker host's administrators | file modes `0600`/`0700`, Vault encryption (optionally with the password outside the volume), non-root container user | `webui/usas_web/store.py`, `Dockerfile` |
+| The container image | anyone pulling it | signed, SBOM, provenance, vulnerability scan before release | `Dockerfile`, `.github/workflows/release.yml` |
 
 The threats, boundaries and countermeasures here are reviewed whenever a change adds an entry point or
 touches one of these paths (the pull request says so), and at each release.
@@ -93,16 +107,21 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   per job only where needed.
 - **Least common mechanism.** Each VM gets its own seed ISO and seed directory, removed after its install.
 - **Psychological acceptability.** One command per task (`make provision`, `make baseline`, `make keys`),
-  `--check --diff` works for the baseline, and failures say what to fix.
+  `--check --diff` works for the baseline, and failures say what to fix. The web UI lays out every option
+  with its default and help text, shows errors next to the fields, and offers check mode and a limit on
+  every run.
 - **Limited attack surface.** Servers expose only SSH (and what you add); the installer needs no network
-  service; nothing listens on the control node.
+  service; nothing listens on the control node. The web UI, the one listener the project adds, is
+  published on `127.0.0.1` only, has no API for other programs, and serves only its own script and
+  stylesheet.
 - **Input validation with allowlists.** Required variables are asserted before provisioning starts (a
   numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
   files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
   user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times), anchored
   with `\Z` so a trailing line break can't slip through. Keys are split on every line break and filtered to
   known public-key prefixes. The installer configuration is built as data and written with `to_nice_yaml`.
-  The [fuzz targets](testing.md#fuzzing) check that no accepted value can change a file's structure.
+  The [fuzz targets](testing.md#fuzzing) check that no accepted value can change a file's structure. The
+  web UI applies the same patterns, read from the same files, before it writes anything.
 
 ## 4. Countering common weaknesses
 
@@ -123,13 +142,27 @@ this kind:
 | **Weak password hashing** (CWE-916) | SHA-512 crypt with a random salt (key-stretched) for the admin password; SSH doesn't accept passwords at all. |
 | **Destructive operations without confirmation** (lockouts, wiped disks) | Existing VMs are skipped; the firewall opens SSH before enabling; a new SSH port is verified before the old one closes; the warning in the README and docs; `LIMIT=` and `--check --diff` for trying changes on one host. |
 | **CI/CD weaknesses** (untrusted input in workflows, excessive token permissions) | `pull_request` only (no `pull_request_target`), read-only top-level permissions, actions pinned by commit SHA, untrusted event data only through `env:`; CodeQL analyses the workflows and actionlint lints them. |
-| **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), a memory-safe runtime. |
+| **Cross-site request forgery** (CWE-352) and **DNS rebinding** (CWE-350) | A per-session CSRF token on every form; requests whose `Origin` or `Sec-Fetch-Site` names another site are refused; `SameSite=Strict` cookies; only the configured host names are served (`webui/usas_web/main.py`). |
+| **Cross-site scripting** (CWE-79) and **clickjacking** (CWE-1021) | Jinja auto-escaping in every template; a Content Security Policy with `script-src 'self'` and no inline script; `frame-ancestors 'none'` and `X-Frame-Options: DENY`. |
+| **Template injection into Ansible** (CWE-1336) | Every value the UI writes into the inventory or the Vault is tagged `!unsafe`, so Ansible never evaluates it (`webui/usas_web/store.py`; a unit test runs Ansible on such values). |
+| **Argument injection** (CWE-88) and **path traversal** (CWE-22) | `--limit=` takes only inventory host and group names; host names for `ssh` and `ssh-keyscan` are checked and passed after `--`; run IDs must match a fixed format before any file is opened. |
+| **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. |
+| **Open redirect** (CWE-601) | The sign-in page returns only to the UI's own pages. |
+| **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never rendered back; run logs mask the Vault's values; pages are `Cache-Control: no-store`. |
+| **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), and the web UI is Python, both memory-safe runtimes. |
 
 ## 5. Verification evidence
 
 - **Static analysis on every pull request**: yamllint, ansible-lint with the `production` profile (which
-  includes its security-relevant rules), a syntax check of every playbook, actionlint, and CodeQL for the
-  workflows. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
+  includes its security-relevant rules), a syntax check of every playbook, actionlint, ruff (with its
+  bandit security rules) for the web UI, hadolint for the Dockerfile, and CodeQL for the workflows and the
+  Python code. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
+- **Web UI tests on every pull request**: unit tests (at least 80% statement coverage) of sign-in,
+  sessions, CSRF and Origin checks, the host check, every form and its validation against the roles'
+  patterns, the inventory and Vault files Ansible reads back, runs and their logs, and the pages'
+  accessibility structure; and a smoke test that builds the image and drives the UI against the mock
+  Proxmox API through a real `ansible-playbook` run ([testing.md](testing.md#the-web-ui)). Release images
+  are also scanned with Trivy and fail on fixable high or critical vulnerabilities.
 - **Secret scanning**: gitleaks over the whole history on every change, plus GitHub secret scanning with
   push protection.
 - **Dependency checks**: dependency review on pull requests and Dependabot alerts on `main`

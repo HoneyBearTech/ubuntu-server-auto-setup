@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_text, when %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<p>Work through the steps, then <a href="/run">run</a> the playbooks: build the installer once, provision the
+servers, and apply the baseline. Everything is saved in the data volume as an ordinary Ansible inventory and
+an encrypted Vault.</p>
+<h2>Steps</h2>
+<ol class="steps">
+{% for label, done, href in steps %}
+  <li class="{{ 'done' if done else 'todo' }}"><a href="{{ href }}">{{ label }}</a> — <strong>{{ "Done" if done else "To do" }}</strong></li>
+{% endfor %}
+</ol>
+<h2>Recent runs</h2>
+{% if current_run %}<p>A run is going now: <a href="/runs/{{ current_run.id }}">{{ current_run.action }}</a>.</p>{% endif %}
+{% if runs %}
+<ul class="runs-brief">
+{% for run in runs %}
+  <li><a href="/runs/{{ run.id }}">{{ run.action }}{% if run.check %} (check){% endif %}{% if run.limit %} on {{ run.limit }}{% endif %}</a> {{ status_text(run.status) }} {{ when(run.started) }}</li>
+{% endfor %}
+</ul>
+{% else %}
+<p>No runs yet.</p>
+{% endif %}
+{% endblock %}

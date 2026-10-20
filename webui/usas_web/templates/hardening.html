@@ -1,0 +1,26 @@
+{% extends "section.html" %}
+{% from "_macros.html" import field %}
+{% block intro %}
+<p>What the baseline applies to every server. <strong>Wrong values can lock you out</strong>: check the SSH
+port, the allowed users and the firewall sources, keep the Proxmox console open, and try a run in check mode
+first.</p>
+{% endblock %}
+{% block form %}
+{% set f = fields %}
+<fieldset>
+  <legend>SSH</legend>
+  {% for x in f if x.name.startswith("ssh_") or x.name == "admin_sudo_nopasswd" %}{{ field(x, values, errors, config) }}{% endfor %}
+</fieldset>
+<fieldset>
+  <legend>Firewall (UFW)</legend>
+  {% for x in f if x.name.startswith("ufw_") %}{{ field(x, values, errors, config) }}{% endfor %}
+</fieldset>
+<fieldset>
+  <legend>Fail2Ban</legend>
+  {% for x in f if x.name.startswith("fail2ban_") and not x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
+  <details{% for x in f if x.advanced and errors.get(x.name) %} open{% endfor %}>
+    <summary>More settings</summary>
+    {% for x in f if x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
+  </details>
+</fieldset>
+{% endblock %}

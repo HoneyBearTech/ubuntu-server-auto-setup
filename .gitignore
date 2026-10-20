@@ -15,6 +15,10 @@ collections/
 __pycache__/
 *.retry
 .ansible/
+.coverage
+.pytest_cache/
+.ruff_cache/
+.webui-data/
 
 # Project notes live in Chronos, never here
 .obsidian-docs/

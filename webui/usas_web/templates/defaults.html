@@ -1,0 +1,54 @@
+{% extends "section.html" %}
+{% from "_macros.html" import field %}
+{% block intro %}
+<p>Settings every new server gets. The admin password is stored in the encrypted Vault.</p>
+{% endblock %}
+{% block form %}
+{% set f = fields %}
+<fieldset>
+  <legend>SSH keys for the admin user</legend>
+  {% for x in f if x.name in ("github_user", "admin_extra_ssh_keys") %}{{ field(x, values, errors, config) }}{% endfor %}
+  <div class="field">
+    <div class="check">
+      <input type="checkbox" id="authorize_ui_key" name="authorize_ui_key"{% if config.authorize_ui_key %} checked{% endif %} aria-describedby="authorize-help">
+      <label for="authorize_ui_key">Also authorize this UI's SSH key</label>
+    </div>
+    <p class="help" id="authorize-help">The baseline logs in to the servers with the UI's key, so it must be authorized.
+    {% if ui_key %}It is <code class="key">{{ ui_key }}</code>.{% else %}Create it on the <a href="/ssh">SSH key</a> page.{% endif %}</p>
+  </div>
+  <details{% if errors.get("github_keys_url") %} open{% endif %}>
+    <summary>More settings</summary>
+    {% for x in f if x.name == "github_keys_url" %}{{ field(x, values, errors, config) }}{% endfor %}
+  </details>
+  <div class="actions"><button type="submit" name="action" value="preview" class="secondary">Preview the keys</button></div>
+  <div aria-live="polite">
+  {% if preview_error %}<p class="flash flash-error" role="alert">{{ preview_error }}</p>{% endif %}
+  {% if preview %}
+  <table>
+    <caption>Keys on GitHub for {{ values.github_user }} (what the servers will accept)</caption>
+    <thead><tr><th scope="col">Type</th><th scope="col">Fingerprint</th><th scope="col">Comment</th></tr></thead>
+    <tbody>
+    {% for k in preview + (extra_keys or []) %}<tr><td>{{ k.type }}</td><td><code class="fp">{{ k.fingerprint }}</code></td><td>{{ k.comment }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  </div>
+</fieldset>
+<fieldset>
+  <legend>Admin user</legend>
+  {% for x in f if x.name in ("admin_user", "admin_password", "timezone") %}{{ field(x, values, errors, config) }}{% endfor %}
+  <datalist id="timezones">{% for tz in timezones %}<option value="{{ tz }}">{% endfor %}</datalist>
+</fieldset>
+<fieldset>
+  <legend>Network</legend>
+  {% for x in f if x.name in ("net_gateway", "net_prefix", "net_dns", "net_search") %}{{ field(x, values, errors, config) }}{% endfor %}
+</fieldset>
+<fieldset>
+  <legend>Installation</legend>
+  {% for x in f if x.name == "autoinstall_storage_layout" %}{{ field(x, values, errors, config) }}{% endfor %}
+  <details>
+    <summary>More settings</summary>
+    {% for x in f if x.name == "vm_secure_boot" %}{{ field(x, values, errors, config) }}{% endfor %}
+  </details>
+</fieldset>
+{% endblock %}

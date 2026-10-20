@@ -16,6 +16,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Security
 
+- `requirements.txt` requires certifi 2026.10.19 or later, which removes the emSign root certificates
+  whose intermediate CA keys were compromised (GHSA-6q48-6c7w-9gw2, critical). CI, the release and the
+  image already used that version.
 - The minimum versions in `requirements.txt` now exclude releases with known vulnerabilities:
   ansible-core 2.20.7 (CVE-2026-11332), requests 2.34.2 (CVE-2024-47081, CVE-2026-25645) and idna 3.15
   (PYSEC-2026-215). CI already used fixed versions; this protects `make deps` installs into an environment
@@ -35,6 +38,28 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- A container image, `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (linux/amd64 and linux/arm64), with
+  ansible-core, the collections, the playbooks and roles, and a **web UI**, so the project runs anywhere
+  Docker does, including Windows with Docker Desktop: `docker run -d -p 127.0.0.1:8080:8080 -v
+  usas-data:/data ghcr.io/honeybeartech/ubuntu-server-auto-setup`, `docker-compose.yml`, or `start.ps1` on
+  Windows. See [docs/web-ui.md](docs/web-ui.md).
+- The web UI walks through the Proxmox API (with a connection test and the cluster's CA certificate), the
+  UI's SSH key and the Proxmox node's host key (scanned, compared, then trusted), the defaults (with a
+  preview of the GitHub keys), a servers table and the hardening options, and runs `build-installer`,
+  `provision`, `baseline`, `site` and the key sync, with check mode, differences and a limit, a live log and
+  a run history. Its fields, defaults and validation come from the roles' `defaults/main.yml` and
+  `vars/main.yml`. It writes an ordinary inventory and an Ansible Vault file to the `/data` volume.
+- The web UI needs a sign-in (one password, argon2id, set on first start with a setup code from the
+  container's log), and has CSRF protection, `Origin` and host-name checks, a strict Content Security
+  Policy, and secure session cookies over HTTPS. See [docs/security.md](docs/security.md) and the updated
+  [assurance case](docs/assurance-case.md).
+- Releases publish the image, scanned with Trivy and smoke-tested first, signed with cosign, with an SBOM
+  and SLSA provenance; `images.txt` with its digest is in `SHA256SUMS`
+  ([docs/verifying-releases.md](docs/verifying-releases.md)).
+- CI: the web UI's unit tests (at least 80% statement coverage), a smoke test of the image against the mock
+  Proxmox API with a real playbook run, ruff for the Python code and hadolint for the Dockerfile.
+  `make webui-test`, `make image`, `make smoke` and `make ui`.
+- [docs/accessibility.md](docs/accessibility.md): how the web UI is built and checked for WCAG 2.1 AA.
 - Fuzzing with Atheris (`make fuzz`, `.github/workflows/fuzz.yml`) of the user-data, authorized keys,
   ISO checksum, and sshd and Fail2Ban templates, on every pull request and weekly. See
   [docs/testing.md](docs/testing.md#fuzzing).
@@ -44,6 +69,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - Dependabot's patch and minor updates are approved and merged automatically once every required check
   passes (`.github/workflows/dependabot-auto-merge.yml`); `main` now requires one approval and up-to-date
   branches.
+- `tests/mock_pve.py` takes `--bind` so the smoke test can run it in a container.
+- Dependabot also updates the `Dockerfile`'s base image.
 
 ## [0.1.0] - 2026-10-20
 

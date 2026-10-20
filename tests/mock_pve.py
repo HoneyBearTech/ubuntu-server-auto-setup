@@ -8,7 +8,7 @@ the role's failure path.
 
 It also serves a public-keys file over plain HTTP, standing in for https://github.com/<user>.keys.
 
-Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081]
+Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
 The state (VMs, config changes, requests) is at GET /mock/state, for the tests' assertions.
 """
 
@@ -159,19 +159,21 @@ def main():
     parser.add_argument("--keys-file", required=True)
     parser.add_argument("--port", type=int, default=8006)
     parser.add_argument("--keys-port", type=int, default=8081)
+    # The web UI smoke test runs the mock in its own container, reached by name (tests/webui-smoke.sh).
+    parser.add_argument("--bind", default="127.0.0.1")
     args = parser.parse_args()
 
     with open(args.keys_file, "rb") as fh:
         KeysHandler.keys = fh.read()
-    keys_server = ThreadingHTTPServer(("127.0.0.1", args.keys_port), KeysHandler)
+    keys_server = ThreadingHTTPServer((args.bind, args.keys_port), KeysHandler)
     threading.Thread(target=keys_server.serve_forever, daemon=True).start()
 
-    api = ThreadingHTTPServer(("127.0.0.1", args.port), PveHandler)
+    api = ThreadingHTTPServer((args.bind, args.port), PveHandler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(args.cert, args.key)
     api.socket = context.wrap_socket(api.socket, server_side=True)
-    print(f"mock Proxmox API on https://127.0.0.1:{args.port}, keys on http://127.0.0.1:{args.keys_port}", flush=True)
+    print(f"mock Proxmox API on https://{args.bind}:{args.port}, keys on http://{args.bind}:{args.keys_port}", flush=True)
     api.serve_forever()
 
 
