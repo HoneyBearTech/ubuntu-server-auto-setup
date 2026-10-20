@@ -1,0 +1,12 @@
+---
+profile: production
+exclude_paths:
+  - .venv/
+  - collections/
+  - .github/
+  - .ansible/
+mock_roles: []
+skip_list:
+  # Role variables are the inventory interface and are shared across roles
+  # (ssh_port, admin_user, github_user...), so they don't carry role prefixes.
+  - var-naming[no-role-prefix]

@@ -1,0 +1,13 @@
+---
+ssh_port: 22
+ssh_permit_root_login: "no"
+ssh_password_authentication: false
+ssh_max_auth_tries: 4             # CIS: 4 or fewer; agents offering many keys hit this first
+ssh_login_grace_time: 30
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+ssh_x11_forwarding: false
+ssh_allow_agent_forwarding: false
+ssh_allow_tcp_forwarding: true   # editors' remote-SSH features need this
+# Limit who may log in over SSH. Empty means no AllowUsers line. Keep admin_user in it.
+ssh_allow_users: []

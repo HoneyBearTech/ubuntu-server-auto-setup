@@ -1,6 +1,21 @@
-.vagrant
-*.log
+# Real inventory and secrets stay local. Copy the *.example.yml files to start.
+inventory/hosts.yml
+inventory/host_vars/
+inventory/group_vars/all/vault.yml
+.vault-pass
+*.vault-pass
+.env
+*.pem
+*.key
+
+# Build output and local tooling
+*.iso
+collections/
+.venv/
+__pycache__/
+*.retry
+.ansible/
+
+# Project notes live in Chronos, never here
+.obsidian-docs/
 .DS_Store
-!/tests/results/.gitkeep
-/tests/results/*
-Vagrantfile

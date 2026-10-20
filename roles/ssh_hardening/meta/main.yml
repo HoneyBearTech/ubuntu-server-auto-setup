@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: HoneyBearTech
+  description: OpenSSH server hardening drop-in, with port changes that handle Ubuntu's ssh.socket
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions: [noble, resolute]
+dependencies: []

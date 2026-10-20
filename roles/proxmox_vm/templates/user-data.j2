@@ -1,0 +1,52 @@
+#cloud-config
+# {{ ansible_managed }}
+# Autoinstall for {{ inventory_hostname }}. Holds a password hash: deleted from the node after install.
+autoinstall:
+  version: 1
+  interactive-sections: []
+  locale: {{ autoinstall_locale }}
+  keyboard:
+    layout: {{ autoinstall_keyboard_layout }}
+  source:
+    id: {{ autoinstall_source_id }}
+  refresh-installer:
+    update: false
+  network:
+    version: 2
+    ethernets:
+      primary:
+        match:
+          name: {{ net_interface_match | to_json }}
+        dhcp4: false
+        dhcp6: false
+        addresses:
+          - {{ ansible_host }}/{{ net_prefix }}
+        routes:
+          - to: default
+            via: {{ net_gateway }}
+        nameservers:
+          addresses: {{ net_dns | to_json }}
+          search: {{ net_search | to_json }}
+  storage:
+    layout:
+      name: {{ autoinstall_storage_layout }}
+{% if autoinstall_storage_layout == 'lvm' %}
+      sizing-policy: all
+{% endif %}
+  identity:
+    hostname: {{ inventory_hostname_short }}
+    realname: {{ admin_realname | to_json }}
+    username: {{ admin_user }}
+    password: {{ provision_password_hash | to_json }}
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys: {{ provision_ssh_keys | to_json }}
+  packages: {{ autoinstall_packages | to_json }}
+  updates: {{ autoinstall_updates }}
+  late-commands:
+    # Passwordless sudo so Ansible can run the baseline. The common role removes it again
+    # when admin_sudo_nopasswd is false.
+    - {{ ("echo '" ~ admin_user ~ " ALL=(ALL:ALL) NOPASSWD: ALL' > /target/etc/sudoers.d/90-ansible-" ~ admin_user) | to_json }}
+    - chmod 0440 /target/etc/sudoers.d/90-ansible-{{ admin_user }}
+  shutdown: poweroff

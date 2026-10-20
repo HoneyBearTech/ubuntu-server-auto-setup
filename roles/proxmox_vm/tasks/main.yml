@@ -1,0 +1,47 @@
+---
+- name: Check required variables
+  ansible.builtin.assert:
+    that:
+      - pve_api_host | length > 0
+      - pve_api_token_id | length > 0
+      - pve_api_token_secret | length > 0
+      - pve_node | length > 0
+      - pve_vmid | string is match('^[0-9]+$')
+      - ansible_host is defined and ansible_host != inventory_hostname
+      - net_gateway | length > 0
+      - github_user | length > 0 or admin_extra_ssh_keys | length > 0
+      - admin_password | length > 0
+    fail_msg: >-
+      Set pve_api_host, the API token, pve_node, a numeric pve_vmid, ansible_host (the static IP),
+      net_gateway, github_user (or admin_extra_ssh_keys) and admin_password for {{ inventory_hostname }}.
+    quiet: true
+
+- name: Build the API auth header
+  ansible.builtin.set_fact:
+    pve_api_headers:
+      Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: List VMs in the cluster
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/cluster/resources?type=vm"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+  register: pve_vms
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Check whether the cluster already has VM {{ pve_vmid }}
+  ansible.builtin.set_fact:
+    pve_vm_exists: "{{ pve_vms.json.data | selectattr('vmid', 'equalto', pve_vmid | int) | list | length > 0 }}"
+
+- name: Report existing VM
+  ansible.builtin.debug:
+    msg: VM {{ pve_vmid }} already exists; skipping install for {{ inventory_hostname }}.
+  when: pve_vm_exists
+
+- name: Install Ubuntu on a new VM
+  ansible.builtin.include_tasks: provision.yml
+  when: not pve_vm_exists

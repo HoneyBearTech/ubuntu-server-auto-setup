@@ -1,0 +1,54 @@
+---
+# --- Proxmox API (set in inventory; token values come from Ansible Vault) ---
+pve_api_host: ""
+pve_api_port: 8006
+pve_api_user: ansible@pve
+pve_api_token_id: ""          # token name only, e.g. "automation"
+pve_api_token_secret: ""
+pve_validate_certs: true
+pve_api_url: "https://{{ pve_api_host }}:{{ pve_api_port }}/api2/json"
+# Hide API tokens and the password hash from task output. Set false only while debugging.
+pve_hide_secrets: true
+
+# --- Placement ---
+pve_node: ""                   # Proxmox node name
+pve_ssh_host: "{{ pve_node }}" # inventory host used to reach that node over SSH
+pve_storage: local-lvm         # storage for the VM disks
+pve_efidisk_format: raw        # raw for LVM/ZFS/Ceph, qcow2 for directory storage
+pve_bridge: vmbr0
+pve_vlan: ""                   # VLAN tag, empty for none
+pve_vmid: ""                   # required, fixed per host so reruns can find the VM
+pve_tags: [ubuntu, ansible]
+
+# --- VM hardware ---
+vm_cores: 2
+vm_sockets: 1
+vm_cpu_type: host
+vm_memory_mb: 2048
+vm_disk_gb: 32
+vm_secure_boot: false          # pre-enroll Secure Boot keys in the EFI disk
+vm_onboot: true
+# How long to wait for the installer to finish and power off the VM.
+vm_install_timeout: 3600
+
+# --- Installed system ---
+admin_user: sysadmin
+admin_realname: Administrator
+admin_password: ""             # from Vault; hashed (SHA-512) before it goes in the seed
+github_user: ""
+admin_extra_ssh_keys: []       # extra public keys besides the GitHub ones
+net_prefix: 24
+net_gateway: ""
+net_dns: []
+net_search: []
+net_interface_match: "en*"
+autoinstall_locale: en_US.UTF-8
+autoinstall_keyboard_layout: us
+autoinstall_source_id: ubuntu-server   # or ubuntu-server-minimal
+autoinstall_storage_layout: lvm        # lvm, direct or zfs
+autoinstall_updates: security          # security or all
+autoinstall_packages:
+  - qemu-guest-agent
+
+# Replace the control node's known_hosts entry for the new VM with its fresh host key.
+provision_manage_known_hosts: true

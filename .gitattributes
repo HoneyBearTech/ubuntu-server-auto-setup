@@ -1,2 +1,2 @@
-*.sh linguist-language=Bash
-tests/Vagrant/* linguist-vendored
+*.yml linguist-language=YAML
+*.j2 linguist-language=Jinja

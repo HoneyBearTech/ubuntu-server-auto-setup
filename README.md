@@ -1,51 +1,232 @@
 # ubuntu-server-auto-setup
 
-[![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/workflows/CI/badge.svg?event=push)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions?query=workflow%3ACI) 
+[![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/ci.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HoneyBearTech/ubuntu-server-auto-setup/badge)](https://scorecard.dev/viewer/?uri=github.com/HoneyBearTech/ubuntu-server-auto-setup)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15740/badge)](https://www.bestpractices.dev/projects/15740)
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/15740/baseline)](https://www.bestpractices.dev/projects/15740)
 
+Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
+load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).
 
-This is a setup script to automate the setup and provisioning of Ubuntu servers. It does the following:
-* Adds a new user account with sudo access
-* Adds a public ssh key for the new user account
-* Disables password authentication to the server
-* Deny root login to the server
-* Setup Uncomplicated Firewall
-* Create Swap file based on machine's installed memory
-* Setup the timezone for the server (Default to "America/Chicago")
-* Install Network Time Protocol
+> [!WARNING]
+> **Provisioning creates VMs, and the installer wipes the target VM's disk.** `make provision` only
+> touches VM IDs (`pve_vmid`) that don't exist yet, but a wrong ID or storage in your inventory still means
+> a new VM and a freshly erased disk.
+>
+> **The baseline changes SSH and firewall settings, and can lock you out** if your inventory variables are
+> wrong (the SSH port, the admin user, the GitHub user whose keys are installed, the firewall rules).
+>
+> Run against one host first with `LIMIT=<host>`, keep a console (the Proxmox web console) open, and try
+> `ARGS="--check --diff"` before a real run.
 
-# Installation
-SSH into your server and install git if it is not installed:
-```bash
-sudo apt-get update
-sudo apt-get install git
-```
+## Documentation
 
-Clone this repository into your home directory:
-```bash
-cd ~
-git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git
-```
+- [Quick start](docs/quick-start.md), [installing](docs/installing.md) (including the Proxmox API token
+  and its privileges), [upgrading and backups](docs/upgrading.md) and
+  [verifying releases](docs/verifying-releases.md). The [documentation index](docs/README.md) lists
+  everything.
+- [Architecture](docs/architecture.md): the playbooks and roles, and how a VM goes from nothing to a
+  hardened server.
+- [Security requirements](docs/security.md): what this project does and doesn't protect against, and the
+  [assurance case](docs/assurance-case.md) behind it.
+- [External interfaces](docs/interfaces.md): the inventory variables, the commands, and every system
+  the playbooks talk to; [dependencies and vulnerability management](docs/dependencies.md).
+- [Roadmap](docs/roadmap.md): where the project is going, and what it won't do.
+- [Support](SUPPORT.md): which versions get fixes, and for how long. [Changelog](CHANGELOG.md).
+- [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Governance](GOVERNANCE.md) and
+  [reporting a vulnerability](SECURITY.md).
 
-Run the setup script
-```bash
-cd ubuntu-server-auto-setup
-bash setup.sh
-```
+## What it does
 
-# Setup prompts
-When the setup script is run, you will be prompted to enter the username and password of the new user account. 
+Three playbooks, run from your own machine (the "control node"), plus `playbooks/site.yml` that runs all
+three in order:
 
-Following that, you will then be prompted to add a public ssh key (which should be from your local machine) for the new account. To generate an ssh key from your local machine:
-```bash
-ssh-keygen -t rsa
-cat ~/.ssh/id_rsa.pub
-```
+1. **`playbooks/build-installer.yml`** runs on your Proxmox node(s) (inventory group `proxmox_nodes`) over
+   SSH as root. It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
+   Ubuntu's published `SHA256SUMS`, and uses `xorriso` to build a copy whose GRUB menu adds the
+   `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
+   asks before wiping disks). Both ISOs go into the node's ISO storage (`/var/lib/vz/template/iso`).
+2. **`playbooks/provision-vms.yml`** handles every host in the group `ubuntu_servers` whose VM (by
+   `pve_vmid`) doesn't exist yet. It fetches your public keys from `https://github.com/<github_user>.keys`,
+   renders the installer's answers (hostname, static IP, the admin user with a SHA-512 hashed password from
+   Ansible Vault, your SSH keys, password SSH off, `qemu-guest-agent`), builds a small per-host seed ISO
+   on the node, creates the VM through the Proxmox API (UEFI, q35, VirtIO SCSI) with both ISOs attached,
+   and starts it. When the installer has finished and powered the VM off, it detaches both ISOs, deletes
+   the seed ISO (it holds the password hash), starts the VM and waits for SSH. VMs that already exist are
+   skipped, so reruns are safe.
+3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 24.04 or 26.04
+   server, not only ones this project installed:
+   - `apt` full upgrade, hostname and timezone;
+   - the admin user, with its `authorized_keys` kept exactly in sync with your GitHub keys;
+   - an SSH hardening drop-in: no root login, no passwords, and optionally a different port (which also
+     switches off Ubuntu's socket-activated `ssh.socket` so the new port takes effect);
+   - UFW: deny incoming, rate-limited SSH, and any extra allow rules you list;
+   - Fail2Ban: an `sshd` jail on the systemd journal, banning through nftables, with longer bans for
+     repeat offenders and an `ignoreip` list for your own networks;
+   - unattended security upgrades, and `qemu-guest-agent`.
 
-Finally, you will be prompted to specify a [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) for the server. It will be set to 'America/Chicago' if you do not specify a value.
+## Getting started
 
-# Supported versions
-This setup script has been tested against Ubuntu 14.04, Ubuntu 16.04, Ubuntu 18.04 and Ubuntu 20.04.
+You need:
 
-# Running tests
-Tests are run against a set of Vagrant VMs. To run the tests, run the following in the project's directory:  
-`./tests/tests.sh`
+- a control node (Linux or macOS) with Python 3.11 or later and `git`;
+- one or more Proxmox VE 8 or 9 nodes that you can reach over SSH as `root` with a key;
+- a Proxmox API token with the privileges listed in [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token);
+- free static IP addresses on the VMs' network, and a GitHub account with your SSH public keys on it.
+
+1. Get the code and install the dependencies in a virtual environment:
+
+   ```sh
+   git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git
+   cd ubuntu-server-auto-setup
+   python3 -m venv .venv && . .venv/bin/activate
+   make deps
+   ```
+
+2. Create your inventory and your secrets (both files are gitignored):
+
+   ```sh
+   cp inventory/hosts.example.yml inventory/hosts.yml
+   cp inventory/vault.example.yml inventory/group_vars/all/vault.yml
+   $EDITOR inventory/hosts.yml inventory/group_vars/all/vault.yml
+   ansible-vault encrypt inventory/group_vars/all/vault.yml
+   ```
+
+3. Run it against one new VM first:
+
+   ```sh
+   make build-installer ARGS=--ask-vault-pass
+   make provision LIMIT=web-01 ARGS=--ask-vault-pass
+   make baseline LIMIT=web-01 ARGS="--ask-vault-pass --check --diff"
+   make baseline LIMIT=web-01 ARGS=--ask-vault-pass
+   ```
+
+   Once that host looks right, `make site ARGS=--ask-vault-pass` does everything for every host. The
+   [quick start](docs/quick-start.md) walks through the same steps with more explanation.
+
+## Usage
+
+| Command | What it does |
+| --- | --- |
+| `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`) and the Ansible collections (`requirements.yml`). |
+| `make lint` | `yamllint .` and `ansible-lint`. |
+| `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
+| `make site` | Build the installer, provision missing VMs, apply the baseline. |
+| `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox node(s). |
+| `make provision` | Create and auto-install the VMs that don't exist yet. |
+| `make baseline` | Apply the baseline to the servers. |
+| `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
+
+Two variables apply to every target: `LIMIT=<host or group>` narrows the run (`--limit`), and
+`ARGS="..."` passes anything else to `ansible-playbook`, for example `ARGS="--ask-vault-pass"`,
+`ARGS="--vault-password-file ~/.config/usas-vault-pass"` or `ARGS="--check --diff"`. `INVENTORY=` points at
+another inventory file (default `inventory/hosts.yml`).
+
+## Configuration
+
+Everything is configured through the inventory (`inventory/hosts.yml`, copied from
+[`inventory/hosts.example.yml`](inventory/hosts.example.yml)) and the encrypted Vault file
+(`inventory/group_vars/all/vault.yml`, copied from [`inventory/vault.example.yml`](inventory/vault.example.yml)).
+The variables you are most likely to set are below. [docs/interfaces.md](docs/interfaces.md) describes them
+in more detail, and every role lists all of its variables, with defaults and comments, in
+`roles/<role>/defaults/main.yml` (`installer_iso`, `ubuntu_release`, `proxmox_vm`, `common`, `firewall`,
+`ssh_hardening`, `fail2ban`).
+
+**Secrets (Vault)**
+
+| Variable | What it is |
+| --- | --- |
+| `vault_admin_password` | The admin user's password, for the console (and `sudo` if you turn passwordless sudo off). SSH stays key-only. |
+| `vault_pve_api_token_id` | The Proxmox API token's name only (`automation`, not `ansible@pve!automation`). |
+| `vault_pve_api_token_secret` | The token's secret (a UUID). |
+
+**All hosts**
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `github_user` | (required) | The GitHub account whose public keys (`https://github.com/<user>.keys`) are installed for the admin user. |
+| `admin_extra_ssh_keys` | `[]` | Extra public keys to install besides the GitHub ones. |
+| `ssh_keys_exclusive` | `true` | Remove keys from `authorized_keys` that are no longer on GitHub or in `admin_extra_ssh_keys`. The run refuses to touch the file if it finds no keys at all. |
+| `admin_user` | `sysadmin` | The admin user created by the installer and managed by the baseline. |
+| `admin_password` | `""` | Set it to `"{{ vault_admin_password }}"`. Hashed (SHA-512) before it reaches the installer; the baseline only uses it when it has to create the user. |
+| `admin_sudo_nopasswd` | `true` | Passwordless `sudo` for the admin user. With `false`, also set `ansible_become_password`. |
+| `timezone` | `Etc/UTC` | Any [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name. |
+| `pve_api_host`, `pve_api_port` | `""`, `8006` | The Proxmox API. |
+| `pve_api_user` | `ansible@pve` | The user that owns the API token. |
+| `pve_api_token_id`, `pve_api_token_secret` | `""` | Set them to the Vault values. |
+| `pve_validate_certs` | `true` | Verify the Proxmox API's TLS certificate. Leave it on; see [running it securely](#running-it-securely). |
+
+**Proxmox nodes** (group `proxmox_nodes`): each inventory host name must match the Proxmox node name, with
+`ansible_host` and `ansible_user: root`. The ISO location is set by `pve_iso_storage` (default `local`)
+and `pve_iso_dir` (default `/var/lib/vz/template/iso`); the Ubuntu release by `ubuntu_release` (`26.04`)
+and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3 seconds) and `installer_iso_rebuild`
+(`false`) control the remastered ISO.
+
+**New VMs** (group `ubuntu_servers`, used by `provision-vms.yml`)
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `ansible_host` | (required) | The server's static IP address; the installer configures it. |
+| `pve_vmid` | (required) | The Proxmox VM ID. Only IDs that don't exist anywhere in the cluster yet are created. |
+| `pve_node` | (required) | The Proxmox node the VM is created on (and, through `pve_ssh_host`, the inventory host used to reach it over SSH). |
+| `pve_storage` | `local-lvm` | The storage for the VM's disk and EFI disk (`pve_efidisk_format`: `raw`, or `qcow2` on directory storage). |
+| `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | The network bridge and an optional VLAN tag. |
+| `vm_cores`, `vm_memory_mb`, `vm_disk_gb` | `2`, `2048`, `32` | The VM's size. |
+| `vm_secure_boot` | `false` | Pre-enroll the Secure Boot keys in the EFI disk. |
+| `net_prefix`, `net_gateway` | `24`, (required) | The network prefix length and the default gateway. |
+| `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
+| `autoinstall_storage_layout` | `lvm` | The installer's disk layout: `lvm`, `direct` or `zfs`. |
+| `vm_install_timeout` | `3600` | Seconds to wait for the installer to finish. |
+
+**Baseline** (group `ubuntu_servers`, used by `baseline.yml`)
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `ssh_port` | `22` | The SSH port. Anything other than 22 switches sshd from `ssh.socket` to `ssh.service`; the firewall rule moves with it. |
+| `ssh_allow_users` | `[]` | If set, only these users may log in over SSH (it must include `admin_user`; the run refuses otherwise). |
+| `ufw_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
+| `ufw_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
+| `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
+| `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
+| `apt_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
+| `reboot_if_required` | `false` | Reboot after upgrades when the server asks for it (otherwise the run reports it). |
+| `unattended_upgrades_auto_reboot` | `false` | Let unattended upgrades reboot the server, at `unattended_upgrades_reboot_time` (`04:00`). |
+
+## Running it securely
+
+- **Keep the Vault encrypted** and its password out of the repository: use `--ask-vault-pass`, or a
+  password file outside the checkout (or `.vault-pass`, which is gitignored) with mode `0600`. Never commit
+  `inventory/hosts.yml` or a plaintext `vault.yml`; both are gitignored.
+- **Give the API token only the privileges in [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)**,
+  on a dedicated `ansible@pve` user with privilege separation, and rotate it if your control node may
+  have been compromised.
+- **Keep `pve_validate_certs: true`.** If your Proxmox node uses its self-signed certificate, add the
+  cluster's CA (`/etc/pve/pve-root-ca.pem`) to your control node's trust store instead of turning
+  verification off, or the API token can be intercepted.
+- **Protect your GitHub account with two-factor authentication.** Whoever controls it controls which keys
+  can log in to your servers: `make keys` and the baseline install exactly the keys GitHub lists.
+- **Provision on a network you trust.** The control node learns a new VM's SSH host key by scanning it the
+  first time the VM boots (trust on first use). Later port changes reuse the key read over the verified
+  connection.
+- **Decide on passwordless sudo.** The admin user gets passwordless `sudo` by default so Ansible can run
+  unattended; set `admin_sudo_nopasswd: false` (and `ansible_become_password`) if you'd rather require
+  the password.
+- **Put your own management network in `fail2ban_ignoreip`**, and double-check `ssh_port`,
+  `ufw_ssh_sources` and `ufw_allow` before the first baseline run on a server that's already in use.
+- **Seed files are temporary.** The seed ISO holds the password hash. Provisioning deletes it once the
+  install finishes, and also when a run fails part-way. Only a run killed outright (Ctrl-C, lost control
+  node) can leave `seed-<host>.iso` in the node's ISO storage; delete it by hand then. The baseline removes
+  the installer's own copy of the answers (`/var/log/installer/autoinstall-user-data`) from the server.
+- What this project does and doesn't protect against is in [docs/security.md](docs/security.md).
+
+## Previous version
+
+Up to 2021 this repository held an interactive bash script (`setup.sh`) for Ubuntu 14.04 to 20.04. It was
+replaced by these Ansible playbooks and is no longer maintained, but it is still in the git history: the
+last commit that has it is
+[`f2e802d`](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/tree/f2e802d).
+
+## License
+
+[MIT](LICENSE).

@@ -1,0 +1,35 @@
+---
+admin_user: sysadmin
+admin_shell: /bin/bash
+# Only used when the user doesn't exist yet (servers this repo didn't install).
+admin_password: ""
+admin_sudo_nopasswd: true
+
+# Keys from https://github.com/<github_user>.keys plus any extras.
+github_user: ""
+admin_extra_ssh_keys: []
+# Remove keys that are no longer on GitHub (or in admin_extra_ssh_keys).
+ssh_keys_exclusive: true
+
+manage_hostname: true
+server_hostname: "{{ inventory_hostname_short }}"
+server_domain: ""            # adds "<ip> <host>.<domain> <host>" to /etc/hosts when set
+timezone: Etc/UTC
+
+apt_upgrade: dist            # dist, safe, full or "no"
+reboot_if_required: false    # reboot after upgrades when /var/run/reboot-required exists
+common_packages:
+  - ca-certificates
+  - curl
+  - htop
+  - unattended-upgrades
+  - vim
+
+unattended_upgrades_origins:
+  - "${distro_id}:${distro_codename}"
+  - "${distro_id}:${distro_codename}-security"
+  - "${distro_id}ESMApps:${distro_codename}-apps-security"
+  - "${distro_id}ESM:${distro_codename}-infra-security"
+unattended_upgrades_auto_reboot: false
+unattended_upgrades_reboot_time: "04:00"
+unattended_upgrades_remove_unused: true

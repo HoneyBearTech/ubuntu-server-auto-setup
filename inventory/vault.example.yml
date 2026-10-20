@@ -1,0 +1,7 @@
+---
+# Copy to inventory/group_vars/all/vault.yml, fill in, then encrypt:
+#   ansible-vault encrypt inventory/group_vars/all/vault.yml
+# Never commit the plaintext file (it is gitignored either way).
+vault_admin_password: "change-me"            # admin user's password (sudo and console login); SSH stays key-only
+vault_pve_api_token_id: "automation"         # the token name only, without user@realm!
+vault_pve_api_token_secret: "00000000-0000-0000-0000-000000000000"

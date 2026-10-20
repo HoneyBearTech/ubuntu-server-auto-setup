@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: HoneyBearTech
+  description: Fail2Ban with an sshd jail on the systemd journal and incremental bans
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions: [noble, resolute]
+dependencies: []

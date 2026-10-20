@@ -1,0 +1,13 @@
+---
+ssh_port: 22
+ufw_default_incoming: deny
+ufw_default_outgoing: allow
+ufw_logging: low
+# Rate-limit SSH (ufw "limit": 6 connections in 30 s per source) instead of a plain allow.
+ufw_ssh_limit: true
+# Where SSH is allowed from. "any", or a list of addresses/CIDRs.
+ufw_ssh_sources: [any]
+# Extra rules, e.g.
+#   - { port: "443", proto: tcp, comment: https }
+#   - { port: "5432", proto: tcp, from: 10.0.0.0/24, comment: postgres }
+ufw_allow: []

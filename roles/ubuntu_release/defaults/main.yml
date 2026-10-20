@@ -1,0 +1,14 @@
+---
+# Shared by installer_iso and proxmox_vm (both depend on this role).
+# Ubuntu moves superseded point releases to old-releases.ubuntu.com; bump
+# ubuntu_point_release when a new one ships (or point ubuntu_iso_base_url there).
+ubuntu_release: "26.04"
+ubuntu_point_release: "26.04.1"
+ubuntu_iso_base_url: "https://releases.ubuntu.com/{{ ubuntu_release }}"
+ubuntu_iso_name: "ubuntu-{{ ubuntu_point_release }}-live-server-amd64.iso"
+installer_iso_name: "{{ ubuntu_iso_name | regex_replace('\\.iso$', '-autoinstall.iso') }}"
+
+# Where ISOs live on the Proxmox node, and the storage ID that maps to that directory.
+pve_iso_storage: local
+pve_iso_dir: /var/lib/vz/template/iso
+installer_work_dir: /var/tmp/ubuntu-server-auto-setup

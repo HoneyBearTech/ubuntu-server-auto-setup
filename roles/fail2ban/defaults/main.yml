@@ -1,0 +1,13 @@
+---
+ssh_port: 22
+fail2ban_bantime: 1h
+fail2ban_findtime: 10m
+fail2ban_maxretry: 5
+# Each repeat offence bans longer, up to fail2ban_bantime_maxtime.
+fail2ban_bantime_increment: true
+fail2ban_bantime_maxtime: 1w
+# Never ban these (add your admin networks so a typo can't lock you out).
+fail2ban_ignoreip: []
+# Empty keeps Ubuntu's default (nftables).
+fail2ban_banaction: ""
+fail2ban_sshd_mode: normal       # normal, ddos, extra or aggressive
