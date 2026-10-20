@@ -119,8 +119,11 @@ A check on every pull request fails if a commit lacks the sign-off. To fix it, a
 
 ## Pull requests
 
-- `main` is protected: changes land only through a pull request, and the required CI checks must pass. Pull
-  requests are squash-merged.
+- `main` is protected: changes land only through a pull request that is up to date with `main`, has passed
+  the required CI checks and has one approval; pushing to it dismisses earlier approvals. Pull requests are
+  squash-merged. While the project has a single maintainer, the maintainer's own pull requests are merged
+  with the administrator bypass, which works only through a pull request (never a direct push), after the
+  same checks pass. Dependabot's patch and minor updates are approved by a workflow.
 - Keep each pull request focused on one change, and describe what it does and why.
 - Update `README.md`, `docs/` and the role's `defaults/main.yml` when you change a variable or user-visible
   behaviour, and add a line to `CHANGELOG.md` under "Unreleased".
