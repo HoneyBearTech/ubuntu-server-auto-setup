@@ -39,6 +39,7 @@ example shows a typical value.
 | `admin_user` | `sysadmin` | The admin account. |
 | `admin_password` | `""` | Its password, normally `"{{ vault_admin_password }}"`. Required to provision; the baseline uses it only when it creates the user. |
 | `github_user` | `""` | Whose keys from `https://github.com/<user>.keys` are authorized. Required (or `admin_extra_ssh_keys`). |
+| `github_keys_url` | `https://github.com/<github_user>.keys` | Where the public keys are fetched from (the tests point it at a local file). |
 | `admin_extra_ssh_keys` | `[]` | More public keys, one per list item. |
 | `ssh_port` | `22` | The SSH port the baseline configures, opens in UFW and watches with Fail2Ban. |
 
@@ -74,6 +75,7 @@ example shows a typical value.
 | `vm_secure_boot` | `false` | Pre-enroll Secure Boot keys. |
 | `vm_onboot` | `true` | Start the VM when the node boots. |
 | `vm_install_timeout` | `3600` | Seconds to wait for the installer to power off. |
+| `vm_install_poll_interval` | `20` | Seconds between checks of the VM's power state during the install. |
 | `ansible_host` | (required) | The static IPv4 address the installer configures. |
 | `net_prefix`, `net_gateway` | `24`, `""` | Prefix length and gateway (gateway required). |
 | `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
@@ -85,6 +87,7 @@ example shows a typical value.
 | `autoinstall_updates` | `security` | Updates applied during the install: `security` or `all`. |
 | `autoinstall_packages` | `[qemu-guest-agent]` | Extra packages installed by the installer. |
 | `provision_manage_known_hosts` | `true` | Replace the control node's `known_hosts` entry for the new VM's IP with its fresh host key. |
+| `provision_known_hosts_file` | `~/.ssh/known_hosts` | The control node's `known_hosts` file that gets that entry. |
 
 **Baseline: system and users** (`common`)
 
@@ -123,6 +126,7 @@ example shows a typical value.
 | `ssh_client_alive_interval`, `ssh_client_alive_count_max` | `300`, `2` | Dropping unresponsive sessions. |
 | `ssh_x11_forwarding`, `ssh_allow_agent_forwarding`, `ssh_allow_tcp_forwarding` | `false`, `false`, `true` | Forwarding. |
 | `ssh_allow_users` | `[]` | `AllowUsers`, if set (must include `admin_user`). |
+| `ssh_known_hosts_file` | `~/.ssh/known_hosts` | The control node's `known_hosts` file that gets a `[host]:port` entry when `ssh_port` changes. |
 
 **Baseline: Fail2Ban** (`fail2ban`)
 

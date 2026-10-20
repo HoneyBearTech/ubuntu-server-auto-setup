@@ -1,7 +1,7 @@
 ---
 - name: Fetch public SSH keys from GitHub
   ansible.builtin.uri:
-    url: "https://github.com/{{ github_user }}.keys"
+    url: "{{ github_keys_url }}"
     return_content: true
   register: common_github_keys
   delegate_to: localhost

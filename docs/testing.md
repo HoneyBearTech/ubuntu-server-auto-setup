@@ -1,0 +1,78 @@
+# Testing
+
+How ubuntu-server-auto-setup is tested, how to run the tests, and how to add a case. The rules for when a
+change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
+
+## What runs where
+
+| Suite | What it covers | Command | In CI |
+| --- | --- | --- | --- |
+| Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint | `make lint`, `make syntax` | every pull request and push to `main` (required) |
+| Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
+| Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
+| Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy) |
+
+## The integration tests
+
+`tests/run.sh` runs the real playbooks, unchanged, against stand-ins for the systems they talk to. Nothing
+leaves the machine except the container image builds:
+
+| Real system | Stand-in |
+| --- | --- |
+| A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`) |
+| releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, served inside that container |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops |
+| github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
+| A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
+
+The test keys, the mock's TLS certificate and `known_hosts` are created in a temporary directory for each
+run; your own `~/.ssh` is never touched. The steps:
+
+1. **build-installer** twice: the remastered ISO has the `autoinstall` kernel argument and a 3-second GRUB
+   timeout, and the second run changes nothing.
+2. **provision-vms** for `srv-01`: the VM is created with the expected hardware, both ISOs attached, the
+   install awaited, the ISOs detached, the boot order set to disk only, the seed deleted, the VM started and
+   its host key trusted. A second run skips the existing VM.
+3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
+   seed ISO (which holds the password hash). The node must have no seed files left.
+4. **baseline** twice on `srv-01`, then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW
+   rules and policies, the Fail2Ban jail, the sudoers file, the timezone, automatic updates, the removed
+   installer answers file, exactly the published key in `authorized_keys`, and password and root logins
+   refused.
+5. **Key sync**: a key that is no longer published is removed; an empty key list is refused rather than
+   emptying `authorized_keys`.
+6. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,
+   Fail2Ban follows, and a rerun on the new port changes nothing.
+7. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
+   become password.
+8. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
+   (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
+   statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
+   the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
+   report and covered by the real-run part of the test policy.
+
+UFW rate-limits new SSH connections (6 in 30 seconds per address), and in the tests every connection comes
+from Docker's one address, so the script pauses between some steps.
+
+## Running them
+
+You need Docker (privileged containers, for systemd), Python with the CI packages and the collections:
+
+```sh
+python3 -m venv .venv && . .venv/bin/activate
+pip install --require-hashes -r requirements-ci.txt
+ansible-galaxy collection install -r requirements.yml
+make test
+```
+
+A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free.
+
+## Adding a case
+
+- A new behaviour in a role: add the check to the matching `tests/verify-*.yml` playbook (what should
+  happen), and to `tests/run.sh` if it needs its own run, for example with `-e` variables or a `play_fails`
+  step for what should be refused.
+- A new Proxmox API call: add it to `tests/mock_pve.py`, which answers anything it doesn't know with HTTP
+  501, so a missing call fails the test rather than passing silently.
+- A bug fix: add the check that would have caught the bug before fixing it, and see it fail.

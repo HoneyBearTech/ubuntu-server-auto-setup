@@ -2,8 +2,9 @@
 name: CI
 
 # Every pull request and push to main: YAML and Ansible lint, a syntax check of every playbook, the workflow
-# linter, and a secret scan over the whole history. The job names are the required status checks in the
-# main branch ruleset; keep them stable.
+# linter, a secret scan over the whole history, and the integration tests (the playbooks run against
+# containers and a mock Proxmox API; see docs/testing.md). The job names are the required status checks in
+# the main branch ruleset; keep them stable.
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
@@ -27,12 +28,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements-ci.txt
 
+      # Exact versions with hashes (requirements-ci.txt, compiled from requirements.txt and
+      # requirements-dev.txt), so CI installs exactly what was reviewed.
       - name: Install the control-node packages and lint tools
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+        run: python -m pip install --require-hashes -r requirements-ci.txt
 
       - name: Install the Ansible collections
         run: ansible-galaxy collection install -r requirements.yml
@@ -51,6 +52,32 @@ jobs:
         run: >-
           docker run --rm -v "$PWD:/repo:ro" -w /repo
           rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+
+  test:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install the control-node packages
+        run: python -m pip install --require-hashes -r requirements-ci.txt
+
+      - name: Install the Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Builds the test images, runs every playbook against them (installer, provisioning through the mock
+      # Proxmox API, baseline), checks the results and idempotence, and fails below 80% task coverage.
+      - name: Run the integration tests
+        run: tests/run.sh
 
   secrets:
     name: Secret scan (gitleaks)

@@ -1,10 +1,15 @@
 # ubuntu-server-auto-setup
 
-[![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/ci.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/ci.yml)
+[![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/checks.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/checks.yml)
 [![CodeQL](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HoneyBearTech/ubuntu-server-auto-setup/badge)](https://scorecard.dev/viewer/?uri=github.com/HoneyBearTech/ubuntu-server-auto-setup)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15740/badge)](https://www.bestpractices.dev/projects/15740)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/15740/baseline)](https://www.bestpractices.dev/projects/15740)
+[![Release](https://img.shields.io/github/v/release/HoneyBearTech/ubuntu-server-auto-setup?sort=semver)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
+[![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
+[![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
+[![ansible-core 2.19+](https://img.shields.io/badge/ansible--core-2.19%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
 
 Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
 load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).
@@ -32,6 +37,8 @@ load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH har
   [assurance case](docs/assurance-case.md) behind it.
 - [External interfaces](docs/interfaces.md): the inventory variables, the commands, and every system
   the playbooks talk to; [dependencies and vulnerability management](docs/dependencies.md).
+- [Testing](docs/testing.md): the integration tests that run every playbook on every pull request, and how
+  to run them yourself.
 - [Roadmap](docs/roadmap.md): where the project is going, and what it won't do.
 - [Support](SUPPORT.md): which versions get fixes, and for how long. [Changelog](CHANGELOG.md).
 - [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Governance](GOVERNANCE.md) and
@@ -112,6 +119,7 @@ You need:
 | `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`) and the Ansible collections (`requirements.yml`). |
 | `make lint` | `yamllint .` and `ansible-lint`. |
 | `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
+| `make test` | Run the integration tests against containers and a mock Proxmox API (needs Docker; see [docs/testing.md](docs/testing.md)). |
 | `make site` | Build the installer, provision missing VMs, apply the baseline. |
 | `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox node(s). |
 | `make provision` | Create and auto-install the VMs that don't exist yet. |

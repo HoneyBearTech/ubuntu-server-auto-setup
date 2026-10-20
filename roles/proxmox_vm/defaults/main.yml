@@ -30,12 +30,14 @@ vm_secure_boot: false          # pre-enroll Secure Boot keys in the EFI disk
 vm_onboot: true
 # How long to wait for the installer to finish and power off the VM.
 vm_install_timeout: 3600
+vm_install_poll_interval: 20   # seconds between status checks
 
 # --- Installed system ---
 admin_user: sysadmin
 admin_realname: Administrator
 admin_password: ""             # from Vault; hashed (SHA-512) before it goes in the seed
 github_user: ""
+github_keys_url: "https://github.com/{{ github_user }}.keys"
 admin_extra_ssh_keys: []       # extra public keys besides the GitHub ones
 net_prefix: 24
 net_gateway: ""
@@ -52,3 +54,4 @@ autoinstall_packages:
 
 # Replace the control node's known_hosts entry for the new VM with its fresh host key.
 provision_manage_known_hosts: true
+provision_known_hosts_file: "~/.ssh/known_hosts"

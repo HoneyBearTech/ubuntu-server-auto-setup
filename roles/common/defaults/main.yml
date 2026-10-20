@@ -7,6 +7,7 @@ admin_sudo_nopasswd: true
 
 # Keys from https://github.com/<github_user>.keys plus any extras.
 github_user: ""
+github_keys_url: "https://github.com/{{ github_user }}.keys"
 admin_extra_ssh_keys: []
 # Remove keys that are no longer on GitHub (or in admin_extra_ssh_keys).
 ssh_keys_exclusive: true

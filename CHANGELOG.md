@@ -8,7 +8,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-The project is rewritten from an interactive bash script into Ansible playbooks.
+## [0.1.0] - 2026-10-20
+
+The first release of the Ansible version: the project is rewritten from an interactive bash script into
+Ansible playbooks.
 
 ### Upgrading
 
@@ -38,8 +41,19 @@ The project is rewritten from an interactive bash script into Ansible playbooks.
   CodeQL, OpenSSF Scorecard, dependency review and a DCO sign-off check; Dependabot for the Python packages
   and the Actions; a release workflow that publishes a source archive with SHA256 checksums, an SPDX SBOM,
   a cosign keyless signature and SLSA build provenance.
+- Integration tests (`make test`, required on every pull request): every playbook runs against containers
+  and a mock Proxmox API, the results are checked (including refused logins, key sync, a port change and
+  the cleanup of a failed install), every playbook must change nothing on a second run, and at least 80%
+  of role tasks must run. A weekly job remasters the real Ubuntu ISO and compares its boot records.
+  See [docs/testing.md](docs/testing.md).
+- CI installs an exact, hash-pinned set of Python packages (`requirements-ci.txt`).
+- Variables `github_keys_url`, `vm_install_poll_interval`, `provision_known_hosts_file` and
+  `ssh_known_hosts_file`; provisioning also works when the new VM is reached on an SSH port other than 22.
 
 ### Removed
 
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
+
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0
