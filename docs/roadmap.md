@@ -10,8 +10,9 @@ ideas and requests are welcome in [GitHub Issues](https://github.com/HoneyBearTe
 The project has just been rewritten from an interactive bash script for Ubuntu 14.04 to 20.04 (still in the
 git history, see the README) into Ansible playbooks: a hands-off Ubuntu Server 26.04 install on Proxmox VE
 VMs, GitHub SSH keys, and a baseline (SSH hardening, UFW, Fail2Ban, unattended upgrades) that also works on
-existing Ubuntu 24.04 and 26.04 servers. **v0.1.0** will be the first release of the Ansible version, signed
-and with an SBOM and build provenance.
+existing Ubuntu 24.04 and 26.04 servers. **v0.1.0** (October 2026) is the first release of the Ansible
+version, signed and with an SBOM and build provenance, and every playbook is covered by integration tests
+that run on each pull request.
 
 ## Over the following year
 

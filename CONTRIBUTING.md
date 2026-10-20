@@ -20,18 +20,25 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 What you need:
 
 - `git`, `make` and Python 3.11 or later (CI uses 3.12);
+- for the integration tests: Docker that can run privileged containers;
 - for trying changes for real: a Proxmox VE 8 or 9 node you can SSH into as root, an API token as described
   in [docs/installing.md](docs/installing.md), and a VM ID range and IP addresses you can throw away.
 
 ```sh
 git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git && cd ubuntu-server-auto-setup
 python3 -m venv .venv && . .venv/bin/activate
-make deps     # Python packages from requirements*.txt, collections from requirements.yml
+pip install --require-hashes -r requirements-ci.txt   # the exact, hash-pinned versions CI uses
+ansible-galaxy collection install -r requirements.yml
 make lint     # yamllint . and ansible-lint
 make syntax   # syntax-check playbooks/site.yml against inventory/hosts.example.yml
+make test     # integration tests against containers and a mock Proxmox API (docs/testing.md)
 ```
 
-Dependencies come only from `requirements.txt`, `requirements-dev.txt` and `requirements.yml`; how they're
+`make deps` installs the same packages from the version ranges in `requirements.txt` and
+`requirements-dev.txt` instead of the hash-pinned set.
+
+Dependencies come only from `requirements.txt`, `requirements-dev.txt` (resolved and hash-pinned for CI in
+`requirements-ci.txt`) and `requirements.yml`; how they're
 chosen and kept up to date is in [docs/dependencies.md](docs/dependencies.md). Nothing is compiled: a
 release is the tagged source, packaged by `.github/workflows/release.yml` (see
 [docs/verifying-releases.md](docs/verifying-releases.md)). How the playbooks and roles fit together is in

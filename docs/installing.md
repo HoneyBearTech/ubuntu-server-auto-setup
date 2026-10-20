@@ -31,7 +31,8 @@ git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.1.0   # the 
 git checkout v0.1.0
 ```
 
-There is no release of the Ansible version yet (v0.1.0 will be the first); until then, use `main`.
+The latest release is listed on the [releases page](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases);
+`main` has the newest changes, tested but not yet released.
 
 Then install the dependencies in a virtual environment:
 
