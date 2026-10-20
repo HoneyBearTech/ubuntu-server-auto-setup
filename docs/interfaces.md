@@ -169,7 +169,7 @@ needs to really create the VM, so it isn't meaningful there).
 
 ### The web UI
 
-The image `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (tags `X.Y.Z`, `X.Y` and `latest`, for
+The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `ghcr.io/honeybeartech/ubuntu-server-auto-setup` (tags `X.Y.Z`, `X.Y` and `latest`, for
 `linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
@@ -200,5 +200,6 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
-| GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) | The container image. |
+| Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |
+| Docker Hub API | the release workflow | HTTPS, an access token held in the `release` environment (version tags only) | Pushing the image and its description. |
 | The browser | the operator | HTTP on `127.0.0.1` (or HTTPS through a proxy), session cookie | The web UI. |

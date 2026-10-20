@@ -20,7 +20,7 @@
 [CmdletBinding()]
 param(
     [int]$Port = 8080,
-    [string]$Image = "ghcr.io/honeybeartech/ubuntu-server-auto-setup:latest",
+    [string]$Image = "honeybeartech/ubuntu-server-auto-setup:latest",
     [string]$Name = "usas",
     [string]$Volume = "usas-data",
     [switch]$Update,

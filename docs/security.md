@@ -97,7 +97,8 @@ and in [web-ui.md](web-ui.md#security).
   is pushed, and is signed with cosign, with an SBOM and SLSA provenance attached.
 - Every change is linted (yamllint, ansible-lint `production` profile), syntax-checked and scanned for
   secrets (gitleaks over the full history) before it can merge; workflows run with read-only tokens and
-  pinned actions.
+  pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
+  release runs for a `v*` tag (the `release` environment).
 
 ## What it does not protect against
 

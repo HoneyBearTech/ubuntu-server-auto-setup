@@ -8,7 +8,10 @@
 [![Fuzzing](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml)
 [![Installer ISO](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml)
 [![Release](https://img.shields.io/github/v/release/HoneyBearTech/ubuntu-server-auto-setup?sort=semver)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/latest)
-[![Container image](https://img.shields.io/badge/ghcr.io-ubuntu--server--auto--setup-2496ED?logo=docker&logoColor=white)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pkgs/container/ubuntu-server-auto-setup)
+[![Docker Hub](https://img.shields.io/docker/v/honeybeartech/ubuntu-server-auto-setup?sort=semver&logo=docker&logoColor=white&label=Docker%20Hub)](https://hub.docker.com/r/honeybeartech/ubuntu-server-auto-setup)
+[![Image size](https://img.shields.io/docker/image-size/honeybeartech/ubuntu-server-auto-setup?sort=semver&logo=docker&logoColor=white&label=image%20size)](https://hub.docker.com/r/honeybeartech/ubuntu-server-auto-setup/tags)
+[![Docker pulls](https://img.shields.io/docker/pulls/honeybeartech/ubuntu-server-auto-setup?logo=docker&logoColor=white)](https://hub.docker.com/r/honeybeartech/ubuntu-server-auto-setup)
+[![GHCR mirror](https://img.shields.io/badge/mirror-ghcr.io-2496ED?logo=github&logoColor=white)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pkgs/container/ubuntu-server-auto-setup)
 [![Platforms](https://img.shields.io/badge/runs_on-Windows_%7C_Linux_%7C_macOS-2496ED?logo=docker&logoColor=white)](docs/web-ui.md)
 [![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
 [![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
@@ -101,7 +104,7 @@ Anywhere else (or on Windows without the script):
 
 ```sh
 docker run -d --name usas --restart unless-stopped -p 127.0.0.1:8080:8080 -v usas-data:/data \
-  ghcr.io/honeybeartech/ubuntu-server-auto-setup
+  honeybeartech/ubuntu-server-auto-setup
 docker logs usas    # the setup code for the first sign-in
 ```
 

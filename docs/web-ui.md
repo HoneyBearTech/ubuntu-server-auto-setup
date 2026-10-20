@@ -1,6 +1,6 @@
 # The web UI and the container image
 
-The container image `ghcr.io/honeybeartech/ubuntu-server-auto-setup` holds everything the playbooks need
+The container image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub (mirrored to `ghcr.io/honeybeartech/ubuntu-server-auto-setup`) holds everything the playbooks need
 (ansible-core, the collections, the playbooks and roles) plus a small web UI that lays out the options as
 forms and runs the playbooks for you. It is the easiest way to use the project on Windows, and works the
 same on Linux and macOS: you need only Docker.
@@ -17,7 +17,7 @@ The UI holds a Proxmox API token and a root SSH key, so it listens on `127.0.0.1
 
 The image is published with each release from the first one that includes the web UI. Before that, or to
 run your own changes, build it from a checkout: `docker compose up -d --build`, or
-`docker build -t ghcr.io/honeybeartech/ubuntu-server-auto-setup .` before the commands below.
+`docker build -t honeybeartech/ubuntu-server-auto-setup .` before the commands below.
 
 **Windows** (Docker Desktop with the WSL 2 backend): download [`start.ps1`](../start.ps1) and run it in
 PowerShell:
@@ -36,7 +36,7 @@ cosign first, `-Stop` stops it, and `-Port 8081` uses another port.
 
 ```sh
 docker run -d --name usas --restart unless-stopped -p 127.0.0.1:8080:8080 -v usas-data:/data \
-  ghcr.io/honeybeartech/ubuntu-server-auto-setup
+  honeybeartech/ubuntu-server-auto-setup
 docker logs usas    # shows the setup code on the first start
 ```
 

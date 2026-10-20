@@ -44,13 +44,16 @@ Who can change the code, releases and project settings, as of the date of this f
 | --- | --- | --- |
 | Repository administration (settings, rulesets, secrets, merging) | the maintainer (@HoneyBearTech) | GitHub account owner |
 | Publishing releases | the release workflow, on a version tag pushed by the maintainer | GitHub Actions, short-lived `GITHUB_TOKEN` and Sigstore identity |
+| The container image on Docker Hub (`honeybeartech/ubuntu-server-auto-setup`) and its GHCR mirror | the maintainer (Docker Hub account `honeybeartech`, GitHub account); the release workflow pushes | a Docker Hub access token (read and write) in the `release` environment; `GITHUB_TOKEN` for GHCR |
 | Signing version tags | the maintainer | personal SSH key |
 | The [OpenSSF Best Practices entry](https://www.bestpractices.dev/projects/15740) | the maintainer | GitHub sign-in |
 | Security advisories and private vulnerability reports | the maintainer | GitHub |
 | Automated changes | Dependabot (pull requests only). Its patch and minor updates are approved by `.github/workflows/dependabot-auto-merge.yml`, which runs only for Dependabot's own pull requests, and merge only after every required check passes | GitHub |
 
-There are no other collaborators, and no repository secrets: workflows use only the per-job
-`GITHUB_TOKEN`, read-only unless a job asks for more.
+There are no other collaborators. Workflows use the per-job `GITHUB_TOKEN`, read-only unless a job asks
+for more. The only stored secrets are the Docker Hub user name and access token, held in the `release`
+environment: only workflow runs for a `v*` tag can deploy to it, and only the release workflow's image job
+uses it, so no pull request, branch or other workflow can read them. There are no repository-wide secrets.
 
 ## Granting elevated access
 
@@ -70,20 +73,25 @@ this review:
 
 The credentials the project (not your deployment) holds, and how they're handled:
 
-- **What exists**: the maintainer's GitHub account and its recovery codes, and the SSH key that signs
-  tags. Releases are signed keylessly (Sigstore), so there is no long-lived signing key, and workflows
-  need no stored secrets.
+- **What exists**: the maintainer's GitHub account and its recovery codes, the SSH key that signs tags,
+  the Docker Hub account `honeybeartech` and its two-factor recovery codes, and one Docker Hub access token
+  (read and write, for this repository only) that the release workflow uses. Releases and images are signed
+  keylessly (Sigstore), so there is no long-lived signing key.
 - **Storage**: in the maintainer's password manager, never in the repository, CI configuration, issues or
-  logs. GitHub secret scanning with push protection blocks committed secrets, gitleaks scans every change
+  logs. The Docker Hub token is also stored as a secret of the `release` environment, which only `v*` tags
+  can deploy to. GitHub secret scanning with push protection blocks committed secrets, gitleaks scans every change
   and the whole history in CI, and `.gitignore` excludes real inventories, Vault files, vault password
   files, keys and `.env` files.
 - **Access**: the maintainer only, plus the successor through the lockbox described under Continuity.
 - **Rotation**: recovery codes are regenerated after use and at least yearly, and the lockbox updated;
-  the tag-signing key is replaced (and `.github/allowed_signers` updated) if it may have been exposed.
+  the tag-signing key is replaced (and `.github/allowed_signers` updated) if it may have been exposed;
+  the Docker Hub token is rotated at least yearly and after any doubt (create a new one, update the
+  `release` environment, revoke the old one).
   Any secret that might have leaked is revoked and replaced at once, and the incident handled as in
   [SECURITY.md](SECURITY.md).
-- If the project ever needs a stored secret in CI, it goes into GitHub encrypted secrets or an environment
-  with required reviewers, available only to the job that needs it, with this section updated.
+- Any further secret CI needs goes into a GitHub environment restricted to the refs that need it (and with
+  required reviewers where a run could be triggered without the maintainer), available only to the job
+  that uses it, with this section updated.
 
 Your own secrets (the Vault password, the Proxmox API token, the admin password) never leave your
 control node and your Proxmox nodes; the project has no access to them.
@@ -97,8 +105,9 @@ within a week of it being confirmed that the maintainer can no longer support it
   trusted person the maintainer has chosen can open through the password manager's **emergency access**,
   after a waiting period of a few days (short enough to act within the week). It holds the login and
   two-factor recovery codes of the GitHub account that owns the repository, access to that account's
-  email address (GitHub asks it to confirm sign-ins from new devices), and the SSH key that signs release
-  tags. Release files are signed keylessly by GitHub Actions, so whoever controls the repository can keep
+  email address (GitHub asks it to confirm sign-ins from new devices), the SSH key that signs release
+  tags, and the login and two-factor recovery codes of the Docker Hub account `honeybeartech` that
+  publishes the image. Release files are signed keylessly by GitHub Actions, so whoever controls the repository can keep
   publishing verifiable releases.
 - **A succession note**, kept with the maintainer's personal papers and referenced from the lockbox, gives
   that person the right to continue the project or to hand it to a new maintainer.

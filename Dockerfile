@@ -1,6 +1,6 @@
 # The web UI image: ansible-core, the collections, the playbooks and roles, and the web UI, running as a
 # non-root user with everything it writes in /data. Build it with `docker build -t usas .`; run it as in the
-# README: docker run -d -p 127.0.0.1:8080:8080 -v usas-data:/data ghcr.io/honeybeartech/ubuntu-server-auto-setup
+# README: docker run -d -p 127.0.0.1:8080:8080 -v usas-data:/data honeybeartech/ubuntu-server-auto-setup
 # Base images are pinned by digest; Dependabot keeps them current (.github/dependabot.yml).
 
 FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS build
