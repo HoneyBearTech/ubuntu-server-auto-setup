@@ -1,0 +1,40 @@
+---
+name: Dependabot auto-merge
+
+# Dependabot's patch and minor updates merge on their own once every required check passes: this job
+# approves them (main requires one approval) and turns on auto-merge. Major updates, and updates without a
+# semver level (such as image digests), wait for the maintainer. The job runs again on every push to the
+# pull request, so an approval dismissed by a rebase is renewed.
+on: pull_request  # yamllint disable-line rule:truthy
+
+permissions:
+  contents: read
+
+jobs:
+  dependabot:
+    name: Approve and auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Both the pull request's author and the actor that triggered this run must be Dependabot.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write # enable auto-merge
+      pull-requests: write # approve
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Approve and enable auto-merge for patch and minor updates
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE: ${{ steps.metadata.outputs.dependency-names }} (${{ steps.metadata.outputs.update-type }})
+        run: |
+          gh pr review --approve --body "Automatic approval: ${UPDATE}. Merges once the required checks pass." "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"

@@ -47,9 +47,12 @@ the playbooks. Hash-pinned lock files for CI are on the [roadmap](roadmap.md).
 
 ## Tracking dependencies
 
-- **Dependabot** proposes updates weekly for `requirements*.txt` and the GitHub Actions, and security
-  updates as soon as an advisory appears. Each update is merged by the maintainer after the required checks
-  pass and, for runtime packages, a run against a disposable VM.
+- **Dependabot** proposes updates weekly for `requirements*.txt`, the GitHub Actions and the test images,
+  and security updates as soon as an advisory appears. Patch and minor updates are approved by
+  `.github/workflows/dependabot-auto-merge.yml` and merge automatically once every required check passes,
+  including the integration tests that run every playbook. Major updates, and updates without a version
+  level (image digests), wait for the maintainer, who also tries runtime-package majors against a
+  disposable VM.
 - **Ansible collections** have no Dependabot support. The maintainer checks the collections' changelogs
   and security advisories at least monthly and before every release, and widens the ranges in
   `requirements.yml` when a new major version has been tested.
