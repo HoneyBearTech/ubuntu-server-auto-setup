@@ -93,6 +93,10 @@ The project's own code is MIT. Python dependencies must use one of these license
   (`ansible-lint`, `yamllint`) and collections only**: the project exists to be run by Ansible, which loads
   the playbooks as data; nothing from those packages is copied into this repository or its releases.
 
+One package is listed by name because its license is misdetected: `typing-extensions` is under
+`PSF-2.0`, but GitHub's license data reads the license history in its `LICENSE` file as GPL. It reaches CI
+only as a dependency of the lint tools.
+
 Any other license, a missing license, or a new GPL dependency other than those is a violation: the
 dependency review check fails, and the dependency isn't added until the maintainer has decided, in the
 pull request, to replace it or to extend this list (with the reason).
