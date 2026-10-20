@@ -1,0 +1,14 @@
+# Only what the image needs (Dockerfile): everything else stays out of the build context.
+*
+!ansible.cfg
+!LICENSE
+!requirements.txt
+!requirements-webui.in
+!requirements-webui.txt
+!requirements.yml
+!playbooks/
+!roles/
+!inventory/hosts.example.yml
+!inventory/vault.example.yml
+!webui/usas_web/
+**/__pycache__

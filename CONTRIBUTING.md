@@ -19,8 +19,8 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 What you need:
 
-- `git`, `make` and Python 3.11 or later (CI uses 3.12);
-- for the integration tests: Docker that can run privileged containers;
+- `git`, `make` and Python 3.11 or later (CI and the container image use 3.12);
+- for the integration tests, the image and its smoke test: Docker that can run privileged containers;
 - for trying changes for real: a Proxmox VE 8 or 9 node you can SSH into as root, an API token as described
   in [docs/installing.md](docs/installing.md), and a VM ID range and IP addresses you can throw away.
 
@@ -29,20 +29,24 @@ git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git && cd ub
 python3 -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-ci.txt   # the exact, hash-pinned versions CI uses
 ansible-galaxy collection install -r requirements.yml
-make lint     # yamllint . and ansible-lint
-make syntax   # syntax-check playbooks/site.yml against inventory/hosts.example.yml
-make test     # integration tests against containers and a mock Proxmox API (docs/testing.md)
+make lint        # yamllint ., ansible-lint and ruff check
+make syntax      # syntax-check playbooks/site.yml against inventory/hosts.example.yml
+make test        # integration tests against containers and a mock Proxmox API (docs/testing.md)
+make webui-test  # the web UI's unit tests
+make ui          # the web UI from this checkout on http://localhost:8080 (data in .webui-data/)
+make smoke       # build the image and smoke-test it (needs Docker)
 ```
 
-`make deps` installs the same packages from the version ranges in `requirements.txt` and
-`requirements-dev.txt` instead of the hash-pinned set.
+`make deps` installs the same packages from the version ranges in `requirements.txt`,
+`requirements-dev.txt` and `requirements-webui.in` instead of the hash-pinned set.
 
-Dependencies come only from `requirements.txt`, `requirements-dev.txt` (resolved and hash-pinned for CI in
-`requirements-ci.txt`) and `requirements.yml`; how they're
-chosen and kept up to date is in [docs/dependencies.md](docs/dependencies.md). Nothing is compiled: a
-release is the tagged source, packaged by `.github/workflows/release.yml` (see
-[docs/verifying-releases.md](docs/verifying-releases.md)). How the playbooks and roles fit together is in
-[docs/architecture.md](docs/architecture.md).
+Dependencies come only from `requirements.txt`, `requirements-dev.txt`, `requirements-webui.in` and
+`requirements.yml` (CI and the image install the hash-pinned `requirements-ci.txt` and
+`requirements-webui.txt` compiled from them); how they're chosen and kept up to date is in
+[docs/dependencies.md](docs/dependencies.md). Nothing is compiled: a release is the tagged source and the
+container image built from the `Dockerfile`, both packaged by `.github/workflows/release.yml` (see
+[docs/verifying-releases.md](docs/verifying-releases.md)). How the playbooks, roles and web UI fit
+together is in [docs/architecture.md](docs/architecture.md).
 
 ## When and how tests run
 
@@ -52,11 +56,15 @@ release is the tagged source, packaged by `.github/workflows/release.yml` (see
 | ansible-lint | Ansible best practices with the `production` profile in `.ansible-lint`: FQCN modules, named tasks, idempotence hints, risky permissions and shell use, secrets without `no_log` | `ansible-lint` (part of `make lint`) | every pull request and push to `main` (required) |
 | Syntax check | every playbook parses, every role and module resolves | `make syntax` | every pull request and push to `main` (required) |
 | gitleaks | no secrets in the change or anywhere in the history | `gitleaks git .` | every pull request and push to `main` (required) |
-| CodeQL | the GitHub Actions workflows (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
+| ruff | the web UI's Python: style, bugs and bandit's security rules, as configured in `ruff.toml` | `ruff check` (part of `make lint`) | every pull request and push to `main` (required, in "Lint + syntax check") |
+| hadolint | the Dockerfile | `docker run --rm -i hadolint/hadolint < Dockerfile` | every pull request and push to `main` (required, in "Lint + syntax check") |
+| CodeQL | the GitHub Actions workflows and the Python code (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
 | osv-scanner | known vulnerabilities in every requirements file, including the lower bounds and what they pull in | `docker run --rm -v "$PWD:/src:ro" ghcr.io/google/osv-scanner scan source -r /src` | every pull request and push to `main` (required) |
 | Dependency review | new or changed dependencies with known vulnerabilities or disallowed licenses | n/a | every pull request |
 | DCO | every commit is signed off | `git log` | every pull request (required) |
 | Integration tests | every playbook end to end: the installer ISO is remastered, VMs are created and installed through a mock Proxmox API (including a failed install that must clean up), and the baseline is applied to an Ubuntu 26.04 container and checked (SSH settings, firewall rules, Fail2Ban jail, sudo, refused password and root logins, key sync, port change). Every playbook must change nothing on a second run, and at least 80% of role tasks must run | `make test` (needs Docker) | every pull request and push to `main` (required) |
+| Web UI tests | the web UI's sign-in, guards, forms and validation against the roles' patterns, the inventory and Vault it writes, runs, and the pages' accessibility structure; at least 80% statement coverage | `make webui-test` | every pull request and push to `main` |
+| Image smoke test | the container image, driven like a browser against the mock Proxmox API, with a real playbook run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and before a release image is pushed |
 | Fuzzing | the templates and expressions that turn inventory values into files and commands, with arbitrary inputs (Atheris) | `make fuzz` (Linux x86-64) | every pull request and push to `main`, longer weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
 | Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy |
@@ -76,6 +84,17 @@ can't be merged.
   and `no_log: true` on every task that handles a password, hash, token or key.
 - **YAML**: [yamllint](https://yamllint.readthedocs.io/) with the rules in `.yamllint` (lines up to 140
   characters, `true`/`false` only, quoted octal modes such as `"0644"`).
+- **Python** (the web UI and its smoke test): [ruff](https://docs.astral.sh/ruff/) with the rules in
+  `ruff.toml` (pycodestyle, pyflakes, bugbear, bandit's security rules, pyupgrade, import order; lines up to
+  120 characters). Subprocesses take argument lists, never `shell=True`; secrets are never logged or sent
+  back to the browser.
+- **Dockerfile**: [hadolint](https://github.com/hadolint/hadolint); base images pinned by digest, Python
+  packages installed with `--require-hashes`, a non-root `USER`.
+- **Web UI pages**: server-rendered, working without JavaScript, with native form controls, a visible
+  label for every control and help and errors tied to it with `aria-describedby`; no inline script or
+  style (the Content Security Policy forbids them); see [docs/accessibility.md](docs/accessibility.md).
+- **Web UI fields**: a field for a role variable names it and takes its default and allowlist pattern from
+  the role (`webui/usas_web/schema.py`); don't copy a role's pattern or default into the UI.
 - **Roles**: every variable a role reads is listed in its `defaults/main.yml` with a comment saying what it
   does; variables that form the inventory interface (`admin_user`, `github_user`, `ssh_port`, ...) keep
   their short names and are documented in [docs/interfaces.md](docs/interfaces.md) and the README.
@@ -95,15 +114,18 @@ can't be merged.
   playbook or role does must add or extend a case in the integration tests (`tests/`, see
   [docs/testing.md](docs/testing.md)) covering what should happen and, where it applies, what should be
   refused, and must keep `make lint`, `make syntax` and `make test` passing, including the 80% task coverage
-  floor. This is mandatory: the maintainer doesn't merge behaviour changes without them.
+  floor. A change to the web UI or the image must add or extend a test in `webui/tests/` (and in the smoke
+  test, for what only the image shows) and keep `make webui-test` above 80% statement coverage and
+  `make smoke` passing. This is mandatory: the maintainer doesn't merge behaviour changes without them.
 - **Bug fixes must add a regression test** to the integration tests that fails without the fix, unless the
   bug can only happen on real hardware or a real Proxmox node; then the pull request says why and how the
   fix was verified.
 - **Changes the containers can't show** (a real install, `cloud-init`, the QEMU guest agent, reboots) are
   also run against a disposable VM on a real Proxmox node, and the pull request describes that run: the
   commands, the Proxmox VE and Ubuntu versions, and that a second run reported no changes.
-- Security-relevant changes (SSH, firewall, users, secrets, disk handling) must show that the protection
-  still works, for example that password SSH and root login are refused after the change.
+- Security-relevant changes (SSH, firewall, users, secrets, disk handling, and the web UI's sign-in,
+  sessions, CSRF and host checks) must show that the protection still works, for example that password
+  SSH and root login are refused after the change, or that a cross-site form post is refused.
 
 ## Developer Certificate of Origin
 
@@ -128,7 +150,8 @@ A check on every pull request fails if a commit lacks the sign-off. To fix it, a
   same checks pass. Dependabot's patch and minor updates are approved by a workflow.
 - Keep each pull request focused on one change, and describe what it does and why.
 - Update `README.md`, `docs/` and the role's `defaults/main.yml` when you change a variable or user-visible
-  behaviour, and add a line to `CHANGELOG.md` under "Unreleased".
+  behaviour (and the web UI's field in `webui/usas_web/schema.py` if it has one), and add a line to
+  `CHANGELOG.md` under "Unreleased".
 - Follow the [coding standards](#coding-standards) and the [test policy](#test-policy), and sign off your
   commits ([DCO](#developer-certificate-of-origin)).
 - Never commit secrets, a real inventory, a plaintext Vault file, vault password files or `.env` files.

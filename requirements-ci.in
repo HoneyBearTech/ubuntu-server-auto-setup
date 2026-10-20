@@ -1,5 +1,6 @@
-# The exact, hash-pinned set CI installs (requirements-ci.txt). Regenerate after changing either file:
+# The exact, hash-pinned set CI installs (requirements-ci.txt). Regenerate after changing any of these files:
 #   docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c \
 #     "pip install -q pip-tools && pip-compile --generate-hashes --allow-unsafe --strip-extras -o requirements-ci.txt requirements-ci.in"
 -r requirements.txt
 -r requirements-dev.txt
+-r requirements-webui.in

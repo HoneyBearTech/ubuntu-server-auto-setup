@@ -1,10 +1,11 @@
 ---
 name: CI
 
-# Every pull request and push to main: YAML and Ansible lint, a syntax check of every playbook, the workflow
-# linter, a secret scan over the whole history, and the integration tests (the playbooks run against
-# containers and a mock Proxmox API; see docs/testing.md). The job names are the required status checks in
-# the main branch ruleset; keep them stable.
+# Every pull request and push to main: YAML, Ansible, Python and Dockerfile lint, a syntax check of every
+# playbook, the workflow linter, a secret scan over the whole history, the integration tests (the playbooks
+# run against containers and a mock Proxmox API), the web UI's unit tests, and a smoke test of the container
+# image (see docs/testing.md). The job names are the required status checks in the main branch ruleset; keep
+# them stable.
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
@@ -53,6 +54,16 @@ jobs:
           docker run --rm -v "$PWD:/repo:ro" -w /repo
           rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
+      # The web UI's Python, with the rules in ruff.toml (including bandit's security checks).
+      - name: Lint Python (ruff)
+        run: ruff check --output-format github
+
+      - name: Lint the Dockerfile (hadolint)
+        run: >-
+          docker run --rm -i
+          hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+          < Dockerfile
+
   test:
     name: Integration tests
     runs-on: ubuntu-latest
@@ -96,6 +107,59 @@ jobs:
           docker run --rm -v "$PWD:/src:ro"
           ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
           scan source -r /src
+
+  webui:
+    name: Web UI tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install the packages (hash-pinned)
+        run: python -m pip install --require-hashes -r requirements-ci.txt
+
+      # Unit tests of the web UI against the real roles and ansible-core; fails below 80% statement coverage
+      # (webui/pytest.ini).
+      - name: Run the unit tests
+        working-directory: webui
+        run: python -m pytest
+
+  image:
+    name: Image smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Builds the image from this checkout, starts it next to the mock Proxmox API (tests/mock_pve.py) and
+      # drives the web UI: first-run setup, sign-in, the connection test with the CA, saving every page, and
+      # a provisioning run through ansible-playbook that the mock answers.
+      - name: Build the image and run the smoke test
+        run: tests/webui-smoke.sh
+
+      # The Windows start script, with PowerShell 7 on Linux (Windows runners can't run Linux containers):
+      # creates the container from the image just built, shows the setup code, starts it again, stops it.
+      - name: Start it with start.ps1
+        shell: pwsh
+        run: |
+          $first = ./start.ps1 -Image usas:smoke -NoBrowser -Port 18090 -Name usas-ps -Volume usas-ps-data *>&1 | Out-String
+          Write-Output $first
+          if ($first -notmatch 'setup code: [A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}') { throw "no setup code" }
+          $again = ./start.ps1 -Image usas:smoke -NoBrowser -Port 18090 -Name usas-ps -Volume usas-ps-data *>&1 | Out-String
+          if ($again -notmatch 'http://localhost:18090') { throw "second start failed: $again" }
+          ./start.ps1 -Name usas-ps -Stop
+          docker rm -f usas-ps
+          docker volume rm usas-ps-data
 
   secrets:
     name: Secret scan (gitleaks)

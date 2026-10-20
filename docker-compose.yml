@@ -1,0 +1,26 @@
+---
+# The web UI with Docker Compose: docker compose up -d, then open http://localhost:8080.
+# The setup code for the first sign-in is in the log: docker compose logs usas
+# To build the image from this checkout instead of pulling it: docker compose up -d --build
+services:
+  usas:
+    image: ghcr.io/honeybeartech/ubuntu-server-auto-setup:latest
+    build: .
+    container_name: usas
+    restart: unless-stopped
+    # Localhost only. Before publishing it anywhere else, read "Exposing it" in docs/web-ui.md.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - usas-data:/data
+    # Hardening: nothing but /data, /tmp and the home directory is writable, no capabilities, no setuid.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/usas:uid=10001,gid=10001,mode=0700
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  usas-data:

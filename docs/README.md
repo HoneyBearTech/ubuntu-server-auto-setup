@@ -15,7 +15,10 @@
 - [Installing](installing.md): what you need, the Proxmox API token and its privileges, the inventory and
   the Vault, and uninstalling.
 - [Upgrading, backups and rotating secrets](upgrading.md).
-- [Verifying releases](verifying-releases.md): check the signatures, checksums, provenance and tags.
+- [Verifying releases](verifying-releases.md): check the signatures, checksums, provenance and tags, and
+  the container image.
+- [The web UI and the container image](web-ui.md): run everything from Docker on Windows, Linux or macOS,
+  with forms for every option.
 
 ## Using it
 
@@ -28,6 +31,7 @@ their defaults.
 
 - [Architecture](architecture.md), [external interfaces](interfaces.md),
   [security requirements](security.md) and the [assurance case](assurance-case.md).
+- [Accessibility](accessibility.md) of the web UI: what is checked and the known gaps.
 - [Testing](testing.md): the integration tests, how to run them and how to add a case.
 - [Dependencies and vulnerability management](dependencies.md): how dependencies are chosen and tracked,
   and the remediation policies for dependency and static-analysis findings.

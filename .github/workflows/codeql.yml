@@ -2,8 +2,8 @@
 name: CodeQL
 
 # CodeQL has no analysis for YAML or Ansible, so it analyses the GitHub Actions workflows themselves
-# (injection of untrusted event data, excessive permissions, unpinned actions) and the Python helpers of the
-# integration tests. The playbooks are covered by ansible-lint in checks.yml.
+# (injection of untrusted event data, excessive permissions, unpinned actions), the web UI (webui/) and the
+# Python helpers of the tests. The playbooks are covered by ansible-lint in checks.yml.
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # actions: the workflows. python: the integration-test helpers in tests/ (mock API, coverage).
+        # actions: the workflows. python: the web UI (webui/) and the test helpers in tests/.
         language: [actions, python]
     permissions:
       security-events: write

@@ -1,9 +1,12 @@
 # Architecture
 
 ubuntu-server-auto-setup is a set of Ansible playbooks and roles run from one machine, the control node.
-It has no server, daemon, database or agent of its own: each run reads the inventory and the Vault, talks
-to Proxmox and the servers, and exits. The security reasoning behind this design is in the
-[assurance case](assurance-case.md); the interfaces it uses are listed in [interfaces.md](interfaces.md).
+The playbooks have no server, daemon, database or agent of their own: each run reads the inventory and the
+Vault, talks to Proxmox and the servers, and exits. The control node can be your own machine with a
+checkout, or the project's container image, whose small web UI writes the inventory and the Vault and runs
+the same playbooks ([below](#the-web-ui-and-the-container-image)). The security reasoning behind this
+design is in the [assurance case](assurance-case.md); the interfaces it uses are listed in
+[interfaces.md](interfaces.md).
 
 ## Components
 
@@ -36,6 +39,8 @@ to Proxmox and the servers, and exits. The security reasoning behind this design
 | `ssh_hardening` | The sshd drop-in, the optional port change and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
 | `fail2ban` | The `sshd` jail. | `roles/fail2ban/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
+| Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
+| Container image | ansible-core, the collections, the playbooks and roles, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
 
 ## How a server is built
 
@@ -97,6 +102,48 @@ For each host, after checking that the required variables are set:
 `site.yml` runs the three playbooks in that order. `make keys` runs only the `ssh_keys` tasks of the
 baseline.
 
+## The web UI and the container image
+
+```text
+ browser ──HTTP, 127.0.0.1:8080──▶ container "usas" (UID 10001)                 /data volume
+ (sign-in, forms, live log)        ┌──────────────────────────────────────┐      ────────────
+                                   │ uvicorn + FastAPI (usas_web)         │────▶ inventory/hosts.yml
+                                   │   pages, sign-in, CSRF, host check   │      inventory/group_vars/all/
+                                   │   schema: fields from roles/*/       │        vault.yml (Ansible Vault)
+                                   │     defaults and vars                │      .vault-pass
+                                   │   runner ──argv──▶ ansible-playbook ─┼──▶   ssh/ (key, known_hosts)
+                                   │   ssh-keyscan, ssh (host key, CA)    │      pve-ca.pem, ca-bundle.pem
+                                   │ /app: ansible.cfg, playbooks, roles, │      auth.json, runs/
+                                   │       collections                    │
+                                   └──────────────────────────────────────┘
+                                     │ the same connections as the control node above:
+                                     └─▶ Proxmox API (HTTPS), Proxmox node and servers (SSH), github.com
+```
+
+| Part | What it does | Where |
+| --- | --- | --- |
+| `schema.py` | Builds the form fields from the roles: each field's default and help text from `roles/<role>/defaults/main.yml`, its allowlist pattern or allowed values from `roles/<role>/vars/main.yml`. Fails at startup if a field names a variable or pattern no role has. | `webui/usas_web/schema.py` |
+| `store.py` | Reads and writes `inventory/hosts.yml` (every typed value tagged `!unsafe`, so Ansible never templates it) and the Vault-encrypted `vault.yml`, atomically, mode `0600`. | `webui/usas_web/store.py` |
+| `auth.py` | The password (argon2id), the first-run setup code, in-memory sessions, CSRF tokens, throttling of failed sign-ins. | `webui/usas_web/auth.py` |
+| `runner.py` | Runs `ansible-playbook` with an argument list, one run at a time, writes the output (with the Vault's values masked) and the run's details to `runs/`. | `webui/usas_web/runner.py` |
+| `sshkeys.py`, `remote.py` | The UI's key pair, scanning and trusting the node's host key, the cluster CA; the Proxmox connection test and the GitHub keys preview. | `webui/usas_web/` |
+| `main.py`, `templates/`, `static/` | The pages (server-rendered HTML that works without JavaScript), the guard middleware (allowed hosts, sessions, Origin checks, security headers), the live log as server-sent events. | `webui/usas_web/` |
+
+How a run works: the page posts the form; the runner checks the limit against the inventory's host and
+group names and starts `ansible-playbook -i /data/inventory/hosts.yml --vault-password-file
+/data/.vault-pass [--check] [--diff] [--limit=...] playbooks/<playbook>.yml` from `/app`, with
+`ANSIBLE_CONFIG=/app/ansible.cfg` and, if a cluster CA was saved, `SSL_CERT_FILE` and
+`REQUESTS_CA_BUNDLE` pointing at the bundle with that CA. The inventory points Ansible at the UI's key
+(`ansible_ssh_private_key_file`) and its `known_hosts` (`StrictHostKeyChecking=yes`), and adds the UI's
+public key to `admin_extra_ssh_keys`, so the baseline can log in to the servers it installed. The browser
+follows the log through `/runs/<id>/stream`.
+
+The image is built in two stages from `python:3.12-slim` (pinned by digest): the first installs the
+hash-pinned `requirements-webui.txt` (wheels only) into a virtual environment and the collections from
+`requirements.yml`; the second adds `openssh-client` and `tzdata`, the security updates published since the
+base image, the playbooks, roles and web UI, and runs as UID 10001 with everything it writes in `/data`.
+Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
+
 ## Key properties
 
 - **Idempotent and safe to rerun.** Existing VMs are never touched by provisioning; the ISO is downloaded
@@ -122,3 +169,5 @@ baseline.
 | `community.proxmox` and the Proxmox API with a token | A token with a narrow role instead of root credentials for VM management; the `uri` module covers what the collection doesn't (start, status, detach). |
 | UFW, Fail2Ban, OpenSSH drop-ins, unattended-upgrades | The tools Ubuntu ships and documents, so the result is ordinary, inspectable Ubuntu configuration. |
 | GitHub `.keys` endpoint | One place to manage the keys for every server; removing a key there removes it everywhere at the next sync. |
+| FastAPI with server-rendered Jinja pages, a few lines of plain JavaScript | A small UI with no front-end build, no bundled third-party JavaScript, and a strict Content Security Policy; the same Python and Jinja as Ansible itself. |
+| One container image with Docker volumes | Runs the same on Windows (Docker Desktop with WSL 2), Linux and macOS; Ansible doesn't run natively on Windows. |

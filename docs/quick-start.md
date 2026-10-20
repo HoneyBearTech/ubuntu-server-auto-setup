@@ -9,6 +9,10 @@ You need: a Linux or macOS machine with Python 3.11+ and `git`; root SSH access 
 8 or 9 node; a free VM ID and a free static IP address; and your SSH public keys on your GitHub account
 (check `https://github.com/<you>.keys`).
 
+> [!TIP]
+> On Windows, or if you'd rather fill in forms than YAML, use the container image and its web UI instead:
+> the same steps in a browser, with only Docker to install. See [web-ui.md](web-ui.md).
+
 ## 1. Get the code
 
 ```sh
