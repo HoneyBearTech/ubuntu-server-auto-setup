@@ -8,8 +8,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Upgrading
+
+- **ansible-core 2.20.7 or later is now required** (was 2.19 or 2.20). Older versions are affected by
+  CVE-2026-11332, an argument injection in `ansible-galaxy role install`. Run `make deps` (or
+  `pip install -r requirements.txt`) to upgrade.
+
 ### Security
 
+- The minimum versions in `requirements.txt` now exclude releases with known vulnerabilities:
+  ansible-core 2.20.7 (CVE-2026-11332), requests 2.34.2 (CVE-2024-47081, CVE-2026-25645) and idna 3.15
+  (PYSEC-2026-215). CI already used fixed versions; this protects `make deps` installs into an environment
+  that has older copies. CI now scans the requirement files with osv-scanner on every change.
 - Values that reach a configuration file or a shell command are now validated against allowlist patterns
   before anything changes: the admin user name and host names (used in the installer's root shell
   commands and the sudoers file name), IPv4 addresses, `ssh_allow_users`, `ssh_permit_root_login`,

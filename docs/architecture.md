@@ -116,7 +116,7 @@ baseline.
 
 | Choice | Why |
 | --- | --- |
-| Ansible (ansible-core 2.19+) | Agentless over SSH, idempotent modules, and Ansible Vault for the few secrets. No controller to run. |
+| Ansible (ansible-core 2.20) | Agentless over SSH, idempotent modules, and Ansible Vault for the few secrets. No controller to run. |
 | Ubuntu autoinstall (Subiquity) with a NoCloud seed ISO | Ubuntu's own unattended installer; a local seed needs no web server and exposes nothing on the network. |
 | Remastering with `xorriso` | Adds one kernel argument while keeping Ubuntu's signed boot chain and boot records; no custom kernel or initrd. |
 | `community.proxmox` and the Proxmox API with a token | A token with a narrow role instead of root credentials for VM management; the `uri` module covers what the collection doesn't (start, status, detach). |

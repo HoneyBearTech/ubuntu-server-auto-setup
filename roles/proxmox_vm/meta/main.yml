@@ -3,7 +3,7 @@ galaxy_info:
   author: HoneyBearTech
   description: Create a Proxmox VE VM and install Ubuntu Server on it with autoinstall
   license: MIT
-  min_ansible_version: "2.19"
+  min_ansible_version: "2.20"
   platforms:
     - name: Ubuntu
       versions: [all]

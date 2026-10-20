@@ -79,6 +79,24 @@ jobs:
       - name: Run the integration tests
         run: tests/run.sh
 
+  osv:
+    name: Vulnerability scan (OSV)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Every requirements file, including the lower bounds in requirements.txt and their transitive
+      # dependencies, against the OSV database (the same data OpenSSF Scorecard uses). Any known
+      # vulnerability fails the check.
+      - name: Known vulnerabilities in the dependency files
+        run: >-
+          docker run --rm -v "$PWD:/src:ro"
+          ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
+          scan source -r /src
+
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
