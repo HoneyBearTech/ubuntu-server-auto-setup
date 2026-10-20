@@ -3,7 +3,7 @@
 # README: docker run -d -p 127.0.0.1:8080:8080 -v usas-data:/data honeybeartech/ubuntu-server-auto-setup
 # Base images are pinned by digest; Dependabot keeps them current (.github/dependabot.yml).
 
-FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS build
+FROM python:3.15-slim@sha256:2da676046630d7bf14c6764ae1143dc7fa0377a53f94bf5a642f0b214aca5bce AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
 COPY requirements.txt requirements-webui.in requirements-webui.txt requirements.yml ./
@@ -15,7 +15,7 @@ RUN /opt/venv/bin/ansible-galaxy collection install -r requirements.yml -p /opt/
  && find /opt/collections -type d -name tests -prune -exec rm -rf {} + \
  && /opt/venv/bin/ansible-galaxy collection list -p /opt/collections > /opt/collections/VERSIONS.txt
 
-FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS runtime
+FROM python:3.15-slim@sha256:2da676046630d7bf14c6764ae1143dc7fa0377a53f94bf5a642f0b214aca5bce AS runtime
 # Security fixes published since the pinned base image. A release passes its run ID, so a build cache
 # can't reuse an older upgrade layer.
 ARG SECURITY_UPDATES=
