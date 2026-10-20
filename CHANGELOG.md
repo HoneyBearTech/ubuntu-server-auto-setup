@@ -18,6 +18,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   the installer. Inventory values come from the operator, so this is defence in depth.
 - The installer configuration is built as data and written with `to_nice_yaml`; characters outside
   Unicode's basic plane (such as an emoji in `admin_realname`) used to be mangled by JSON-encoding.
+- `ubuntu_iso_name` is checked before use: it becomes a path on the Proxmox node, so slashes, spaces and
+  line breaks are refused.
 - An entry of `admin_extra_ssh_keys` that contains a line break is split into separate lines instead of
   being written as one entry.
 

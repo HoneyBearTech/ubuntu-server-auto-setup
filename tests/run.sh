@@ -117,6 +117,7 @@ step "build-installer: remaster the ISO, then check a second run changes nothing
 play playbooks/build-installer.yml
 play --idempotent playbooks/build-installer.yml
 play tests/verify-installer.yml
+play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
