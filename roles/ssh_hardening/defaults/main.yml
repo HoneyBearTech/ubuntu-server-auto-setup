@@ -11,3 +11,5 @@ ssh_allow_agent_forwarding: false
 ssh_allow_tcp_forwarding: true   # editors' remote-SSH features need this
 # Limit who may log in over SSH. Empty means no AllowUsers line. Keep admin_user in it.
 ssh_allow_users: []
+# The control node file that gets a "[host]:port" entry when the SSH port changes.
+ssh_known_hosts_file: "~/.ssh/known_hosts"

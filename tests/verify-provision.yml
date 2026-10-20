@@ -1,0 +1,65 @@
+---
+- name: Verify what provisioning did through the API and on the node
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the VM that installed
+      vars:
+        vm: "{{ verify_api.json.data.vms['4061'] }}"
+      ansible.builtin.assert:
+        that:
+          - vm.config.name == 'srv-01'
+          - vm.config.bios == 'ovmf'
+          - vm.config.machine == 'q35'
+          - vm.config.scsihw == 'virtio-scsi-single'
+          - vm.config.efidisk0 is search('efitype=4m')
+          - vm.config.scsi0 is search('local-lvm:32')
+          - vm.config.net0 is search('bridge=vmbr0')
+          - "'ide2' not in vm.config and 'ide3' not in vm.config"
+          - vm.config.boot == 'order=scsi0'
+          - vm.config_updates[0].delete == 'ide2,ide3'
+          - vm.starts == 2
+          - vm.status == 'running'
+
+    - name: Check that the create call attached both ISOs
+      vars:
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form') | list }}"
+      ansible.builtin.assert:
+        that:
+          - create | length == 2
+          - create[0].ide2 == 'local:iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,media=cdrom'
+          - create[0].ide3 == 'local:iso/seed-srv-01.iso,media=cdrom'
+          - create[0].boot == 'order=scsi0;ide2'
+
+    - name: Check the VM whose install never finished
+      ansible.builtin.assert:
+        that:
+          - verify_api.json.data.vms['4099'].starts == 1
+
+    - name: Check that the new host key was trusted
+      ansible.builtin.command:
+        argv: [ssh-keygen, -F, "[127.0.0.1]:2201", -f, "{{ lookup('ansible.builtin.env', 'TEST_TMP') }}/known_hosts"]
+      changed_when: false
+
+- name: Verify the node has no seed files left
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Look for seed ISOs and seed directories
+      ansible.builtin.find:
+        paths: [/var/lib/vz/template/iso, /var/tmp/ubuntu-server-auto-setup]
+        patterns: ["seed-*"]
+        file_type: any
+      register: verify_seeds
+
+    - name: Check none are left (they hold the password hash)
+      ansible.builtin.assert:
+        that: verify_seeds.matched == 0
+        fail_msg: "Seed files left on the node: {{ verify_seeds.files | map(attribute='path') | list }}"

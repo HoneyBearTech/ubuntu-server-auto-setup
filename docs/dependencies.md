@@ -32,7 +32,9 @@ copied into the repository ("vendored").
 | Lint tools (ansible-lint, yamllint) | `requirements-dev.txt` | minimum versions | `pip install -r requirements-dev.txt` (`make deps`) |
 | Ansible collections (`community.proxmox`, `community.general`, `ansible.posix`) | `requirements.yml` | version ranges | `ansible-galaxy collection install -r requirements.yml` (`make deps`) |
 | CI actions | `.github/workflows/*.yml` | full commit SHAs | GitHub Actions |
-| CI container images (gitleaks, actionlint) | `.github/workflows/ci.yml` | image digests (`@sha256:…`) | Docker |
+| Python packages in CI (all of the above, resolved) | `requirements-ci.txt`, compiled from `requirements-ci.in` | exact versions with SHA-256 hashes (`pip install --require-hashes`) | CI and `make test` |
+| CI container images (gitleaks, actionlint) | `.github/workflows/checks.yml` | image digests (`@sha256:…`) | Docker |
+| Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test` |
 
 On the systems they manage, the playbooks install packages only from Ubuntu's and Debian's own archives
 (`apt`): `xorriso` on the Proxmox nodes; UFW, Fail2Ban, unattended-upgrades, qemu-guest-agent and a few

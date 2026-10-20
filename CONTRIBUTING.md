@@ -48,14 +48,12 @@ release is the tagged source, packaged by `.github/workflows/release.yml` (see
 | CodeQL | the GitHub Actions workflows (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
 | Dependency review | new or changed dependencies with known vulnerabilities or disallowed licenses | n/a | every pull request |
 | DCO | every commit is signed off | `git log` | every pull request (required) |
-| Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | not yet: see below |
+| Integration tests | every playbook end to end: the installer ISO is remastered, VMs are created and installed through a mock Proxmox API (including a failed install that must clean up), and the baseline is applied to an Ubuntu 26.04 container and checked (SSH settings, firewall rules, Fail2Ban jail, sudo, refused password and root logins, key sync, port change). Every playbook must change nothing on a second run, and at least 80% of role tasks must run | `make test` (needs Docker) | every pull request and push to `main` (required) |
+| Real installer ISO | the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
+| Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy |
 
 A pull request can only merge when the required checks pass. A failing check's log names the file, line and
-rule.
-
-There is no automated suite yet that runs the roles themselves; a [Molecule](https://ansible.readthedocs.io/projects/molecule/)
-scenario for the baseline is on the [roadmap](docs/roadmap.md). Until it lands, a change to what a role does
-is tested by hand on a disposable VM, as the test policy below describes.
+rule. How the integration tests are built, and how to add a case, is in [docs/testing.md](docs/testing.md).
 
 ## Coding standards
 
@@ -84,14 +82,17 @@ can't be merged.
 
 ## Test policy
 
-- **New or changed behaviour must be tested.** A pull request that adds or changes what a playbook or role
-  does must keep `make lint` and `make syntax` passing and must describe, in the pull request, a run
-  against a disposable VM: the commands, the Proxmox VE and Ubuntu versions, that a second run reported no
-  changes, and for baseline changes that you could still log in afterwards. Once the Molecule scenario
-  exists, such changes must add or extend a test case there, covering both what should happen and what
-  should be refused.
-- **Bug fixes** come with a regression check (a Molecule case, an `assert` task, or a lint rule) where
-  that is practical; otherwise the pull request says why and how the fix was verified.
+- **New or changed behaviour must come with automated tests.** A pull request that adds or changes what a
+  playbook or role does must add or extend a case in the integration tests (`tests/`, see
+  [docs/testing.md](docs/testing.md)) covering what should happen and, where it applies, what should be
+  refused, and must keep `make lint`, `make syntax` and `make test` passing, including the 80% task coverage
+  floor. This is mandatory: the maintainer doesn't merge behaviour changes without them.
+- **Bug fixes must add a regression test** to the integration tests that fails without the fix, unless the
+  bug can only happen on real hardware or a real Proxmox node; then the pull request says why and how the
+  fix was verified.
+- **Changes the containers can't show** (a real install, `cloud-init`, the QEMU guest agent, reboots) are
+  also run against a disposable VM on a real Proxmox node, and the pull request describes that run: the
+  commands, the Proxmox VE and Ubuntu versions, and that a second run reported no changes.
 - Security-relevant changes (SSH, firewall, users, secrets, disk handling) must show that the protection
   still works, for example that password SSH and root login are refused after the change.
 

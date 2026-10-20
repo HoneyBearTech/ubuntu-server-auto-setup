@@ -14,7 +14,7 @@
 
 - name: Fetch public SSH keys from GitHub
   ansible.builtin.uri:
-    url: "https://github.com/{{ github_user }}.keys"
+    url: "{{ github_keys_url }}"
     return_content: true
   register: pve_github_keys
   delegate_to: localhost
@@ -148,8 +148,8 @@
         validate_certs: "{{ pve_validate_certs }}"
       register: pve_vm_status
       until: pve_vm_status.json is defined and pve_vm_status.json.data.status == 'stopped'
-      retries: "{{ (vm_install_timeout | int) // 20 }}"
-      delay: 20
+      retries: "{{ (vm_install_timeout | int) // (vm_install_poll_interval | int) }}"
+      delay: "{{ vm_install_poll_interval | int }}"
       delegate_to: localhost
       become: false
       no_log: "{{ pve_hide_secrets }}"
@@ -207,7 +207,7 @@
 - name: Wait for SSH on {{ ansible_host }}
   ansible.builtin.wait_for:
     host: "{{ ansible_host }}"
-    port: 22
+    port: "{{ ansible_port | default(22) | int }}"
     search_regex: OpenSSH
     timeout: 600
   delegate_to: localhost
@@ -217,22 +217,28 @@
   when: provision_manage_known_hosts | bool
   delegate_to: localhost
   become: false
+  vars:
+    # ssh writes "[host]:port" for any port other than 22.
+    provision_known_hosts_name: >-
+      {{ ansible_host if (ansible_port | default(22) | int) == 22 else '[' ~ ansible_host ~ ']:' ~ (ansible_port | int) }}
   block:
     - name: Remove the stale host key
       ansible.builtin.known_hosts:
-        name: "{{ ansible_host }}"
+        path: "{{ provision_known_hosts_file }}"
+        name: "{{ provision_known_hosts_name }}"
         state: absent
 
     - name: Scan the new host key
       ansible.builtin.command:
-        argv: [ssh-keyscan, -T, "10", -t, ed25519, "{{ ansible_host }}"]
+        argv: [ssh-keyscan, -T, "10", -t, ed25519, -p, "{{ ansible_port | default(22) | string }}", "{{ ansible_host }}"]
       register: pve_host_key
       changed_when: false
       failed_when: pve_host_key.stdout | length == 0
 
     - name: Trust the new host key
       ansible.builtin.known_hosts:
-        name: "{{ ansible_host }}"
+        path: "{{ provision_known_hosts_file }}"
+        name: "{{ provision_known_hosts_name }}"
         key: "{{ pve_host_key.stdout_lines | select('match', '^[^#]') | first }}"
         state: present
 

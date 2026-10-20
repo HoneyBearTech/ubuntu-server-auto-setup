@@ -1,0 +1,22 @@
+---
+- name: Verify the remastered installer ISO
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Extract grub.cfg from the autoinstall ISO
+      ansible.builtin.command:
+        argv: [xorriso, -osirrox, "on", -indev, /var/lib/vz/template/iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,
+               -extract, /boot/grub/grub.cfg, /tmp/verify-grub.cfg]
+      changed_when: false
+
+    - name: Read it
+      ansible.builtin.slurp:
+        src: /tmp/verify-grub.cfg
+      register: verify_grub
+
+    - name: Check the kernel line and the timeout
+      ansible.builtin.assert:
+        that:
+          - (verify_grub.content | b64decode) is search('linux\\s+/casper/vmlinuz autoinstall\\s+---')
+          - (verify_grub.content | b64decode) is search('(?m)^set timeout=3$')
+          - (verify_grub.content | b64decode) is not search('timeout=30')

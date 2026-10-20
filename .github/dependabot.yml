@@ -22,3 +22,10 @@ updates:
       # different init.
       codeql-action:
         patterns: ["github/codeql-action*"]
+
+  # Base images of the integration-test containers (pinned by digest).
+  - package-ecosystem: "docker"
+    directories: ["/tests/images/pve-node", "/tests/images/ubuntu-target"]
+    schedule:
+      interval: "weekly"
+    assignees: ["HoneyBearTech"]

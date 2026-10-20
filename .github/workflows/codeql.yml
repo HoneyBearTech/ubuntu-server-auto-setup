@@ -2,8 +2,8 @@
 name: CodeQL
 
 # CodeQL has no analysis for YAML or Ansible, so it analyses the GitHub Actions workflows themselves
-# (injection of untrusted event data, excessive permissions, unpinned actions). The playbooks are covered by
-# ansible-lint in ci.yml.
+# (injection of untrusted event data, excessive permissions, unpinned actions) and the Python helpers of the
+# integration tests. The playbooks are covered by ansible-lint in checks.yml.
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
@@ -16,9 +16,14 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze (actions)
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # actions: the workflows. python: the integration-test helpers in tests/ (mock API, coverage).
+        language: [actions, python]
     permissions:
       security-events: write
       actions: read
@@ -30,9 +35,9 @@ jobs:
 
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          languages: actions
+          languages: ${{ matrix.language }}
           build-mode: none
 
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          category: "/language:actions"
+          category: "/language:${{ matrix.language }}"

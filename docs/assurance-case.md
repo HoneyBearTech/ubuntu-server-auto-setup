@@ -125,14 +125,17 @@ this kind:
 
 - **Static analysis on every pull request**: yamllint, ansible-lint with the `production` profile (which
   includes its security-relevant rules), a syntax check of every playbook, actionlint, and CodeQL for the
-  workflows. Any finding fails the check (`.github/workflows/ci.yml`, `.github/workflows/codeql.yml`).
+  workflows. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
 - **Secret scanning**: gitleaks over the whole history on every change, plus GitHub secret scanning with
   push protection.
 - **Dependency checks**: dependency review on pull requests and Dependabot alerts on `main`
   ([dependencies.md](dependencies.md)).
-- **Manual end-to-end runs**: behaviour changes are tried against a disposable VM on a real Proxmox node, as
-  the [test policy](../CONTRIBUTING.md#test-policy) requires; a Molecule scenario that runs the baseline in
-  CI is on the [roadmap](roadmap.md).
+- **Integration tests on every pull request**: every playbook runs against containers and a mock Proxmox
+  API, and the results are checked, including what must be refused (password and root logins, an empty key
+  list) and the cleanup of a failed install; every playbook must change nothing on a second run, and at
+  least 80% of role tasks must run ([testing.md](testing.md)). A weekly job remasters the real Ubuntu ISO.
+- **Manual end-to-end runs** for what containers can't show (a real install, reboots), as the
+  [test policy](../CONTRIBUTING.md#test-policy) requires.
 - **Runtime checks inside the playbooks**: assertions on required variables, on the ISO checksum, on the
   remastered GRUB configuration, on a non-empty key list and on `ssh_allow_users`; `sshd -t` and `visudo`
   validation before files are installed.

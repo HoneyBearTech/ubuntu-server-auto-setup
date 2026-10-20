@@ -58,6 +58,7 @@
 
     - name: Add a known_hosts entry for the new port
       ansible.builtin.known_hosts:
+        path: "{{ ssh_known_hosts_file }}"
         name: "[{{ ansible_host }}]:{{ ssh_port }}"
         key: "[{{ ansible_host }}]:{{ ssh_port }} {{ (ssh_host_key.content | b64decode).split()[:2] | join(' ') }}"
         state: present

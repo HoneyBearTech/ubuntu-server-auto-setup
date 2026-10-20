@@ -1,0 +1,45 @@
+---
+name: Installer ISO
+
+# The integration tests use a small stand-in ISO. This job remasters the real Ubuntu 26.04 live-server ISO
+# (about 3 GB) in the test "Proxmox node" container and checks the result: the checksum from Ubuntu's
+# SHA256SUMS, the autoinstall kernel argument, and BIOS and UEFI boot records identical to the original.
+# Weekly (Ubuntu can publish a new point release or change the ISO layout at any time) and on changes to
+# the installer roles.
+on:  # yamllint disable-line rule:truthy
+  schedule:
+    - cron: "23 4 * * 3" # weekly, Wednesday 04:23 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "roles/installer_iso/**"
+      - "roles/ubuntu_release/**"
+      - "tests/real-iso.sh"
+      - ".github/workflows/installer-iso.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  real-iso:
+    name: Remaster the real Ubuntu ISO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install the control-node packages and collections
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.txt
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Remaster and check the real ISO
+        run: tests/real-iso.sh

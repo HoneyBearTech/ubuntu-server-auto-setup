@@ -16,15 +16,14 @@ and with an SBOM and build provenance.
 ## Over the following year
 
 **Testing**
-- A [Molecule](https://ansible.readthedocs.io/projects/molecule/) scenario that runs the baseline roles
-  against Ubuntu 24.04 and 26.04 in CI on every pull request, checks idempotence, and verifies the result
-  (password SSH and root refused, UFW and Fail2Ban active).
+- Done: integration tests that run every playbook against containers and a mock Proxmox API on every pull
+  request, with idempotence checks and an 80% task coverage floor, plus a weekly run against the real
+  Ubuntu ISO ([testing.md](testing.md)).
+- Run the baseline tests against Ubuntu 24.04 as well as 26.04.
 - A documented end-to-end test against a real Proxmox VE node before every release.
 
 **Provisioning**
 - Verify the GPG signature on Ubuntu's `SHA256SUMS`, not only the checksum.
-- Clean up the seed ISO automatically when a provisioning run fails part-way, and remove the installer's
-  saved configuration (with the password hash) from the installed server.
 - Optional IPv6 and DHCP network configuration, and more disk layouts (including LUKS encryption).
 - Running the ISO build as a non-root user on the Proxmox node.
 
@@ -34,7 +33,8 @@ and with an SBOM and build provenance.
 - Notifications (mail or a webhook) from unattended-upgrades and Fail2Ban.
 
 **Supply chain**
-- Hash-pinned lock files for the Python packages used in CI, and a tested list of collection versions.
+- Done: CI installs a hash-pinned set of Python packages (`requirements-ci.txt`).
+- A tested list of collection versions.
 
 **Security and project health**
 - Keep the [OpenSSF Best Practices](https://www.bestpractices.dev/projects/15740) Passing and Silver
