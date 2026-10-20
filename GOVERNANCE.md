@@ -45,7 +45,7 @@ Who can change the code, releases and project settings, as of the date of this f
 | --- | --- | --- |
 | Repository administration (settings, rulesets, secrets, merging) | the maintainer (@HoneyBearTech) | GitHub account owner |
 | Publishing releases | the release workflow, on a version tag pushed by the maintainer | GitHub Actions, short-lived `GITHUB_TOKEN` and Sigstore identity |
-| The container image on Docker Hub (`honeybeartech/ubuntu-server-auto-setup`) and its GHCR mirror | the maintainer (Docker Hub account `honeybeartech`, GitHub account); the release workflow pushes | a Docker Hub access token (read and write) in the `release` environment; `GITHUB_TOKEN` for GHCR |
+| The container image on Docker Hub (`honeybeartech/ubuntu-server-auto-setup`) and its GHCR mirror | the maintainer (Docker Hub account `honeybeartech`, GitHub account); the release workflow pushes | a Docker Hub access token (Read, Write, Delete: Docker Hub requires Delete scope to update the repository's description) in the `release` environment; `GITHUB_TOKEN` for GHCR |
 | Signing version tags | the maintainer | personal SSH key |
 | The [OpenSSF Best Practices entry](https://www.bestpractices.dev/projects/15740) | the maintainer | GitHub sign-in |
 | Security advisories and private vulnerability reports | the maintainer | GitHub |
@@ -76,7 +76,7 @@ The credentials the project (not your deployment) holds, and how they're handled
 
 - **What exists**: the maintainer's GitHub account and its recovery codes, the SSH key that signs tags,
   the Docker Hub account `honeybeartech` and its two-factor recovery codes, and one Docker Hub access token
-  (read and write, for this repository only) that the release workflow uses. Releases and images are signed
+  (Read, Write, Delete; Docker Hub needs Delete scope to update the repository description) that the release workflow uses. Releases and images are signed
   keylessly (Sigstore), so there is no long-lived signing key.
 - **Storage**: in the maintainer's password manager, never in the repository, CI configuration, issues or
   logs. The Docker Hub token is also stored as a secret of the `release` environment, which only `v*` tags

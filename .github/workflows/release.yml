@@ -177,8 +177,11 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      # The README as the Docker Hub page, with relative links made absolute.
+      # The README as the Docker Hub page, with relative links made absolute. Docker Hub's API needs a token
+      # with Read, Write, Delete scope for this. A failure here only leaves the old page text, so it doesn't
+      # stop the release (the image is already pushed and signed); the job log shows it as a warning.
       - name: Update the Docker Hub description
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
