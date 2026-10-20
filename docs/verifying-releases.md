@@ -17,8 +17,9 @@ what you downloaded came from that workflow, unchanged:
   workflow run built them from which commit;
 - the **version tag** in git is signed with the maintainer's SSH key.
 
-There is no release of the Ansible version yet; this applies from the first one, v0.1.0. The examples use
-v0.1.0. You need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or later (with
+This applies to every release from the first one,
+[v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0), which the examples
+use. You need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or later (with
 cosign 2.6, add `--new-bundle-format`), and the [GitHub CLI](https://cli.github.com/) for the provenance.
 
 ## The release files
