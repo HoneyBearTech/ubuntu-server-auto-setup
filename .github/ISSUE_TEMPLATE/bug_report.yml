@@ -1,0 +1,54 @@
+---
+name: Bug report
+description: A playbook failed, did something it shouldn't, or left a server in the wrong state.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for reporting. **Security problems go to the private form instead** (see SECURITY.md).
+        Leave out passwords, hashes, API tokens, host names and addresses: replace them with placeholders.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release (for example 0.1.0) or commit you ran.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Proxmox VE version, Ubuntu version of the target, ansible-core version (`ansible --version`), control node OS.
+    validations:
+      required: true
+  - type: dropdown
+    id: playbook
+    attributes:
+      label: Which playbook?
+      options:
+        - build-installer.yml
+        - provision-vms.yml
+        - baseline.yml
+        - site.yml
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The failing task and its output, run with `-v` (`ARGS=-v`). Check it for secrets first.
+      render: text
+  - type: textarea
+    id: inventory
+    attributes:
+      label: The relevant inventory variables
+      description: Only the hosts and variables involved, with secrets and addresses replaced.
+      render: yaml

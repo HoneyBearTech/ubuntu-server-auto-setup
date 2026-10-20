@@ -1,0 +1,172 @@
+# External interfaces
+
+Every way people and other software interact with ubuntu-server-auto-setup, what each one expects and
+produces, and where it's specified. The project has no HTTP API, UI or daemon: its interface is the
+inventory you write and the commands you run. What should be reachable from where is described in the
+[assurance case](assurance-case.md#attack-surface).
+
+## Interfaces the project offers
+
+| Interface | Who uses it | Specification |
+| --- | --- | --- |
+| Inventory variables | the operator, in `inventory/hosts.yml` | [below](#inventory-variables); every role's `roles/<role>/defaults/main.yml` |
+| Vault variables | the operator, in `inventory/group_vars/all/vault.yml` | [below](#vault-variables); `inventory/vault.example.yml` |
+| Inventory groups | the operator | [below](#inventory-groups) |
+| Make targets | the operator | [below](#commands); `make help` |
+| Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
+| Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
+
+### Inventory groups
+
+| Group | Members | Connection |
+| --- | --- | --- |
+| `proxmox_nodes` | each Proxmox VE node; the inventory host name must equal the Proxmox node name | SSH as `root` (`ansible_user: root`) |
+| `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+
+### Inventory variables
+
+The variables below are the project's interface: names and meanings change only in a minor release before
+1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
+full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
+`roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/common`, `roles/firewall`,
+`roles/ssh_hardening` and `roles/fail2ban`. Where a role's default and the example inventory differ, the
+example shows a typical value.
+
+**Shared by provisioning and the baseline**
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `admin_user` | `sysadmin` | The admin account. |
+| `admin_password` | `""` | Its password, normally `"{{ vault_admin_password }}"`. Required to provision; the baseline uses it only when it creates the user. |
+| `github_user` | `""` | Whose keys from `https://github.com/<user>.keys` are authorized. Required (or `admin_extra_ssh_keys`). |
+| `admin_extra_ssh_keys` | `[]` | More public keys, one per list item. |
+| `ssh_port` | `22` | The SSH port the baseline configures, opens in UFW and watches with Fail2Ban. |
+
+**Ubuntu release and ISOs** (`ubuntu_release`, `installer_iso`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ubuntu_release` | `"26.04"` | The release directory on the mirror. |
+| `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
+| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO and `SHA256SUMS` come from. |
+| `pve_iso_storage`, `pve_iso_dir` | `local`, `/var/lib/vz/template/iso` | The Proxmox storage ID for ISOs and its directory. |
+| `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). |
+| `installer_grub_timeout` | `3` | Seconds the installer's GRUB menu waits. |
+| `installer_iso_rebuild` | `false` | Rebuild the remastered ISO even if it exists. |
+
+**Proxmox API and VMs** (`proxmox_vm`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `pve_api_host`, `pve_api_port` | `""`, `8006` | The Proxmox API endpoint. |
+| `pve_api_user` | `ansible@pve` | The token's user. |
+| `pve_api_token_id`, `pve_api_token_secret` | `""` | The token's name and secret, from the Vault. |
+| `pve_validate_certs` | `true` | Verify the API's TLS certificate. |
+| `pve_hide_secrets` | `true` | Hide the token and the password hash from task output; turn off only while debugging. |
+| `pve_node` | `""` | The node the VM is created on (required). |
+| `pve_ssh_host` | `"{{ pve_node }}"` | The inventory host used to reach that node over SSH. |
+| `pve_vmid` | `""` | The VM ID (required, fixed per host). |
+| `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Disk storage and the EFI disk format (`qcow2` on directory storage). |
+| `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Network bridge and optional VLAN tag. |
+| `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. |
+| `vm_cores`, `vm_sockets`, `vm_cpu_type` | `2`, `1`, `host` | CPU. |
+| `vm_memory_mb`, `vm_disk_gb` | `2048`, `32` | Memory and disk size. |
+| `vm_secure_boot` | `false` | Pre-enroll Secure Boot keys. |
+| `vm_onboot` | `true` | Start the VM when the node boots. |
+| `vm_install_timeout` | `3600` | Seconds to wait for the installer to power off. |
+| `ansible_host` | (required) | The static IPv4 address the installer configures. |
+| `net_prefix`, `net_gateway` | `24`, `""` | Prefix length and gateway (gateway required). |
+| `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
+| `net_interface_match` | `en*` | Which interface gets the static address. |
+| `admin_realname` | `Administrator` | The admin account's full name. |
+| `autoinstall_locale`, `autoinstall_keyboard_layout` | `en_US.UTF-8`, `us` | Locale and keyboard. |
+| `autoinstall_source_id` | `ubuntu-server` | `ubuntu-server` or `ubuntu-server-minimal`. |
+| `autoinstall_storage_layout` | `lvm` | `lvm`, `direct` or `zfs`. |
+| `autoinstall_updates` | `security` | Updates applied during the install: `security` or `all`. |
+| `autoinstall_packages` | `[qemu-guest-agent]` | Extra packages installed by the installer. |
+| `provision_manage_known_hosts` | `true` | Replace the control node's `known_hosts` entry for the new VM's IP with its fresh host key. |
+
+**Baseline: system and users** (`common`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `admin_shell` | `/bin/bash` | The admin account's shell. |
+| `admin_sudo_nopasswd` | `true` | Passwordless sudo for the admin account. |
+| `ssh_keys_exclusive` | `true` | Remove authorized keys that aren't on GitHub or in `admin_extra_ssh_keys`. |
+| `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
+| `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
+| `timezone` | `Etc/UTC` | The timezone. |
+| `apt_upgrade` | `dist` | `dist`, `safe`, `full` or `"no"`. |
+| `reboot_if_required` | `false` | Reboot when upgrades ask for it. |
+| `common_packages` | `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim` | Packages installed on every server. |
+| `unattended_upgrades_origins` | release, security and ESM security pockets | What unattended-upgrades installs. |
+| `unattended_upgrades_auto_reboot`, `unattended_upgrades_reboot_time` | `false`, `"04:00"` | Automatic reboots after unattended upgrades. |
+| `unattended_upgrades_remove_unused` | `true` | Remove unused dependencies. |
+
+**Baseline: firewall** (`firewall`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ufw_default_incoming`, `ufw_default_outgoing` | `deny`, `allow` | Default policies. |
+| `ufw_logging` | `low` | UFW log level. |
+| `ufw_ssh_limit` | `true` | Rate-limit SSH (`limit`) instead of a plain allow. |
+| `ufw_ssh_sources` | `[any]` | Where SSH is allowed from. |
+| `ufw_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
+
+**Baseline: SSH** (`ssh_hardening`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ssh_permit_root_login` | `"no"` | `PermitRootLogin`. |
+| `ssh_password_authentication` | `false` | `PasswordAuthentication` (and `AuthenticationMethods publickey` when off). |
+| `ssh_max_auth_tries`, `ssh_login_grace_time` | `4`, `30` | Authentication limits (CIS: at most 4 tries). |
+| `ssh_client_alive_interval`, `ssh_client_alive_count_max` | `300`, `2` | Dropping unresponsive sessions. |
+| `ssh_x11_forwarding`, `ssh_allow_agent_forwarding`, `ssh_allow_tcp_forwarding` | `false`, `false`, `true` | Forwarding. |
+| `ssh_allow_users` | `[]` | `AllowUsers`, if set (must include `admin_user`). |
+
+**Baseline: Fail2Ban** (`fail2ban`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `fail2ban_bantime`, `fail2ban_findtime`, `fail2ban_maxretry` | `1h`, `10m`, `5` | Ban length, window and failures. |
+| `fail2ban_bantime_increment`, `fail2ban_bantime_maxtime` | `true`, `1w` | Longer bans for repeat offenders, up to a maximum. |
+| `fail2ban_ignoreip` | `[]` | Never banned (besides localhost). |
+| `fail2ban_banaction` | `""` | Ban action; empty keeps Ubuntu's default (nftables). |
+| `fail2ban_sshd_mode` | `normal` | The `sshd` filter mode: `normal`, `ddos`, `extra` or `aggressive`. |
+
+### Vault variables
+
+| Variable | Used by | Meaning |
+| --- | --- | --- |
+| `vault_admin_password` | `admin_password` (and `ansible_become_password` if passwordless sudo is off) | The admin account's password. |
+| `vault_pve_api_token_id` | `pve_api_token_id` | The token's name, without `user@realm!`. |
+| `vault_pve_api_token_secret` | `pve_api_token_secret` | The token's secret. |
+
+### Commands
+
+| Command | Playbook | Hosts | Effect |
+| --- | --- | --- | --- |
+| `make build-installer` | `playbooks/build-installer.yml` | `proxmox_nodes` | Download, verify and remaster the Ubuntu ISO. Changes only the node's ISO storage and `xorriso`. |
+| `make provision` | `playbooks/provision-vms.yml` | `ubuntu_servers` | Create and install each VM whose `pve_vmid` doesn't exist. Erases the new VM's disk only. |
+| `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings. |
+| `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `ubuntu_servers` | Sync the admin account's authorized keys only. |
+| `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
+| `make deps`, `make lint`, `make syntax` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
+
+`LIMIT=` becomes `--limit` (not for `build-installer`), `ARGS=` is passed to `ansible-playbook` unchanged,
+and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh` and
+`fail2ban`, so `ARGS="--tags firewall"` runs one of them. Exit codes are `ansible-playbook`'s: 0 on success,
+non-zero on any failed or unreachable host. `--check --diff` is supported by the baseline (provisioning
+needs to really create the VM, so it isn't meaningful there).
+
+## Interfaces the project uses
+
+| System | From | Protocol and authentication | What for |
+| --- | --- | --- | --- |
+| Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them. |
+| Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso`, build ISOs and seed ISOs, delete seed files. |
+| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication | The Ubuntu ISO and `SHA256SUMS`. |
+| `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
+| Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
+| Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
+| PyPI, Ansible Galaxy | control node (`make deps`) | HTTPS | Ansible, the Python packages and the collections. |

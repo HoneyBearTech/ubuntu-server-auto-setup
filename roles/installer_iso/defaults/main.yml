@@ -1,0 +1,5 @@
+---
+# Seconds the GRUB menu waits before booting the autoinstall entry.
+installer_grub_timeout: 3
+# Set true to rebuild the remastered ISO even if it already exists.
+installer_iso_rebuild: false

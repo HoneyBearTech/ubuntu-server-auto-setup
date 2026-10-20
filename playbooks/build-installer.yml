@@ -1,0 +1,6 @@
+---
+- name: Build the hands-off Ubuntu installer ISO on the Proxmox nodes
+  hosts: proxmox_nodes
+  gather_facts: false
+  roles:
+    - installer_iso

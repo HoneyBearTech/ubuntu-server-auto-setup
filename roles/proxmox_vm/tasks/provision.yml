@@ -1,0 +1,242 @@
+---
+- name: Check that the autoinstall ISO has been built on {{ pve_node }}
+  ansible.builtin.stat:
+    path: "{{ pve_iso_dir }}/{{ installer_iso_name }}"
+    get_checksum: false
+  register: pve_installer_iso
+  delegate_to: "{{ pve_ssh_host }}"
+
+- name: Fail if the installer ISO is missing
+  ansible.builtin.assert:
+    that: pve_installer_iso.stat.exists
+    fail_msg: "{{ installer_iso_name }} is not on {{ pve_node }}. Run playbooks/build-installer.yml first."
+    quiet: true
+
+- name: Fetch public SSH keys from GitHub
+  ansible.builtin.uri:
+    url: "https://github.com/{{ github_user }}.keys"
+    return_content: true
+  register: pve_github_keys
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when: github_user | length > 0
+
+- name: Collect the authorized keys
+  ansible.builtin.set_fact:
+    provision_ssh_keys: >-
+      {{ ((pve_github_keys.content | default('')).splitlines() + admin_extra_ssh_keys)
+         | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}
+
+- name: Fail if there are no SSH keys
+  ansible.builtin.assert:
+    that: provision_ssh_keys | length > 0
+    fail_msg: No public keys found for github_user '{{ github_user }}' and admin_extra_ssh_keys is empty.
+    quiet: true
+
+- name: Hash the admin password
+  ansible.builtin.set_fact:
+    provision_password_hash: "{{ admin_password | password_hash('sha512') }}"
+  no_log: "{{ pve_hide_secrets }}"
+
+# Everything from the seed ISO to its deletion runs in one block, so a failure part-way
+# still removes the seed (it holds the password hash) from the node.
+- name: Build the seed and run the installer
+  block:
+    - name: Create the seed directory
+      ansible.builtin.file:
+        path: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ pve_ssh_host }}"
+
+    - name: Render autoinstall user-data
+      ansible.builtin.template:
+        src: user-data.j2
+        dest: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/user-data"
+        mode: "0600"
+      delegate_to: "{{ pve_ssh_host }}"
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Render meta-data
+      ansible.builtin.template:
+        src: meta-data.j2
+        dest: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/meta-data"
+        mode: "0600"
+      delegate_to: "{{ pve_ssh_host }}"
+
+    - name: Build the NoCloud seed ISO
+      ansible.builtin.command:
+        argv:
+          - xorriso
+          - -as
+          - mkisofs
+          - -quiet
+          - -output
+          - "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
+          - -volid
+          - CIDATA
+          - -joliet
+          - -rock
+          - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/user-data"
+          - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/meta-data"
+      changed_when: true
+      delegate_to: "{{ pve_ssh_host }}"
+
+    - name: Restrict the seed ISO (it holds the password hash)
+      ansible.builtin.file:
+        path: "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
+        mode: "0600"
+      delegate_to: "{{ pve_ssh_host }}"
+
+    - name: Create the VM
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ pve_api_host }}"
+        api_port: "{{ pve_api_port }}"
+        api_user: "{{ pve_api_user }}"
+        api_token_id: "{{ pve_api_token_id }}"
+        api_token_secret: "{{ pve_api_token_secret }}"
+        validate_certs: "{{ pve_validate_certs }}"
+        node: "{{ pve_node }}"
+        vmid: "{{ pve_vmid | int }}"
+        name: "{{ inventory_hostname_short }}"
+        description: Installed by ubuntu-server-auto-setup (Ubuntu {{ ubuntu_point_release }})
+        tags: "{{ pve_tags }}"
+        ostype: l26
+        machine: q35
+        bios: ovmf
+        efidisk0:
+          storage: "{{ pve_storage }}"
+          format: "{{ pve_efidisk_format }}"
+          efitype: 4m
+          pre_enrolled_keys: "{{ vm_secure_boot | bool }}"
+        cpu: "{{ vm_cpu_type }}"
+        sockets: "{{ vm_sockets }}"
+        cores: "{{ vm_cores }}"
+        memory: "{{ vm_memory_mb }}"
+        scsihw: virtio-scsi-single
+        scsi:
+          scsi0: "{{ pve_storage }}:{{ vm_disk_gb }},discard=on,iothread=1,ssd=1"
+        ide:
+          ide2: "{{ pve_iso_storage }}:iso/{{ installer_iso_name }},media=cdrom"
+          ide3: "{{ pve_iso_storage }}:iso/seed-{{ inventory_hostname }}.iso,media=cdrom"
+        net:
+          net0: "virtio,bridge={{ pve_bridge }}{{ (',tag=' ~ pve_vlan) if pve_vlan | string | length > 0 else '' }}"
+        boot: order=scsi0;ide2
+        agent: enabled=1
+        onboot: "{{ vm_onboot | bool }}"
+        state: present
+        timeout: 300
+      delegate_to: localhost
+      become: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Start the VM (the installer runs now)
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/start"
+        method: POST
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+      delegate_to: localhost
+      become: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Wait for the installer to finish and power off the VM
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/current"
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+      register: pve_vm_status
+      until: pve_vm_status.json is defined and pve_vm_status.json.data.status == 'stopped'
+      retries: "{{ (vm_install_timeout | int) // 20 }}"
+      delay: 20
+      delegate_to: localhost
+      become: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Detach the installer and seed ISOs and boot from disk only
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/config"
+        method: PUT
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+        body_format: form-urlencoded
+        body:
+          delete: ide2,ide3
+          boot: order=scsi0
+      delegate_to: localhost
+      become: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Delete the seed ISO and its files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
+        - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}"
+      delegate_to: "{{ pve_ssh_host }}"
+
+  rescue:
+    - name: Delete the seed ISO and its files after a failure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
+        - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}"
+      delegate_to: "{{ pve_ssh_host }}"
+
+    - name: Stop with the original error
+      ansible.builtin.fail:
+        msg: >-
+          Provisioning {{ inventory_hostname }} failed at "{{ ansible_failed_task.name }}" (seed ISO removed).
+          If VM {{ pve_vmid }} was created, check its console, delete it in Proxmox (qm destroy {{ pve_vmid }})
+          and run again. Rerun with pve_hide_secrets=false to see the full error.
+
+- name: Start the installed system
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/start"
+    method: POST
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+  delegate_to: localhost
+  become: false
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Wait for SSH on {{ ansible_host }}
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 22
+    search_regex: OpenSSH
+    timeout: 600
+  delegate_to: localhost
+  become: false
+
+- name: Refresh the control node's known_hosts entry
+  when: provision_manage_known_hosts | bool
+  delegate_to: localhost
+  become: false
+  block:
+    - name: Remove the stale host key
+      ansible.builtin.known_hosts:
+        name: "{{ ansible_host }}"
+        state: absent
+
+    - name: Scan the new host key
+      ansible.builtin.command:
+        argv: [ssh-keyscan, -T, "10", -t, ed25519, "{{ ansible_host }}"]
+      register: pve_host_key
+      changed_when: false
+      failed_when: pve_host_key.stdout | length == 0
+
+    - name: Trust the new host key
+      ansible.builtin.known_hosts:
+        name: "{{ ansible_host }}"
+        key: "{{ pve_host_key.stdout_lines | select('match', '^[^#]') | first }}"
+        state: present
+
+# The first-boot user and keys are created by cloud-init, which can lag sshd by a few seconds.
+- name: Wait until the admin user can log in
+  ansible.builtin.wait_for_connection:
+    timeout: 300

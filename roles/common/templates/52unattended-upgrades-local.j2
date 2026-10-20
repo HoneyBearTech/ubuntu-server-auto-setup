@@ -1,0 +1,11 @@
+// {{ ansible_managed }}
+// Overrides 50unattended-upgrades from the package.
+Unattended-Upgrade::Allowed-Origins {
+{% for origin in unattended_upgrades_origins %}
+        "{{ origin }}";
+{% endfor %}
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "{{ unattended_upgrades_remove_unused | bool | lower }}";
+Unattended-Upgrade::Automatic-Reboot "{{ unattended_upgrades_auto_reboot | bool | lower }}";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ unattended_upgrades_reboot_time }}";

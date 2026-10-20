@@ -1,0 +1,81 @@
+---
+- name: Check that the admin user may still log in
+  ansible.builtin.assert:
+    that: ssh_allow_users | length == 0 or (admin_user | default(ansible_user)) in ssh_allow_users
+    fail_msg: ssh_allow_users doesn't include {{ admin_user | default(ansible_user) }}; applying it would lock Ansible out.
+    quiet: true
+
+- name: Read the current hardening drop-in
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config.d/00-hardening.conf
+  register: ssh_current_dropin
+  failed_when: false
+
+- name: Note the port sshd uses now
+  ansible.builtin.set_fact:
+    ssh_previous_port: >-
+      {{ (ssh_current_dropin.content | default('') | b64decode)
+         | regex_findall('^Port\s+([0-9]+)', multiline=True) | default(['22'], true) | first | int }}
+
+# sshd uses the first value it reads for most options, and drop-ins load in name order,
+# so 00- wins over 50-cloud-init.conf and the main sshd_config.
+- name: Install the hardening drop-in
+  ansible.builtin.template:
+    src: 00-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+# Ubuntu starts sshd from ssh.socket, which listens on port 22 regardless of sshd_config.
+# For any other port, run ssh.service directly so sshd's own Port setting applies.
+- name: Switch from socket activation to ssh.service for a custom port
+  when: ssh_port | int != 22
+  block:
+    - name: Enable ssh.service
+      ansible.builtin.systemd_service:
+        name: ssh.service
+        enabled: true
+
+    - name: Disable ssh.socket
+      ansible.builtin.systemd_service:
+        name: ssh.socket
+        enabled: false
+        state: stopped
+      notify: Restart ssh
+
+- name: Apply SSH changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Reconnect on the new SSH port
+  when: ssh_previous_port | int != ssh_port | int
+  block:
+    # Trust the host key read over the already-verified connection, not a fresh scan.
+    - name: Read the server's host key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: ssh_host_key
+
+    - name: Add a known_hosts entry for the new port
+      ansible.builtin.known_hosts:
+        name: "[{{ ansible_host }}]:{{ ssh_port }}"
+        key: "[{{ ansible_host }}]:{{ ssh_port }} {{ (ssh_host_key.content | b64decode).split()[:2] | join(' ') }}"
+        state: present
+      delegate_to: localhost
+      become: false
+
+    - name: Switch the connection to port {{ ssh_port }}
+      ansible.builtin.set_fact:
+        ansible_port: "{{ ssh_port | int }}"
+
+    - name: Wait for SSH on port {{ ssh_port }}
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+
+    - name: Remove the old port 22 firewall rule
+      community.general.ufw:
+        rule: "{{ item }}"
+        port: "22"
+        proto: tcp
+        delete: true
+      loop: [limit, allow]

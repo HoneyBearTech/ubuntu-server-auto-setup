@@ -1,0 +1,9 @@
+---
+- name: Build the installer ISO
+  ansible.builtin.import_playbook: build-installer.yml
+
+- name: Provision missing VMs
+  ansible.builtin.import_playbook: provision-vms.yml
+
+- name: Apply the baseline
+  ansible.builtin.import_playbook: baseline.yml

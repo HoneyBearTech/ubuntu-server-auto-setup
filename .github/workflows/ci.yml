@@ -1,143 +1,77 @@
 ---
 name: CI
-'on':
-  pull_request:
+
+# Every pull request and push to main: YAML and Ansible lint, a syntax check of every playbook, the workflow
+# linter, and a secret scan over the whole history. The job names are the required status checks in the
+# main branch ruleset; keep them stable.
+on:  # yamllint disable-line rule:truthy
   push:
-    branches:
-      - master
-  schedule:
-    - cron: "10 2 * * 0"
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  scripts:
-    name: Scripts
+  lint:
+    name: Lint + syntax check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - test_script: collection
-          - test_script: molecule
-          - test_script: orchestration
-
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v2
-
-      - uses: actions/setup-python@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.x'
+          persist-credentials: false
 
-      - name: Run test script.
-        run: tests/${{ matrix.test_script }}.sh
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-  playbooks:
-    name: Playbooks
+      - name: Install the control-node packages and lint tools
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install the Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Coding standards (CONTRIBUTING.md#coding-standards). Any finding fails the build.
+      - name: Lint YAML (yamllint)
+        run: yamllint --format github .
+
+      - name: Lint Ansible (ansible-lint, production profile)
+        run: ansible-lint
+
+      - name: Syntax-check every playbook
+        run: ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml
+
+      - name: Lint workflows (actionlint, with shellcheck)
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro" -w /repo
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+
+  secrets:
+    name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          # TODO: This started failing on GitHub Actions.
-          # See: https://github.com/geerlingguy/ansible-for-devops/issues/429
-          # - playbook: deployments.yml
-          #   distro: ubuntu2004
-          #   test_idempotence: false
-
-          # TODO: Not easy to test in CI at this time.
-          # - playbook: deployments-balancer.yml
-          #   distro: ubuntu2004
-
-          # TODO: This started failing on GitHub Actions.
-          # See: https://github.com/geerlingguy/ansible-for-devops/issues/359
-          # - playbook: deployments-rolling.yml
-          #   distro: ubuntu2004
-
-          - playbook: docker.yml
-            distro: ubuntu2004
-            test_idempotence: false
-
-          - playbook: docker-flask.yml
-            distro: ubuntu2004
-            test_idempotence: false
-
-          - playbook: docker-hubot.yml
-            distro: ubuntu2004
-            test_idempotence: false
-
-          - playbook: drupal.yml
-            distro: ubuntu2004
-
-          # TODO: Not easy to test in CI at this time.
-          # - playbook: dynamic-inventory.yml
-          #   distro: ubuntu2004
-
-          - playbook: elk.yml
-            distro: ubuntu2004
-
-          # TODO: This started failing on GitHub Actions.
-          # See: https://github.com/geerlingguy/ansible-for-devops/issues/402
-          # - playbook: first-ansible-playbook.yml
-          #   distro: centos7
-
-          - playbook: galaxy-role-servers.yml
-            distro: ubuntu2004
-
-          # TODO: Not easy to test in CI at this time.
-          # - playbook: gluster.yml
-          #   distro: ubuntu2004
-
-          - playbook: https-self-signed.yml
-            distro: ubuntu2004
-
-          - playbook: https-nginx-proxy.yml
-            distro: debian10
-
-          # TODO: This started failing on GitHub Actions.
-          # See: https://github.com/geerlingguy/ansible-for-devops/issues/359
-          # - playbook: includes.yml
-          #   distro: ubuntu2004
-
-          # TODO: This started failing on GitHub Actions.
-          # See: https://github.com/geerlingguy/ansible-for-devops/issues/359
-          # - playbook: jenkins.yml
-          #   distro: ubuntu2004
-
-          # TODO: Not easy to test in CI at this time.
-          # - playbook: kubernetes.yml
-          #   distro: debian9
-
-          # TODO: Not easy to test in CI at this time.
-          # - playbook: lamp-infrastructure.yml
-          #   distro: ubuntu2004
-
-          - playbook: nodejs.yml
-            distro: rockylinux8
-
-          - playbook: nodejs-role.yml
-            distro: rockylinux8
-
-          - playbook: security.yml
-            distro: rockylinux8
-
-          - playbook: solr.yml
-            distro: ubuntu2004
-
-          - playbook: test-plugin.yml
-            distro: rockylinux8
-
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v2
-
-      - uses: actions/setup-python@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.x'
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans the whole history, not just this commit
 
-      - name: Download test shim.
+      # The checkout belongs to another user inside the container, so git needs safe.directory, and the step
+      # fails if gitleaks ever scans nothing (it would otherwise report "no leaks found").
+      - name: No secrets in the repository or its history
+        shell: bash
         run: |
-          wget -O tests/test.sh https://gist.githubusercontent.com/geerlingguy/73ef1e5ee45d8694570f334be385e181/raw/
-          chmod +x tests/test.sh
-
-      - name: Run playbook with test shim.
-        run: tests/test.sh
-        env:
-          playbook: ${{ matrix.playbook }}
-          distro: ${{ matrix.distro }}
-          test_idempotence: ${{ matrix.test_idempotence }}
+          docker run --rm -v "$PWD:/repo:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner --no-color /repo 2>&1 | tee "$RUNNER_TEMP/gitleaks.log"
+          if grep -Eq ' 0 commits scanned|ERR' "$RUNNER_TEMP/gitleaks.log"; then
+            echo "::error::gitleaks didn't scan the history"
+            exit 1
+          fi

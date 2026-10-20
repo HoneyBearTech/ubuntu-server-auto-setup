@@ -1,0 +1,25 @@
+---
+name: Feature request
+description: Suggest a new baseline setting, a provisioning option, or another improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Please check the [roadmap](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/roadmap.md)
+        first: it lists what's planned and what this project deliberately won't do.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: What you're trying to set up, or what's hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

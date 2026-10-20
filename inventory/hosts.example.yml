@@ -1,0 +1,58 @@
+---
+# Copy to inventory/hosts.yml (gitignored) and edit. Secrets go in
+# inventory/group_vars/all/vault.yml, encrypted with ansible-vault (see inventory/vault.example.yml).
+all:
+  vars:
+    # Whose public keys (https://github.com/<user>.keys) get installed for the admin user.
+    github_user: HoneyBearTech
+    admin_user: sysadmin
+    admin_password: "{{ vault_admin_password }}"
+    timezone: America/Chicago
+
+    # Proxmox VE API (token needs the privileges listed in docs/installing.md)
+    pve_api_host: pve-1.example.lan
+    pve_api_user: ansible@pve
+    pve_api_token_id: "{{ vault_pve_api_token_id }}"
+    pve_api_token_secret: "{{ vault_pve_api_token_secret }}"
+    pve_validate_certs: true
+
+  children:
+    # Proxmox nodes: Ansible connects to them as root over SSH to build the ISOs.
+    # Each inventory hostname must match the Proxmox node name.
+    proxmox_nodes:
+      hosts:
+        pve-1:
+          ansible_host: 10.10.10.10
+          ansible_user: root
+
+    ubuntu_servers:
+      vars:
+        ansible_user: "{{ admin_user }}"
+        # Only used if you set admin_sudo_nopasswd: false; harmless otherwise.
+        ansible_become_password: "{{ vault_admin_password }}"
+        pve_node: pve-1
+        pve_storage: local-lvm
+        pve_bridge: vmbr0
+        net_prefix: 24
+        net_gateway: 10.10.10.1
+        net_dns: [10.10.10.1, 1.1.1.1]
+        net_search: [example.lan]
+        fail2ban_ignoreip: [10.10.10.0/24]
+      hosts:
+        web-01:
+          ansible_host: 10.10.10.61   # static IP the installer configures
+          pve_vmid: 4061
+          vm_cores: 2
+          vm_memory_mb: 4096
+          vm_disk_gb: 32
+          ufw_allow:
+            - { port: "80", proto: tcp, comment: http }
+            - { port: "443", proto: tcp, comment: https }
+        db-01:
+          ansible_host: 10.10.10.62
+          pve_vmid: 4062
+          vm_cores: 4
+          vm_memory_mb: 8192
+          vm_disk_gb: 64
+          ufw_allow:
+            - { port: "5432", proto: tcp, from: 10.10.10.0/24, comment: postgres }

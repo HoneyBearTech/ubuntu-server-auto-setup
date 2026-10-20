@@ -1,0 +1,7 @@
+---
+- name: Create Ubuntu VMs on Proxmox and install them unattended
+  hosts: ubuntu_servers
+  gather_facts: false
+  become: false
+  roles:
+    - proxmox_vm

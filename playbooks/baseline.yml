@@ -1,0 +1,40 @@
+---
+- name: Apply the server baseline
+  hosts: ubuntu_servers
+  become: true
+  gather_facts: false
+  pre_tasks:
+    # After ssh_hardening moves SSH off port 22, later runs connect on ssh_port; a fresh
+    # server still listens on 22. Probe so the same inventory works for both.
+    - name: Probe the configured SSH port
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ ssh_port | int }}"
+        timeout: 5
+      delegate_to: localhost
+      become: false
+      register: baseline_ssh_probe
+      ignore_errors: true
+      when: ssh_port is defined and ssh_port | int != 22 and ansible_port is not defined
+      tags: [always]
+
+    - name: Connect on whichever SSH port answers
+      ansible.builtin.set_fact:
+        ansible_port: "{{ (ssh_port | int) if baseline_ssh_probe is succeeded else 22 }}"
+      when: baseline_ssh_probe is not skipped
+      tags: [always]
+
+    - name: Gather facts
+      ansible.builtin.setup:
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [common]
+    # The firewall goes before SSH hardening so a new SSH port is open before sshd moves to it.
+    - role: firewall
+      tags: [firewall]
+    - role: ssh_hardening
+      tags: [ssh]
+    - role: fail2ban
+      tags: [fail2ban]

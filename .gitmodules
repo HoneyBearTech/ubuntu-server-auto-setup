@@ -1,3 +1,0 @@
-[submodule "tests/lib"]
-	path = tests/lib
-	url = git@github.com:Honeyb34r/BashScriptTestingLibrary.git

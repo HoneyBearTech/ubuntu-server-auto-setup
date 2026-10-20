@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+[DEFAULT]
+bantime = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+bantime.increment = {{ fail2ban_bantime_increment | bool | lower }}
+bantime.maxtime = {{ fail2ban_bantime_maxtime }}
+ignoreip = {{ (['127.0.0.1/8', '::1'] + fail2ban_ignoreip) | join(' ') }}
+{% if fail2ban_banaction | length > 0 %}
+banaction = {{ fail2ban_banaction }}
+{% endif %}
+
+[sshd]
+enabled = true
+backend = systemd
+mode = {{ fail2ban_sshd_mode }}
+port = {{ ssh_port }}
