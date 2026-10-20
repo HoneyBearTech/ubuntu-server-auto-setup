@@ -8,6 +8,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-20
+
+The container image with a web UI, published to Docker Hub, plus fuzzing and stricter input validation.
+
 ### Upgrading
 
 - **ansible-core 2.20.7 or later is now required** (was 2.19 or 2.20). Older versions are affected by
@@ -71,6 +75,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- Dependabot's Docker base-image updates are no longer approved automatically; they wait for the
+  maintainer, like major updates.
 - Dependabot's patch and minor updates are approved and merged automatically once every required check
   passes (`.github/workflows/dependabot-auto-merge.yml`); `main` now requires one approval and up-to-date
   branches.
@@ -124,5 +130,6 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.0
 [0.1.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0

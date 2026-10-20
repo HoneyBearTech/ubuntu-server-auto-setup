@@ -32,8 +32,9 @@ reasoning, and may change course. Because the code is MIT-licensed, you can alwa
 | Security reporter | Anyone who reports a vulnerability | Report privately and allow time for a fix before disclosing, as described in [SECURITY.md](SECURITY.md). |
 
 Automated tools also take part: Dependabot proposes updates to the Python packages, the GitHub Actions and
-the test images. Its patch and minor updates are approved by a workflow and merge automatically once every
-required check passes; major updates wait for the maintainer. CI, CodeQL, secret scanning and OpenSSF
+the test images. Its patch and minor updates (except Docker base images) are approved by a workflow and merge
+automatically once every required check passes; major updates and base-image updates wait for the
+maintainer. CI, CodeQL, secret scanning and OpenSSF
 Scorecard check every change.
 
 ## Access to sensitive resources

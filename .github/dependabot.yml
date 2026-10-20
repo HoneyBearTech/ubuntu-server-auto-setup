@@ -1,8 +1,8 @@
 ---
 version: 2
 # Patch and minor updates are approved and merged automatically once every required check passes,
-# including the integration tests (.github/workflows/dependabot-auto-merge.yml); major updates and image
-# digest updates wait for the maintainer. Ansible collections (requirements.yml) have no Dependabot
+# including the integration tests (.github/workflows/dependabot-auto-merge.yml); major updates and all
+# Docker base-image updates wait for the maintainer. Ansible collections (requirements.yml) have no Dependabot
 # ecosystem; they are checked by hand as described in docs/dependencies.md.
 updates:
   # Control-node packages (requirements.txt), the web UI's (requirements-webui.in, hash-pinned in
