@@ -1,4 +1,19 @@
 ---
+- name: Check the Fail2Ban settings
+  ansible.builtin.assert:
+    that:
+      - fail2ban_ignoreip | select('match', fail2ban_ignoreip_pattern) | list | length == fail2ban_ignoreip | length
+      - fail2ban_bantime | string is match(fail2ban_time_pattern)
+      - fail2ban_findtime | string is match(fail2ban_time_pattern)
+      - fail2ban_bantime_maxtime | string is match(fail2ban_time_pattern)
+      - fail2ban_banaction is match(fail2ban_banaction_pattern)
+      - fail2ban_sshd_mode in fail2ban_sshd_modes
+      - fail2ban_maxretry | string is match('^[0-9]+\Z')
+    fail_msg: >-
+      fail2ban_ignoreip entries must be addresses, ranges or host names; the times like 3600, 10m or 1h30m;
+      fail2ban_maxretry a number; fail2ban_sshd_mode one of {{ fail2ban_sshd_modes | join(', ') }}.
+    quiet: true
+
 # python3-systemd lets Fail2Ban read the journal (Ubuntu servers no longer log SSH to auth.log by default).
 - name: Install Fail2Ban
   ansible.builtin.apt:

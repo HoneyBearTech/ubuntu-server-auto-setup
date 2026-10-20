@@ -56,6 +56,7 @@ release is the tagged source, packaged by `.github/workflows/release.yml` (see
 | Dependency review | new or changed dependencies with known vulnerabilities or disallowed licenses | n/a | every pull request |
 | DCO | every commit is signed off | `git log` | every pull request (required) |
 | Integration tests | every playbook end to end: the installer ISO is remastered, VMs are created and installed through a mock Proxmox API (including a failed install that must clean up), and the baseline is applied to an Ubuntu 26.04 container and checked (SSH settings, firewall rules, Fail2Ban jail, sudo, refused password and root logins, key sync, port change). Every playbook must change nothing on a second run, and at least 80% of role tasks must run | `make test` (needs Docker) | every pull request and push to `main` (required) |
+| Fuzzing | the templates and expressions that turn inventory values into files and commands, with arbitrary inputs (Atheris) | `make fuzz` (Linux x86-64) | every pull request and push to `main`, longer weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
 | Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy |
 

@@ -24,8 +24,10 @@
 
 - name: Collect the authorized keys
   ansible.builtin.set_fact:
+    # One key per line: the GitHub file and the extra keys are split on every line break, so no entry can
+    # carry a second line into authorized_keys or the installer configuration.
     provision_ssh_keys: >-
-      {{ ((pve_github_keys.content | default('')).splitlines() + admin_extra_ssh_keys)
+      {{ ((pve_github_keys.content | default('')) ~ '\n' ~ (admin_extra_ssh_keys | join('\n'))).splitlines()
          | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}
 
 - name: Fail if there are no SSH keys

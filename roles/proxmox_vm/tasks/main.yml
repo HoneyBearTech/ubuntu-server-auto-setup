@@ -6,7 +6,7 @@
       - pve_api_token_id | length > 0
       - pve_api_token_secret | length > 0
       - pve_node | length > 0
-      - pve_vmid | string is match('^[0-9]+$')
+      - pve_vmid | string is match('^[0-9]+\Z')
       - ansible_host is defined and ansible_host != inventory_hostname
       - net_gateway | length > 0
       - github_user | length > 0 or admin_extra_ssh_keys | length > 0
@@ -14,6 +14,20 @@
     fail_msg: >-
       Set pve_api_host, the API token, pve_node, a numeric pve_vmid, ansible_host (the static IP),
       net_gateway, github_user (or admin_extra_ssh_keys) and admin_password for {{ inventory_hostname }}.
+    quiet: true
+
+# These values go into the installer's configuration and a shell command run as root during the install.
+- name: Check the formats of values the installer uses
+  ansible.builtin.assert:
+    that:
+      - admin_user is match(provision_username_pattern)
+      - inventory_hostname_short is match(provision_hostname_pattern)
+      - ansible_host is match(provision_ipv4_pattern)
+      - net_gateway is match(provision_ipv4_pattern)
+      - net_prefix | string is match('^[0-9]{1,2}\Z') and 1 <= (net_prefix | int) <= 32
+    fail_msg: >-
+      {{ inventory_hostname }}: admin_user must be a lowercase Linux user name, the inventory name a valid
+      host name (letters, digits, hyphens), ansible_host and net_gateway IPv4 addresses, and net_prefix 1-32.
     quiet: true
 
 - name: Build the API auth header

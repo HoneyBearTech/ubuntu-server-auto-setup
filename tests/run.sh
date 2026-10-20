@@ -117,10 +117,17 @@ step "build-installer: remaster the ISO, then check a second run changes nothing
 play playbooks/build-installer.yml
 play --idempotent playbooks/build-installer.yml
 play tests/verify-installer.yml
+play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
 play --idempotent playbooks/provision-vms.yml --limit srv-01
+
+step "provision-vms: values that could break the installer's configuration are refused before anything is created"
+play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
+  -e 'admin_user="x; touch /pwned"'
+play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
+  -e '{"admin_user": "sysadmin\n"}'
 
 step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
@@ -141,6 +148,15 @@ cool_down
 step "baseline: an empty key list is refused instead of wiping authorized_keys"
 play_fails 'refusing to touch authorized_keys' playbooks/baseline.yml --limit srv-01 --tags ssh_keys \
   -e github_user= -e '{"admin_extra_ssh_keys": []}'
+
+step "baseline: settings that could inject sshd or Fail2Ban directives are refused"
+play_fails "ssh_allow_users entries can't contain spaces or line breaks" playbooks/baseline.yml --limit srv-01 \
+  --tags ssh -e '{"ssh_allow_users": ["sysadmin\nPermitRootLogin yes"]}'
+play_fails "ssh_allow_users entries can't contain spaces or line breaks" playbooks/baseline.yml --limit srv-01 \
+  --tags ssh -e '{"ssh_allow_users": ["sysadmin\n"]}'
+play_fails 'fail2ban_ignoreip entries must be addresses' playbooks/baseline.yml --limit srv-01 \
+  --tags fail2ban -e '{"fail2ban_ignoreip": ["10.0.0.0/8\nenabled = false"]}'
+cool_down
 
 step "baseline: move SSH to port 2222, check, rerun on the new port"
 play playbooks/baseline.yml --limit srv-01 -e ssh_port=2222

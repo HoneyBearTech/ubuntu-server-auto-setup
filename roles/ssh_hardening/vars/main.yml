@@ -1,0 +1,5 @@
+---
+# What an AllowUsers entry may contain (user, user@host, wildcards, negation): no spaces or line breaks,
+# so a value can't add other sshd directives. tests/fuzz/ reads it from here.
+ssh_allow_users_pattern: '^[A-Za-z0-9_.*?@!%:-]+\Z'
+ssh_permit_root_login_values: ["no", prohibit-password, without-password, forced-commands-only, "yes"]

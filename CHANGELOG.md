@@ -8,6 +8,27 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Security
+
+- Values that reach a configuration file or a shell command are now validated against allowlist patterns
+  before anything changes: the admin user name and host names (used in the installer's root shell
+  commands and the sudoers file name), IPv4 addresses, `ssh_allow_users`, `ssh_permit_root_login`,
+  `fail2ban_ignoreip`, and the Fail2Ban times and mode. Before, a line break in some of these could add
+  directives to the sshd or Fail2Ban configuration, and a shell metacharacter in `admin_user` could run in
+  the installer. Inventory values come from the operator, so this is defence in depth.
+- The installer configuration is built as data and written with `to_nice_yaml`; characters outside
+  Unicode's basic plane (such as an emoji in `admin_realname`) used to be mangled by JSON-encoding.
+- `ubuntu_iso_name` is checked before use: it becomes a path on the Proxmox node, so slashes, spaces and
+  line breaks are refused.
+- An entry of `admin_extra_ssh_keys` that contains a line break is split into separate lines instead of
+  being written as one entry.
+
+### Added
+
+- Fuzzing with Atheris (`make fuzz`, `.github/workflows/fuzz.yml`) of the user-data, authorized keys,
+  ISO checksum, and sshd and Fail2Ban templates, on every pull request and weekly. See
+  [docs/testing.md](docs/testing.md#fuzzing).
+
 ### Changed
 
 - Dependabot's patch and minor updates are approved and merged automatically once every required check

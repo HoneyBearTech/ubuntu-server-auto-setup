@@ -1,5 +1,5 @@
 # {{ ansible_managed }}
-Port {{ ssh_port }}
+Port {{ ssh_port | int }}
 PermitRootLogin {{ ssh_permit_root_login }}
 PubkeyAuthentication yes
 PasswordAuthentication {{ 'yes' if ssh_password_authentication | bool else 'no' }}
@@ -8,10 +8,10 @@ PermitEmptyPasswords no
 {% if not ssh_password_authentication | bool %}
 AuthenticationMethods publickey
 {% endif %}
-MaxAuthTries {{ ssh_max_auth_tries }}
-LoginGraceTime {{ ssh_login_grace_time }}
-ClientAliveInterval {{ ssh_client_alive_interval }}
-ClientAliveCountMax {{ ssh_client_alive_count_max }}
+MaxAuthTries {{ ssh_max_auth_tries | int }}
+LoginGraceTime {{ ssh_login_grace_time | int }}
+ClientAliveInterval {{ ssh_client_alive_interval | int }}
+ClientAliveCountMax {{ ssh_client_alive_count_max | int }}
 X11Forwarding {{ 'yes' if ssh_x11_forwarding | bool else 'no' }}
 AllowAgentForwarding {{ 'yes' if ssh_allow_agent_forwarding | bool else 'no' }}
 AllowTcpForwarding {{ 'yes' if ssh_allow_tcp_forwarding | bool else 'no' }}

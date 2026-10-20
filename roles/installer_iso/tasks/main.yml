@@ -1,4 +1,12 @@
 ---
+- name: Check the ISO file names
+  ansible.builtin.assert:
+    that:
+      - ubuntu_iso_name is match(installer_iso_name_pattern)
+      - installer_iso_name is match(installer_iso_name_pattern)
+    fail_msg: ubuntu_iso_name may contain only letters, digits, dots, underscores, plus signs and hyphens.
+    quiet: true
+
 - name: Install ISO tooling
   ansible.builtin.apt:
     name: xorriso

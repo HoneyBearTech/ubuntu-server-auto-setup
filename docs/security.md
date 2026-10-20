@@ -31,7 +31,7 @@ it securely" section.
 - The Ubuntu ISO is downloaded over HTTPS and checked against the SHA-256 checksum Ubuntu publishes for it
   (also fetched over HTTPS); a mismatch stops the run.
 - SSH public keys come from `https://github.com/<github_user>.keys` over HTTPS. Only lines that look like
-  public keys are used, and they reach the installer configuration JSON-encoded, so they can't add other
+  public keys are used, and they reach the installer configuration as data written with `to_nice_yaml`, so they can't add other
   configuration or commands.
 
 **Provisioning**

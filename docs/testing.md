@@ -9,6 +9,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | --- | --- | --- | --- |
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
+| Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
 | Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy) |
 
@@ -53,6 +54,26 @@ run; your own `~/.ssh` is never touched. The steps:
 
 UFW rate-limits new SSH connections (6 in 30 seconds per address), and in the tests every connection comes
 from Docker's one address, so the script pauses between some steps.
+
+## Fuzzing
+
+`tests/fuzz/` holds [Atheris](https://github.com/google/atheris) fuzz targets for the places where
+inventory values become configuration files or shell commands. Each target loads the real template, Jinja
+expression or allowlist pattern from the role (`tests/fuzz/roles.py`), renders it with Ansible's own
+filters and tests, and checks a property for every input the role would accept:
+
+| Target | What it renders | Property |
+| --- | --- | --- |
+| `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words |
+| `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm` and `common` | both roles agree; every entry is one trimmed line of the input that starts with a key type |
+| `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
+| `fuzz_configs.py` | the sshd drop-in and `jail.local` | every setting appears once with exactly the given value; nothing else is added |
+
+`make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it
+runs in CI (`.github/workflows/fuzz.yml`) or on such a machine:
+`pip install --require-hashes -r requirements-ci.txt -r requirements-fuzz.txt`. A finding prints the input
+and saves it as `tests/fuzz/crash-*` (uploaded as an artifact in CI); fix the role, then add a case to the
+integration tests that the fix refuses.
 
 ## Running them
 

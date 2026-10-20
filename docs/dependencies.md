@@ -34,6 +34,7 @@ copied into the repository ("vendored").
 | CI actions | `.github/workflows/*.yml` | full commit SHAs | GitHub Actions |
 | Python packages in CI (all of the above, resolved) | `requirements-ci.txt`, compiled from `requirements-ci.in` | exact versions with SHA-256 hashes (`pip install --require-hashes`) | CI and `make test` |
 | CI container images (gitleaks, actionlint) | `.github/workflows/checks.yml` | image digests (`@sha256:…`) | Docker |
+| Fuzzing engine (atheris) | `requirements-fuzz.in`, pinned in `requirements-fuzz.txt` | exact version with SHA-256 hashes | the fuzzing workflow and `make fuzz` |
 | Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test` |
 
 On the systems they manage, the playbooks install packages only from Ubuntu's and Debian's own archives
