@@ -16,6 +16,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Security
 
+- `requirements.txt` requires certifi 2026.10.19 or later, which removes the emSign root certificates
+  whose intermediate CA keys were compromised (GHSA-6q48-6c7w-9gw2, critical). CI, the release and the
+  image already used that version.
 - The minimum versions in `requirements.txt` now exclude releases with known vulnerabilities:
   ansible-core 2.20.7 (CVE-2026-11332), requests 2.34.2 (CVE-2024-47081, CVE-2026-25645) and idna 3.15
   (PYSEC-2026-215). CI already used fixed versions; this protects `make deps` installs into an environment
