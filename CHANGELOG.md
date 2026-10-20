@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Changed
+
+- Dependabot's patch and minor updates are approved and merged automatically once every required check
+  passes (`.github/workflows/dependabot-auto-merge.yml`); `main` now requires one approval and up-to-date
+  branches.
+
 ## [0.1.0] - 2026-10-20
 
 The first release of the Ansible version: the project is rewritten from an interactive bash script into
