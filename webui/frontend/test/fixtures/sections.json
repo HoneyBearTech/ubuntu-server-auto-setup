@@ -400,11 +400,11 @@
     "name": "admin_sudo_nopasswd",
     "label": "Passwordless sudo for the admin user",
     "kind": "bool",
-    "help": "Convenient for unattended runs, but anyone with an authorized key has root.",
+    "help": "Off by default: the first run removes the installer's passwordless sudo, and later runs use the admin password. On is convenient, but anyone with an authorized key has root. The installer grants passwordless sudo so the first baseline run can work unattended; with false (the default) that run removes it again, and later runs use ansible_become_password (the admin password).",
     "required": false,
     "advanced": false,
     "variable": "admin_sudo_nopasswd",
-    "default": "true",
+    "default": "false",
     "choices": null
    },
    {
