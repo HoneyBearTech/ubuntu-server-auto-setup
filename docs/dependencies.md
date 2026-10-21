@@ -71,7 +71,8 @@ the project's own, so there is no front-end build and nothing bundled from npm.
   allowlist.
 - **GitHub's dependency graph** and Dependabot security alerts watch the default branch between changes.
 - **osv-scanner** checks every requirements file on every pull request and push, including the lower bounds
-  in `requirements.txt` and what they pull in (the `Vulnerability scan (OSV)` check). The lower bounds are
+  in `requirements.txt` and what they pull in (the `Vulnerability scan (OSV)` check), and
+  `tests/check_floors.py` checks every lower bound itself against OSV in the same check. The lower bounds are
   kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy.
 - Every release carries an SBOM (SPDX) of the source tree, and the container image an SBOM of its own
   contents, see [verifying-releases.md](verifying-releases.md).

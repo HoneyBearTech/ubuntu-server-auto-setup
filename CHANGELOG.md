@@ -8,6 +8,19 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-21
+
+The container image moves to Python 3.14, and dependency lower bounds skip more vulnerable versions.
+
+### Security
+
+- Lower bounds raised past versions with known vulnerabilities: `python-multipart>=0.0.31` (the web UI's
+  form parser; GHSA-wp53-j4wj-2cfg, GHSA-mj87-hwqh-73pj, GHSA-pp6c-gr5w-3c5g, GHSA-5rvq-cxj2-64vf,
+  GHSA-6jv3-5f52-599m, GHSA-vffw-93wf-4j4q, GHSA-v9pg-7xvm-68hf) and `pytest>=9.0.3` (CVE-2025-71176). The
+  image and CI already used fixed versions (0.0.32 and 9.1.1).
+- CI now also checks every lower bound in the requirements files against OSV (`tests/check_floors.py`, in
+  the Vulnerability scan (OSV) check), not only the versions they resolve to.
+
 ### Changed
 
 - The container image runs Python 3.14 (was 3.12), the newest Python that ansible-core 2.20 supports.
@@ -140,6 +153,7 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.1
 [0.2.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.0
 [0.1.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0
