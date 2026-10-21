@@ -15,7 +15,7 @@
   become: false
   no_log: "{{ pve_hide_secrets }}"
 
-- name: Fail unless VM {{ pve_vmid }} started
+- name: Fail unless the VM started
   ansible.builtin.assert:
     that: pve_vm_start_task.json.data.exitstatus == 'OK'
     fail_msg: "Proxmox couldn't start VM {{ pve_vmid }}: {{ pve_vm_start_task.json.data.exitstatus }}"
