@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+# Posts a message to fail2ban_webhook_url for every ban. Root-only: the URL may hold a token.
+[Definition]
+actionstart =
+actionstop =
+actioncheck =
+{% if fail2ban_webhook_format == 'json' %}
+actionban = curl -fsS --max-time 10 -o /dev/null -H 'Content-Type: application/json' --data-binary '{"title": "Fail2Ban on <fq-hostname>", "text": "<msg>", "message": "<msg>", "content": "<msg>"}' '{{ fail2ban_webhook_url }}'
+{% else %}
+actionban = curl -fsS --max-time 10 -o /dev/null -H 'Title: Fail2Ban on <fq-hostname>' -H 'Content-Type: text/plain' --data-binary '<msg>' '{{ fail2ban_webhook_url }}'
+{% endif %}
+actionunban =
+
+[Init]
+msg = Banned <ip> in jail <name> on <fq-hostname> after <failures> failures.

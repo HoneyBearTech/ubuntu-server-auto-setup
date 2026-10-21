@@ -31,9 +31,12 @@ that run on each pull request.
 - Running the ISO build as a non-root user on the Proxmox node.
 
 **Baseline**
-- Optional extra hardening, each off by default and documented: kernel and network `sysctl` settings,
-  auditd, time synchronisation settings, and limiting `sudo` to a password after provisioning.
-- Notifications (mail or a webhook) from unattended-upgrades and Fail2Ban.
+- Done: optional extra hardening, each off by default and documented: kernel and network `sysctl`
+  settings, auditd and an AppArmor check ([security.md](security.md#optional-hardening-and-notifications)).
+  Limiting `sudo` to a password after provisioning is the default since 0.3.0.
+- Done: notifications from unattended-upgrades (mail) and Fail2Ban (mail or a webhook), with an optional
+  msmtp relay.
+- Time synchronisation settings (chrony or `systemd-timesyncd` servers).
 
 **The web UI and the container image**
 - Done: a container image (amd64 and arm64, signed, with an SBOM and provenance) with a web UI that lays

@@ -3,8 +3,9 @@
 The inventory (inventory/hosts.yml) is an ordinary Ansible inventory: the same playbooks can use it from the
 command line (with the Vault password file). Every value a user typed is written with the ``!unsafe`` tag, so
 Ansible never treats it as a template, whatever it contains; only the few templates the UI itself writes
-(such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings. The secrets (the admin password
-and the API token) are in inventory/group_vars/all/vault.yml, encrypted with Ansible Vault.
+(such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings. The secrets (the admin password,
+the API token, and the mail relay password and webhook URL when set) are in inventory/group_vars/all/vault.yml,
+encrypted with Ansible Vault.
 """
 
 import json
@@ -21,7 +22,11 @@ from ansible.parsing.vault import VaultLib, VaultSecret
 from .config import Settings
 from .schema import Schema
 
-VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_token_secret")
+VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_token_secret",
+               "vault_mail_relay_password", "vault_fail2ban_webhook_url")
+# Secrets a server may go without: the inventory refers to them only once they are saved.
+OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
+                    "fail2ban_webhook_url": "vault_fail2ban_webhook_url"}
 SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb")
 
 
@@ -215,6 +220,9 @@ class Store:
         all_vars["admin_password"] = "{{ vault_admin_password }}"  # noqa: S105
         all_vars["pve_api_token_id"] = "{{ vault_pve_api_token_id }}"  # noqa: S105
         all_vars["pve_api_token_secret"] = "{{ vault_pve_api_token_secret }}"  # noqa: S105
+        for name, vault_name in OPTIONAL_SECRETS.items():
+            if config.secret_is_set(vault_name):
+                all_vars[name] = "{{ " + vault_name + " }}"
 
         # The UI's own SSH key and known_hosts, for the Proxmox node and the servers.
         all_vars["ansible_ssh_private_key_file"] = str(s.ssh_key)

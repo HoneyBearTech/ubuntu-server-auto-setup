@@ -510,6 +510,57 @@ def test_hardening(ui):
     assert r.status_code == 422 and len(r.json()["errors"]) == 2
 
 
+EXTRAS = {
+    "hardening_sysctl_enabled": "on", "hardening_auditd_enabled": "on", "hardening_apparmor_enabled": "on",
+    "unattended_upgrades_mail": "updates@example.com", "unattended_upgrades_mail_report": "only-on-error",
+    "fail2ban_destemail": "security@example.com", "fail2ban_webhook_url": "https://ntfy.example.com/bans?auth=tk_1",
+    "fail2ban_webhook_format": "text", "mail_relay_enabled": "on", "mail_relay_host": "smtp.example.com",
+    "mail_relay_port": "465", "mail_relay_tls": "tls", "mail_relay_from": "srv@example.com",
+    "mail_relay_user": "relay", "mail_relay_password": 'p "w" \\ x',
+}
+
+
+def test_hardening_extras_and_notifications(ui, settings):
+    r = post(ui, "/hardening", {**HARDENING, **EXTRAS})
+    assert r.json()["message"] == "Saved the hardening settings."
+    store = ui.app_state.store
+    values = store.load().values
+    assert values["hardening_sysctl_enabled"] is True and "hardening_auditd_immutable" not in values  # the default
+    assert values["mail_relay_port"] == 465 and values["unattended_upgrades_mail_report"] == "only-on-error"
+    secrets = store.read_secrets()
+    assert secrets["vault_fail2ban_webhook_url"] == EXTRAS["fail2ban_webhook_url"]
+    assert secrets["vault_mail_relay_password"] == EXTRAS["mail_relay_password"]
+    text = settings.inventory_file.read_text()
+    assert "fail2ban_webhook_url: '{{ vault_fail2ban_webhook_url }}'" in text and "tk_1" not in text
+    assert "mail_relay_password: '{{ vault_mail_relay_password }}'" in text
+    data = get(ui, "/api/hardening").json()
+    fields = {f["name"]: f for f in data["fields"]}
+    assert fields["fail2ban_webhook_url"]["saved"] is True and data["values"]["fail2ban_webhook_url"] == ""
+
+    # Leaving a saved secret empty keeps it; ticking "Remove the saved value" removes it from the Vault and
+    # the inventory.
+    post(ui, "/hardening", {**HARDENING, **EXTRAS, "fail2ban_webhook_url": "", "mail_relay_password": ""})
+    assert store.read_secrets()["vault_fail2ban_webhook_url"] == EXTRAS["fail2ban_webhook_url"]
+    post(ui, "/hardening", {**HARDENING, **EXTRAS, "fail2ban_webhook_url": "", "fail2ban_webhook_url__clear": "on"})
+    assert "vault_fail2ban_webhook_url" not in store.read_secrets()
+    assert "fail2ban_webhook_url" not in settings.inventory_file.read_text()
+
+
+@pytest.mark.parametrize("name,raw", [
+    ("fail2ban_webhook_url", "https://ntfy.example.com/x'$(id)'"),
+    ("fail2ban_webhook_url", "https://ntfy.example.com/%(action_)s"),
+    ("fail2ban_destemail", "a@example.com\naction = x"),
+    ("unattended_upgrades_mail", 'a@example.com";'),
+    ("mail_relay_host", "smtp.example.com host"),
+    ("mail_relay_user", 'relay"'),
+    ("mail_relay_password", "two\nlines"),
+    ("mail_relay_tls", "maybe"),
+])
+def test_notification_values_that_could_inject_settings_are_refused(ui, name, raw):
+    r = post(ui, "/hardening", {**HARDENING, **EXTRAS, name: raw})
+    assert r.status_code == 422 and set(r.json()["errors"]) == {name}
+
+
 def test_servers(ui):
     configure(ui, servers=2)
     data = get(ui, "/api/servers").json()

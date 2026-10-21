@@ -1,0 +1,67 @@
+---
+- name: Install AppArmor
+  ansible.builtin.apt:
+    name: apparmor
+    state: present
+  register: hardening_apparmor_install
+
+# The service loads every profile in /etc/apparmor.d in the mode it ships with. In a container the policy is
+# the host's, so it is only enabled there.
+- name: Enable AppArmor
+  ansible.builtin.systemd_service:
+    name: apparmor
+    enabled: true
+    state: "{{ omit if hardening_in_container else 'started' }}"
+  when: not (ansible_check_mode and hardening_apparmor_install is changed)
+
+- name: Ask whether AppArmor is enabled in the kernel
+  ansible.builtin.command: aa-enabled
+  register: hardening_apparmor_enabled_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and hardening_apparmor_install is changed)
+
+- name: Fail if the kernel has AppArmor turned off
+  ansible.builtin.fail:
+    msg: >-
+      AppArmor isn't enabled in {{ inventory_hostname }}'s kernel (aa-enabled: {{ hardening_apparmor_enabled_status.stdout
+      | default('') | trim }}). Remove apparmor=0 or another security= module from the kernel command line and reboot,
+      or set hardening_apparmor_enabled: false.
+  when:
+    - hardening_apparmor_enabled_status is not skipped
+    - hardening_apparmor_enabled_status.rc != 0
+    - not hardening_in_container
+
+- name: Report that AppArmor can't be checked in a container
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is a container ({{ ansible_facts.virtualization_type }}): AppArmor is installed and
+      enabled, but its policy belongs to the host (aa-enabled: {{ hardening_apparmor_enabled_status.stdout | default('') | trim }}).
+  when:
+    - hardening_apparmor_enabled_status is not skipped
+    - hardening_apparmor_enabled_status.rc != 0
+    - hardening_in_container
+
+- name: Read the loaded AppArmor profiles
+  ansible.builtin.command: aa-status --json
+  register: hardening_apparmor_status
+  changed_when: false
+  check_mode: false
+  when:
+    - hardening_apparmor_enabled_status is not skipped
+    - hardening_apparmor_enabled_status.rc == 0
+
+# Some packages ship a profile in complain mode on purpose, so this reports them rather than enforcing them.
+- name: Report AppArmor profiles in complain mode
+  ansible.builtin.debug:
+    msg: >-
+      {{ hardening_apparmor_complain | length }} AppArmor profile(s) on {{ inventory_hostname }} only log what they
+      would block (complain mode): {{ hardening_apparmor_complain | join(', ') }}. Put one in enforce mode with
+      aa-enforce once you have checked its log.
+  vars:
+    hardening_apparmor_complain: "{{ (hardening_apparmor_status.stdout | from_json).profiles | dict2items
+      | selectattr('value', 'equalto', 'complain') | map(attribute='key') | sort }}"
+  when:
+    - hardening_apparmor_status is not skipped
+    - hardening_apparmor_complain | length > 0

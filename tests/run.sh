@@ -218,6 +218,60 @@ play_fails "couldn't use sudo afterwards" playbooks/baseline.yml --limit srv-01 
 cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 
+step "baseline: optional hardening and notifications, all on, then a rerun that changes nothing"
+P2222=(-e ssh_port=2222 -e ansible_port=2222 -e admin_sudo_nopasswd=true)
+HARDENING=(-e @tests/hardening-vars.yml)
+if [ "${CI:-}" != "true" ]; then
+  # Kernel-wide keys (unlike net.*, which belong to the container's network namespace) would change the Docker
+  # host's own kernel until it reboots. CI's runner is thrown away afterwards, so only CI applies them.
+  HARDENING+=(-e '{"hardening_sysctl_extra": {"net.ipv4.conf.all.rp_filter": 2,
+    "net.ipv4.icmp_ignore_bogus_error_responses": null, "kernel.kptr_restrict": null, "kernel.dmesg_restrict": null,
+    "kernel.unprivileged_bpf_disabled": null, "kernel.yama.ptrace_scope": null, "kernel.randomize_va_space": null,
+    "net.core.bpf_jit_harden": null, "dev.tty.ldisc_autoload": null, "fs.protected_hardlinks": null,
+    "fs.protected_symlinks": null, "fs.protected_fifos": null, "fs.protected_regular": null, "fs.suid_dumpable": null}}')
+fi
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${P2222[@]}" "${HARDENING[@]}"
+cool_down
+play --idempotent playbooks/baseline.yml --limit srv-01 "${P2222[@]}" "${HARDENING[@]}"
+cool_down
+play tests/verify-hardening.yml -e ansible_port=2222 "${HARDENING[@]}"
+cool_down
+play --idempotent playbooks/baseline.yml --limit srv-01 --check --diff "${P2222[@]}" "${HARDENING[@]}"
+
+step "baseline: hardening and notification values that could inject settings are refused"
+cool_down
+play_fails 'fail2ban_webhook_url must be an http(s) URL' playbooks/baseline.yml --limit srv-01 --tags fail2ban \
+  "${P2222[@]}" -e '{"fail2ban_webhook_url": "https://ntfy.example.com/x\nenabled = false"}'
+play_fails 'fail2ban_webhook_url must be an http(s) URL' playbooks/baseline.yml --limit srv-01 --tags fail2ban \
+  "${P2222[@]}" -e '{"fail2ban_webhook_url": "https://ntfy.example.com/x'\''$(touch /pwned)'\''"}'
+play_fails 'fail2ban_destemail and fail2ban_sender must be plain mail addresses' playbooks/baseline.yml \
+  --limit srv-01 --tags fail2ban "${P2222[@]}" -e '{"fail2ban_destemail": "a@example.com\naction = %(action_)s"}'
+cool_down
+play_fails 'unattended_upgrades_mail and mail_relay_from must be plain mail addresses' playbooks/baseline.yml \
+  --limit srv-01 --tags common "${P2222[@]}" -e '{"unattended_upgrades_mail": "a@example.com\";\nAPT::Periodic::Unattended-Upgrade \"0"}'
+play_fails 'mail_relay_host must be a host' playbooks/baseline.yml --limit srv-01 --tags common "${P2222[@]}" \
+  "${HARDENING[@]}" -e '{"mail_relay_host": "smtp.example.com\nhost evil.example.com"}'
+play_fails 'mail_relay_user and mail_relay_password go together' playbooks/baseline.yml --limit srv-01 --tags common \
+  "${P2222[@]}" "${HARDENING[@]}" -e '{"mail_relay_password": "secret\npasswordeval touch /pwned"}'
+cool_down
+play_fails 'hardening_sysctl and hardening_sysctl_extra keys must be' playbooks/baseline.yml --limit srv-01 \
+  --tags hardening "${P2222[@]}" -e hardening_sysctl_enabled=true \
+  -e '{"hardening_sysctl_extra": {"kernel.sysrq": "0\nkernel.core_pattern = |/tmp/x"}}'
+play_fails 'hardening_sysctl and hardening_sysctl_extra keys must be' playbooks/baseline.yml --limit srv-01 \
+  --tags hardening "${P2222[@]}" -e hardening_sysctl_enabled=true -e '{"hardening_sysctl_extra": {"kernel.sysrq = 1": 0}}'
+docker exec "$SRV" sh -c '! test -e /pwned' || { echo "ERROR: an injected command ran" >&2; exit 1; }
+
+step "baseline: turning them off again removes their files"
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${P2222[@]}"
+docker exec "$SRV" sh -c '! test -e /etc/sysctl.d/90-usas-hardening.conf && ! test -e /etc/audit/rules.d/60-usas-hardening.rules \
+  && ! test -e /etc/fail2ban/action.d/usas-webhook.conf && ! test -e /etc/msmtp-password \
+  && ! grep -q Mail /etc/apt/apt.conf.d/52unattended-upgrades-local && ! grep -Eq "^(action|destemail) =" /etc/fail2ban/jail.local' \
+  || { echo "ERROR: turning the options off left their files behind" >&2; exit 1; }
+cool_down
+play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
+
 step "Task coverage"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE"
 

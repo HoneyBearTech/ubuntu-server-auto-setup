@@ -1,0 +1,55 @@
+---
+# Extra hardening, each part off by default. See docs/security.md for what each one does and why it's opt-in.
+
+# --- sysctl ---
+# Write hardening_sysctl (plus hardening_sysctl_extra) to /etc/sysctl.d/90-usas-hardening.conf and apply it.
+hardening_sysctl_enabled: false
+# Kernel and network settings that don't get in the way of Docker or a Proxmox guest's network: IP forwarding
+# and IPv6 router advertisements are left alone. Replace the whole set in the inventory, or change single
+# keys with hardening_sysctl_extra.
+hardening_sysctl:
+  kernel.kptr_restrict: 2
+  kernel.dmesg_restrict: 1
+  kernel.unprivileged_bpf_disabled: 1
+  kernel.yama.ptrace_scope: 1
+  kernel.randomize_va_space: 2
+  net.core.bpf_jit_harden: 2
+  dev.tty.ldisc_autoload: 0
+  fs.protected_hardlinks: 1
+  fs.protected_symlinks: 1
+  fs.protected_fifos: 2
+  fs.protected_regular: 2
+  fs.suid_dumpable: 0
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.secure_redirects: 0
+  net.ipv4.conf.default.secure_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.default.accept_source_route: 0
+# Merged over hardening_sysctl: new keys are added, a key set to null is left out (for example
+# net.ipv4.conf.all.rp_filter: 2 on a host with asymmetric routing, or kernel.yama.ptrace_scope: null).
+hardening_sysctl_extra: {}
+
+# --- auditd ---
+# Install auditd and load rules that watch identity files, sudoers, the sshd configuration, time changes,
+# kernel module loading and the audit configuration and logs.
+hardening_auditd_enabled: false
+# Lock the rules until the next reboot (-e 2): nobody, root included, can change or stop auditing; changing
+# the rules then needs a reboot.
+hardening_auditd_immutable: false
+
+# --- AppArmor ---
+# Install AppArmor, keep it enabled and running so Ubuntu's profiles are loaded, and report profiles that
+# are in complain mode (it doesn't change any profile's mode).
+hardening_apparmor_enabled: false

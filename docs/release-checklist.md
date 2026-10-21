@@ -130,6 +130,18 @@ be tagged; replace them with yours.
   make baseline LIMIT=test-01 ARGS="-e ssh_port=2222"
   ```
 
+- [ ] **Optional hardening**, if the release touches the `hardening` role (CI's containers can't run
+  auditd or load AppArmor policy): turn on the extras, check them, and check that a rerun reports
+  `changed=0`:
+
+  ```bash
+  make baseline LIMIT=test-01 ARGS="-e hardening_sysctl_enabled=true -e hardening_auditd_enabled=true -e hardening_apparmor_enabled=true"
+  ssh -t sysadmin@192.0.2.10 'sudo sysctl kernel.kptr_restrict net.ipv4.conf.all.rp_filter; sudo auditctl -l; sudo aa-status | head -3'
+  make baseline LIMIT=test-01 ARGS="-e hardening_sysctl_enabled=true -e hardening_auditd_enabled=true -e hardening_apparmor_enabled=true"
+  ```
+
+  `auditctl -l` must list the `identity`, `sudoers`, `sshd`, `time-change`, `modules` and `audit-*` rules.
+
 Run the playbooks once through the web UI of the image under test, and the second runs from the CLI in a
 checkout of the same commit (`make build-installer`, `make provision LIMIT=test-01`,
 `make baseline LIMIT=test-01`), so both paths are covered. `make site LIMIT=test-01` runs all three.

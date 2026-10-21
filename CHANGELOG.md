@@ -32,6 +32,29 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   each release's results ([docs/accessibility.md](docs/accessibility.md#screen-reader-walk-through)), now part
   of the pre-release checklist. It hasn't been run yet.
 
+- Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
+  `hardening_sysctl_enabled` (kernel and network settings in `/etc/sysctl.d/90-usas-hardening.conf`,
+  applied and checked live on every run, overridable with `hardening_sysctl` and `hardening_sysctl_extra`;
+  IP forwarding and router advertisements left alone for Docker and Proxmox guests),
+  `hardening_auditd_enabled` (auditd with rules for identity files, sudoers, the sshd configuration, time
+  changes, kernel modules and the audit configuration and logs; `hardening_auditd_immutable` locks them
+  until a reboot) and `hardening_apparmor_enabled` (AppArmor kept installed, enabled and running, with
+  complain-mode profiles reported, never forced). The role is tagged `hardening`.
+- Optional notifications: `unattended_upgrades_mail` (with `unattended_upgrades_mail_report`) for
+  unattended-upgrades' report; `fail2ban_destemail` and `fail2ban_sender` to mail every ban (`action_mw`);
+  `fail2ban_webhook_url` and `fail2ban_webhook_format` to post every ban to an ntfy, Gotify, Slack, Discord
+  or Mattermost webhook; and `mail_relay_enabled` to install `msmtp-mta` as a send-only `sendmail` through
+  your smarthost (`mail_relay_host`, `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`,
+  `mail_relay_user`, and `mail_relay_password` from the Vault). The relay password and webhook URL are
+  stored on the server in root-only `0600` files, and every value is checked against `\Z`-anchored
+  allowlist patterns. With the defaults, a rerun changes nothing on existing servers.
+- The web UI's Hardening page has the new switches and notification settings, in groups of their own. The
+  relay password and webhook URL are kept in the Vault, and a saved optional secret can now be removed
+  ("Remove the saved value").
+- Tests: an integration scenario that turns every option on (`tests/hardening-vars.yml`,
+  `tests/verify-hardening.yml`, including a real ban reaching a webhook listener), injection cases, and the
+  fuzz target `fuzz_baseline_extras.py`; `fuzz_configs.py` now covers the Fail2Ban notifications.
+
 ### Fixed
 
 - Web UI: on narrow screens, Escape now closes the open menu and puts focus back on the **Menu** button,

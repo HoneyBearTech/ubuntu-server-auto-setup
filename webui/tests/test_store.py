@@ -53,6 +53,14 @@ def test_round_trip(store):
                                  "ufw_ports": [{"port": "443", "proto": "tcp"}]}
     assert loaded.servers[1]["ufw_ports"] == []
     assert "ssh_port" not in loaded.values  # equal to the role default, so left out
+    text = store.settings.inventory_file.read_text()
+    assert "fail2ban_webhook_url" not in text and "mail_relay_password" not in text  # not saved, so not referred to
+    config.secrets["vault_fail2ban_webhook_url"] = "https://ntfy.example.com/x?auth=tk"
+    store.save(config)
+    assert store.load().secrets == config.secrets
+    text = store.settings.inventory_file.read_text()
+    assert "fail2ban_webhook_url: '{{ vault_fail2ban_webhook_url }}'" in text and "auth=tk" not in text
+    assert "mail_relay_password" not in text
     assert store.host_names() >= {"web-01", "db-01", "pve-1", "all", "ubuntu_servers"}
 
 

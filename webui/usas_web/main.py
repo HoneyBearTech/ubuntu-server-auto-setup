@@ -451,6 +451,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if f.vault:
                 if value:
                     config.secrets[f.vault] = value
+                elif not f.required and form.get(f"{f.name}__clear") in ("on", "true"):
+                    config.secrets.pop(f.vault, None)
                 elif f.required and not config.secret_is_set(f.vault):
                     errors[f.name] = f"{f.label} is required."
                 continue

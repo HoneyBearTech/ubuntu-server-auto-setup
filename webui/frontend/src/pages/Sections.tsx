@@ -363,6 +363,10 @@ export function Defaults() {
 
 // --- Hardening -------------------------------------------------------------------------------------------
 
+// Where update reports and ban notices go; sending mail needs the relay below or a mail server of the server's own.
+const NOTIFICATION_FIELDS = ["unattended_upgrades_mail", "unattended_upgrades_mail_report", "fail2ban_destemail",
+  "fail2ban_sender", "fail2ban_webhook_url", "fail2ban_webhook_format"];
+
 export function Hardening() {
   const page = useData<SectionData>("/api/hardening");
   const form = useSectionForm("/api/hardening", () => page.reload());
@@ -374,7 +378,10 @@ export function Hardening() {
   const groups = groupFields(data.fields, [
     { legend: "SSH", test: (f) => f.name.startsWith("ssh_") || f.name === "admin_sudo_nopasswd" },
     { legend: "Firewall (UFW)", test: (f) => f.name.startsWith("ufw_") },
-    { legend: "Fail2Ban", test: (f) => f.name.startsWith("fail2ban_") },
+    { legend: "Fail2Ban", test: (f) => f.name.startsWith("fail2ban_") && !NOTIFICATION_FIELDS.includes(f.name) },
+    { legend: "Extra hardening (off by default)", test: (f) => f.name.startsWith("hardening_") },
+    { legend: "Notifications", test: named(...NOTIFICATION_FIELDS) },
+    { legend: "Mail relay", test: (f) => f.name.startsWith("mail_relay_") },
   ]);
   return (
     <>
@@ -382,7 +389,7 @@ export function Hardening() {
       <p className="lead">
         What the baseline applies to every server. <strong>Wrong values can lock you out</strong>: check the SSH
         port, the allowed users and the firewall sources, keep the Proxmox console open, and try a run in check
-        mode first.
+        mode first. The extra hardening and the notifications stay off until you turn them on.
       </p>
       <ErrorSummary errors={errors} />
       <form key={page.loaded} className="card" method="post" action="/api/hardening" noValidate

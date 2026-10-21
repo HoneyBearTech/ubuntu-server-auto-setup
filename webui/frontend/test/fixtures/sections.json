@@ -532,6 +532,206 @@
     "variable": "fail2ban_banaction",
     "default": null,
     "choices": null
+   },
+   {
+    "name": "hardening_sysctl_enabled",
+    "label": "Kernel and network settings (sysctl)",
+    "kind": "bool",
+    "help": "Write hardening_sysctl (plus hardening_sysctl_extra) to /etc/sysctl.d/90-usas-hardening.conf and apply it.",
+    "required": false,
+    "advanced": false,
+    "variable": "hardening_sysctl_enabled",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "hardening_auditd_enabled",
+    "label": "Audit changes with auditd",
+    "kind": "bool",
+    "help": "Install auditd and load rules that watch identity files, sudoers, the sshd configuration, time changes, kernel module loading and the audit configuration and logs.",
+    "required": false,
+    "advanced": false,
+    "variable": "hardening_auditd_enabled",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "hardening_auditd_immutable",
+    "label": "Lock the audit rules until a reboot",
+    "kind": "bool",
+    "help": "Lock the rules until the next reboot (-e 2): nobody, root included, can change or stop auditing; changing the rules then needs a reboot.",
+    "required": false,
+    "advanced": true,
+    "variable": "hardening_auditd_immutable",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "hardening_apparmor_enabled",
+    "label": "Keep AppArmor on and report profiles in complain mode",
+    "kind": "bool",
+    "help": "Install AppArmor, keep it enabled and running so Ubuntu's profiles are loaded, and report profiles that are in complain mode (it doesn't change any profile's mode).",
+    "required": false,
+    "advanced": false,
+    "variable": "hardening_apparmor_enabled",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "unattended_upgrades_mail",
+    "label": "Mail update reports to",
+    "kind": "text",
+    "help": "Mail unattended-upgrades' report to this address (empty: no mail). Sending needs a mail transfer agent on the server: an existing one, or the msmtp relay below.",
+    "required": false,
+    "advanced": false,
+    "variable": "unattended_upgrades_mail",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "unattended_upgrades_mail_report",
+    "label": "Which update reports",
+    "kind": "choice",
+    "help": "Always, only-on-error or on-change.",
+    "required": false,
+    "advanced": false,
+    "variable": "unattended_upgrades_mail_report",
+    "default": "on-change",
+    "choices": [
+     "always",
+     "only-on-error",
+     "on-change"
+    ]
+   },
+   {
+    "name": "fail2ban_destemail",
+    "label": "Mail bans to",
+    "kind": "text",
+    "help": "Mail every ban, with a whois report of the address, to this address (Fail2Ban's action_mw). Needs a mail transfer agent on the server, such as the common role's msmtp relay (mail_relay_enabled).",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_destemail",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "fail2ban_sender",
+    "label": "Ban mail sender",
+    "kind": "text",
+    "help": "The sender address; empty keeps Fail2Ban's default (root@<host>). The msmtp relay sends from mail_relay_from.",
+    "required": false,
+    "advanced": true,
+    "variable": "fail2ban_sender",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "fail2ban_webhook_url",
+    "label": "Webhook for bans",
+    "kind": "secret",
+    "help": "An ntfy, Gotify, Slack, Discord or Mattermost URL that gets a message for every ban. It often holds a token, so it is kept in the Vault.",
+    "required": false,
+    "advanced": false,
+    "variable": "vault_fail2ban_webhook_url",
+    "default": null,
+    "choices": null,
+    "saved": false
+   },
+   {
+    "name": "fail2ban_webhook_format",
+    "label": "Webhook message format",
+    "kind": "choice",
+    "help": "Text sends the message as the body (ntfy); json sends {\"title\", \"text\", \"message\", \"content\"} (Slack, Mattermost, Gotify, Discord).",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_webhook_format",
+    "default": "text",
+    "choices": [
+     "text",
+     "json"
+    ]
+   },
+   {
+    "name": "mail_relay_enabled",
+    "label": "Send mail through a relay (msmtp)",
+    "kind": "bool",
+    "help": "Install msmtp-mta as the server's sendmail, passing all mail to mail_relay_host. It replaces no other mail server: the run stops if one (Postfix, Exim...) is installed.",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_enabled",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "mail_relay_host",
+    "label": "Relay host",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_host",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "mail_relay_port",
+    "label": "Relay port",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_port",
+    "default": "587",
+    "choices": null
+   },
+   {
+    "name": "mail_relay_tls",
+    "label": "Relay encryption",
+    "kind": "choice",
+    "help": "Starttls, tls (implicit TLS, usually port 465) or \"off\".",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_tls",
+    "default": "starttls",
+    "choices": [
+     "starttls",
+     "tls",
+     "off"
+    ]
+   },
+   {
+    "name": "mail_relay_from",
+    "label": "Sender address",
+    "kind": "text",
+    "help": "The sender address of the mail the server sends.",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_from",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "mail_relay_user",
+    "label": "Relay user",
+    "kind": "text",
+    "help": "Sign in to the relay when set; the password belongs in the Vault (\"{{ vault_mail_relay_password }}\").",
+    "required": false,
+    "advanced": false,
+    "variable": "mail_relay_user",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "mail_relay_password",
+    "label": "Relay password",
+    "kind": "secret",
+    "help": "Kept in the Vault; on the server only root can read it.",
+    "required": false,
+    "advanced": false,
+    "variable": "vault_mail_relay_password",
+    "default": null,
+    "choices": null,
+    "saved": false
    }
   ],
   "values": {
@@ -549,7 +749,24 @@
    "fail2ban_bantime_increment": true,
    "fail2ban_bantime_maxtime": "1w",
    "fail2ban_sshd_mode": "normal",
-   "fail2ban_banaction": ""
+   "fail2ban_banaction": "",
+   "hardening_sysctl_enabled": false,
+   "hardening_auditd_enabled": false,
+   "hardening_auditd_immutable": false,
+   "hardening_apparmor_enabled": false,
+   "unattended_upgrades_mail": "",
+   "unattended_upgrades_mail_report": "on-change",
+   "fail2ban_destemail": "",
+   "fail2ban_sender": "",
+   "fail2ban_webhook_url": "",
+   "fail2ban_webhook_format": "text",
+   "mail_relay_enabled": false,
+   "mail_relay_host": "",
+   "mail_relay_port": "587",
+   "mail_relay_tls": "starttls",
+   "mail_relay_from": "",
+   "mail_relay_user": "",
+   "mail_relay_password": ""
   }
  },
  "servers": {

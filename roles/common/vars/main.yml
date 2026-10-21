@@ -2,3 +2,15 @@
 # Input formats this role accepts; the admin user name ends up in a sudoers file name.
 common_username_pattern: '^[a-z_][a-z0-9_-]{0,31}\Z'
 common_hostname_pattern: '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z'
+# Mail addresses and the relay's host and user end up in apt and msmtp configuration files: no spaces, quotes
+# or line breaks. The password is kept in a file of its own, so it only can't contain control characters.
+# tests/fuzz/ reads them from here.
+common_email_pattern: '^[A-Za-z0-9._+-]+@[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\Z'
+common_mail_host_pattern: '^[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?\Z'
+common_mail_user_pattern: '^[A-Za-z0-9._@+=-]*\Z'
+common_mail_password_pattern: '^[^\x00-\x1f\x7f]*\Z'
+common_mail_report_values: [always, only-on-error, on-change]
+common_mail_tls_values: [starttls, tls, "off"]
+# Packages that are a mail transfer agent already; msmtp-mta would replace them.
+common_other_mtas: [postfix, exim4-daemon-light, exim4-daemon-heavy, sendmail-bin, opensmtpd, nullmailer, dma, ssmtp, courier-mta]
+common_msmtp_password_file: /etc/msmtp-password
