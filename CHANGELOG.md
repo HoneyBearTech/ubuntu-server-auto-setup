@@ -18,6 +18,8 @@ Publishes the changes listed under 0.2.1, with the image fix below.
   libraries in the Python 3.14 base image (certifi, msgpack, setuptools, urllib3) carried fixable advisories,
   including GHSA-6q48-6c7w-9gw2 (critical); the release's Trivy gate stopped 0.2.1 on them. The web UI's own
   copies of those libraries were already fixed versions.
+- Pull requests now run the release's Trivy scan on the image too (in the Image smoke test check), so a
+  vulnerable base image is caught before a release is cut.
 
 ## [0.2.1] - 2026-10-21
 

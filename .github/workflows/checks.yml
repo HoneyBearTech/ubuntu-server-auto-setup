@@ -152,6 +152,15 @@ jobs:
       - name: Build the image and run the smoke test
         run: tests/webui-smoke.sh
 
+      # The same gate as the release workflow, so a vulnerable base image or package shows up on the pull
+      # request rather than when a release is cut.
+      - name: Scan the image for fixable HIGH and CRITICAL vulnerabilities (Trivy)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
+          usas:smoke
+
       # The Windows start script, with PowerShell 7 on Linux (Windows runners can't run Linux containers):
       # creates the container from the image just built, shows the setup code, starts it again, stops it.
       - name: Start it with start.ps1
