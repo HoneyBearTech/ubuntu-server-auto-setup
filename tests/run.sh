@@ -146,10 +146,22 @@ play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doe
   playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
 play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
 
+step "baseline: check mode on the fresh server fails nothing and changes nothing"
+# Before the first run UFW and Fail2Ban aren't installed and nothing limits SSH connections.
+play playbooks/baseline.yml --limit srv-01 --check --diff
+play playbooks/baseline.yml --limit srv-01 --check --diff -e ssh_port=2222
+play playbooks/baseline.yml --limit srv-01 --check --diff -e admin_user=newadmin
+docker exec "$SRV" sh -c '! test -e /etc/ssh/sshd_config.d/00-hardening.conf && ! command -v ufw && ! id newadmin' \
+  >/dev/null || { echo "ERROR: a check run changed the server" >&2; exit 1; }
+
 step "baseline: first run, second run, checks"
 play playbooks/baseline.yml --limit srv-01
 play --idempotent playbooks/baseline.yml --limit srv-01
 play tests/verify-baseline.yml
+cool_down
+
+step "baseline: check mode on a server that has the baseline reports no changes"
+play --idempotent playbooks/baseline.yml --limit srv-01 --check --diff
 cool_down
 
 step "baseline: a key that is no longer published is removed"

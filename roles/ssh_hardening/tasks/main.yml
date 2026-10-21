@@ -58,8 +58,9 @@
 - name: Apply SSH changes now
   ansible.builtin.meta: flush_handlers
 
+# Not in check mode: sshd hasn't really moved, so the run carries on over the current port.
 - name: Reconnect on the new SSH port
-  when: ssh_previous_port | int != ssh_port | int
+  when: ssh_previous_port | int != ssh_port | int and not ansible_check_mode
   block:
     # Trust the host key read over the already-verified connection, not a fresh scan.
     - name: Read the server's host key

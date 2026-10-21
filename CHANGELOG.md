@@ -8,6 +8,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- Keys in `admin_extra_ssh_keys`, including the web UI's own key, were left out of `authorized_keys` and the
+  installer's configuration whenever `github_user` was set (since 0.2.0), and the baseline's exclusive key
+  sync removed them. They are installed again.
+- `--check --diff` works on a server the baseline hasn't run on yet. It stopped at the first package or
+  service the run would install: the package lists are now refreshed in check mode too, and the UFW rules,
+  Fail2Ban and other services that the run would install are skipped in check mode until they exist. A check
+  run with a new `ssh_port` no longer tries to reconnect on a port sshd isn't using yet, and one with an
+  `admin_user` that doesn't exist yet no longer fails on its `authorized_keys`.
+
 ## [0.3.0] - 2026-10-21
 
 The web UI becomes USAS, a React app with a dark theme; passwordless sudo is removed after the first baseline
