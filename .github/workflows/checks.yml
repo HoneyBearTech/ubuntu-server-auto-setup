@@ -3,8 +3,8 @@ name: CI
 
 # Every pull request and push to main: YAML, Ansible, Python and Dockerfile lint, a syntax check of every
 # playbook, the workflow linter, a secret scan over the whole history, the integration tests (the playbooks
-# run against containers and a mock Proxmox API), the web UI's unit tests (server and app), and a smoke test of the container
-# image (see docs/testing.md). The job names are the required status checks in the main branch ruleset; keep
+# run against containers and a mock Proxmox API), the web UI's unit tests (server and app) and browser tests, and a smoke
+# test of the container image (see docs/testing.md). The job names are the required status checks in the main branch ruleset; keep
 # them stable.
 on:  # yamllint disable-line rule:truthy
   push:
@@ -167,6 +167,41 @@ jobs:
       - name: Build the app
         working-directory: webui/frontend
         run: npm run build
+
+      # The browser tests start a provisioning run, and the playbook needs the collections.
+      - name: Install the Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Chromium, at the build the lock file's Playwright expects: the download is cached by that version; the
+      # system libraries it needs come from Ubuntu's archive on every run.
+      - name: Find the Playwright version
+        id: playwright
+        working-directory: webui/frontend
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Chromium for the browser tests
+        working-directory: webui/frontend
+        run: npx playwright install --with-deps --only-shell chromium
+
+      # The app in Chromium against the server and the mock Proxmox API (tests/webui-browser.sh): setup, the
+      # connection test, the node and a run by keyboard only; Tab order, visible focus and no traps on every
+      # page; Escape on the phone menu; the run's live status; axe-core's WCAG 2.1 A and AA rules with real
+      # layout, so with contrast, in every theme (docs/accessibility.md).
+      - name: Run the browser tests (Playwright)
+        run: tests/webui-browser.sh
+
+      - name: Keep the browser tests' traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: webui/frontend/test-results/
+          retention-days: 7
 
   image:
     name: Image smoke test

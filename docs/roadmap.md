@@ -43,8 +43,9 @@ that run on each pull request.
 - Several Proxmox nodes per inventory (choosing the node per server).
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
-- An automated keyboard check of the pages in CI (a real browser), and a screen-reader walk-through
-  ([accessibility.md](accessibility.md)).
+- Done: an automated keyboard and axe-core check of every page in a real browser in CI (Playwright,
+  Chromium). Written, not yet run: a screen-reader walk-through with VoiceOver and NVDA, now part of the
+  pre-release checklist ([accessibility.md](accessibility.md#screen-reader-walk-through)).
 
 **Supply chain**
 - Done: CI and the image install hash-pinned sets of Python packages (`requirements-ci.txt`,

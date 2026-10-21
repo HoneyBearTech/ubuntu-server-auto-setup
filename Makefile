@@ -4,7 +4,7 @@ LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 
-.PHONY: help deps app lint syntax test fuzz webui-test image smoke ui site build-installer provision baseline keys
+.PHONY: help deps app lint syntax test fuzz webui-test webui-browser image smoke ui site build-installer provision baseline keys
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -33,6 +33,9 @@ fuzz: ## Atheris fuzz targets, FUZZ_SECONDS each (Linux x86-64; needs requiremen
 webui-test: ## The web UI's unit tests (server and app), with coverage
 	cd webui && python -m pytest
 	cd webui/frontend && npm run check && npm test
+
+webui-browser: ## The web UI in Chromium: keyboard, focus, live regions, axe-core (after make app and the collections)
+	tests/webui-browser.sh
 
 image: ## Build the container image as ubuntu-server-auto-setup:dev
 	docker build -t ubuntu-server-auto-setup:dev .

@@ -22,8 +22,20 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   certificate instead of trusting them on first use: comparing fingerprints with the node's console,
   `StrictHostKeyChecking=yes`, clustered nodes, the cluster CA with `pve_validate_certs: true`, and giving
   the web UI's container a `known_hosts` entry.
+- Browser tests of the web UI in CI (Playwright, Chromium; `tests/webui-browser.sh`, `make webui-browser`),
+  in the "Web UI tests" check: the whole setup and a provisioning run by keyboard only, against the server
+  and the mock Proxmox API; Tab order, a visible and uncovered focus outline and no keyboard trap on every
+  page; where focus goes after each action; the run's status in a polite live region while the output
+  streams without moving focus; and axe-core's WCAG 2.1 A and AA rules with real layout, so with contrast,
+  on every page in the dark, light and system themes. See [docs/testing.md](docs/testing.md#the-browser-tests).
+- A screen-reader walk-through with VoiceOver and NVDA, with what each step should announce and a table for
+  each release's results ([docs/accessibility.md](docs/accessibility.md#screen-reader-walk-through)), now part
+  of the pre-release checklist. It hasn't been run yet.
 
 ### Fixed
+
+- Web UI: on narrow screens, Escape now closes the open menu and puts focus back on the **Menu** button,
+  and moving focus out of the menu closes it, so it no longer covers the part of the page that has focus.
 
 - [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
   virtual environment the Proxmox modules don't read the system's trust store.

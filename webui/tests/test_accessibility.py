@@ -2,7 +2,8 @@
 language, a title, one h1, landmarks, a skip link, unique IDs, and a message for browsers without JavaScript;
 and nothing inline that the Content-Security-Policy would block. The pages the app draws are checked the same
 way, plus axe-core, by the app's own tests (webui/frontend/test/a11y.test.tsx); contrast by
-webui/frontend/test/contrast.test.ts. Keyboard use and screen readers are checked in a browser by hand."""
+webui/frontend/test/contrast.test.ts. Keyboard use, focus and axe-core with real layout are checked in Chromium by
+webui/frontend/e2e (tests/webui-browser.sh); screen readers by hand (docs/accessibility.md)."""
 
 import html.parser
 import re

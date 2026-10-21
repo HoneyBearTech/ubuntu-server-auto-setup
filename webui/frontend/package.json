@@ -11,7 +11,7 @@
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc --noEmit -p e2e",
     "test": "vitest run --coverage"
   },
   "dependencies": {
@@ -21,9 +21,12 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.8",
+    "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
