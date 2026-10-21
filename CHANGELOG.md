@@ -8,6 +8,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Changed
+
+- The container image runs Python 3.14 (was 3.12), the newest Python that ansible-core 2.20 supports.
+  Dependabot no longer proposes Python 3.15 or later for the image until ansible-core supports it.
+
+### Fixed
+
+- A failure to update the Docker Hub page no longer stops a release: the v0.2.0 run pushed and signed the
+  image, then stopped before creating the GitHub Release because the Docker Hub token lacked Delete scope.
+
 ## [0.2.0] - 2026-10-20
 
 The container image with a web UI, published to Docker Hub, plus fuzzing and stricter input validation.

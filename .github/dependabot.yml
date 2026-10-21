@@ -30,3 +30,9 @@ updates:
     schedule:
       interval: "weekly"
     assignees: ["HoneyBearTech"]
+    ignore:
+      # The image runs ansible-core 2.20, which supports Python 3.12 to 3.14 on the control node. Move the
+      # image past 3.14 together with an ansible-core that supports the newer Python (and only once every
+      # package in requirements-webui.txt ships wheels for it).
+      - dependency-name: "python"
+        versions: [">=3.15"]
