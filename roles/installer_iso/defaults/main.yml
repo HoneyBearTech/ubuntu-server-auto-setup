@@ -3,3 +3,10 @@
 installer_grub_timeout: 3
 # Set true to rebuild the remastered ISO even if it already exists.
 installer_iso_rebuild: false
+# SHA256SUMS must carry a good signature (SHA256SUMS.gpg) by this key before its checksum is trusted:
+# Ubuntu's CD image signing key, "Ubuntu CD Image Automatic Signing Key (2012) <cdimage@ubuntu.com>",
+# whose fingerprint Ubuntu publishes at https://ubuntu.com/tutorials/how-to-verify-ubuntu. The keyring is a
+# binary OpenPGP keyring on the control node: a name in the role's files/ or an absolute path. Change both
+# only for a mirror that signs its own SHA256SUMS.
+installer_signing_keyring: ubuntu-cdimage-keyring.gpg
+installer_signing_fingerprint: 843938DF228D22F7B3742BC0D94AA3F0EFE21092

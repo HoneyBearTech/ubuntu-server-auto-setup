@@ -42,8 +42,10 @@ copied into the repository ("vendored").
 | Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test` |
 
 On the systems they manage, the playbooks install packages only from Ubuntu's and Debian's own archives
-(`apt`): `xorriso` on the Proxmox nodes; UFW, Fail2Ban, unattended-upgrades, qemu-guest-agent and a few
-tools on the servers. The Ubuntu ISO is verified against Ubuntu's published SHA-256 checksum.
+(`apt`): `xorriso` and `gpgv` on the Proxmox nodes; UFW, Fail2Ban, unattended-upgrades, qemu-guest-agent and a few
+tools on the servers. The Ubuntu ISO is verified against Ubuntu's published SHA-256 checksum, after `gpgv`
+has checked Ubuntu's signature on the checksum file with the CD image signing key that ships in
+`roles/installer_iso/files/` (pinned by fingerprint; it is never fetched at run time).
 
 Version ranges, not exact pins, are used for a control node you set up yourself on purpose: there the
 project is a set of playbooks you run, and you should get Ansible's and the collections' bug and security

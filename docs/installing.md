@@ -139,6 +139,11 @@ Check that you can still log in, and that password and root logins are refused (
 - **"... is not listed in SHA256SUMS"**: Ubuntu has published a newer point release and moved the old one.
   Set `ubuntu_point_release` to the new one (and rerun `make build-installer`), or point
   `ubuntu_iso_base_url` at `https://old-releases.ubuntu.com/releases/26.04`.
+- **"The signature on .../SHA256SUMS is bad or isn't by the key ..."** or **"Couldn't fetch
+  .../SHA256SUMS.gpg"**: the checksum file couldn't be authenticated, so nothing was downloaded. Check
+  `ubuntu_iso_base_url`: a mirror must publish `SHA256SUMS.gpg` next to `SHA256SUMS`. If it's
+  `releases.ubuntu.com` itself, a tampered file or a proxy rewriting it is possible; don't work around the
+  check. If Ubuntu has moved to a new signing key, update to a release that ships it.
 - **The installer waits for input or never powers off**: the remastered ISO didn't get the `autoinstall`
   argument, or the seed ISO wasn't found. Open the VM's console. Rebuild the ISO with
   `ARGS="-e installer_iso_rebuild=true"`.
