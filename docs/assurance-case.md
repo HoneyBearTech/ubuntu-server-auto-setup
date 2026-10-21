@@ -162,7 +162,8 @@ this kind:
   sessions, the CSRF header and Origin checks, the host check, every form's API and its validation against
   the roles' patterns, the inventory and Vault files Ansible reads back, runs and their logs; the app's
   tests of every page against a stand-in API, with axe-core, structural accessibility checks and the
-  contrast of every colour pair; and a smoke test that builds the image and drives the UI against the mock
+  contrast of every colour pair; browser tests in Chromium of the whole setup by keyboard only, focus on
+  every page and axe-core with real layout in every theme; and a smoke test that builds the image and drives the UI against the mock
   Proxmox API through a real `ansible-playbook` run ([testing.md](testing.md#the-web-ui)). Release images
   are also scanned with Trivy and fail on fixable high or critical vulnerabilities.
 - **Secret scanning**: gitleaks over the whole history on every change, plus GitHub secret scanning with

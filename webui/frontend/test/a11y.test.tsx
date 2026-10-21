@@ -122,4 +122,32 @@ describe("pages with errors", () => {
     expect(document.getElementById("sidebar-panel")?.classList.contains("open")).toBe(true);
     await checkAxe("/ with the menu open");
   });
+
+  it("the phone menu closes with Escape, focus back on its button", async () => {
+    new FakeApi();
+    renderAt("/");
+    await loaded();
+    const menu = screen.getByRole("button", { name: "Menu" });
+    await act(() => userEvent.click(menu));
+    await userEvent.tab();
+    expect(document.activeElement?.textContent).toContain("Overview");
+    await userEvent.keyboard("{Escape}");
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(menu);
+    await userEvent.keyboard("{Escape}"); // closed already: nothing happens
+    expect(document.activeElement).toBe(menu);
+  });
+
+  it("the phone menu closes when focus leaves it for the page", async () => {
+    new FakeApi();
+    renderAt("/");
+    await loaded();
+    const menu = screen.getByRole("button", { name: "Menu" });
+    await act(() => userEvent.click(menu));
+    act(() => document.getElementById("sidebar-panel")?.querySelector("a")?.focus());
+    expect(menu.getAttribute("aria-expanded")).toBe("true"); // within the menu: still open
+    act(() => document.getElementById("main")?.focus());
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement?.id).toBe("main");
+  });
 });

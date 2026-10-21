@@ -1,8 +1,9 @@
 // The frame around every page once signed in: the sidebar (brand, navigation, theme, account) and the footer.
-// Below 60rem the sidebar is a top bar whose menu button shows the navigation.
+// Below 60rem the sidebar is a top bar whose menu button shows the navigation. Escape closes the menu and puts
+// focus back on the button; so does moving focus out of it (it would otherwise cover the page focus moved to).
 
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { FocusEvent, ReactNode } from "react";
 import { location_, post } from "../api";
 import { useData } from "../data";
 import { Link, useRouter } from "../router";
@@ -106,6 +107,7 @@ export function Footer({ version, children }: { version: string; children?: Reac
 export function Layout({ version, children }: { version: string; children: ReactNode }) {
   const { path, seq, notice } = useRouter();
   const [open, setOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const overview = useData<OverviewData>("/api/overview");
   const { reload } = overview;
 
@@ -113,6 +115,23 @@ export function Layout({ version, children }: { version: string; children: React
     setOpen(false);
     if (seq > 0) reload();
   }, [seq, reload]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      menuButton.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Focus moved somewhere else on the page (not to another window, which leaves relatedTarget empty).
+  const onBlur = (event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (open && next instanceof Node && !event.currentTarget.contains(next)) setOpen(false);
+  };
 
   const stepDone = (hrefs: string[]) => {
     const steps = overview.data?.steps.filter((s) => hrefs.includes(s.href)) ?? [];
@@ -127,10 +146,10 @@ export function Layout({ version, children }: { version: string; children: React
   return (
     <div className="app">
       <a className="skip" href="#main">Skip to the content</a>
-      <header className="sidebar">
+      <header className="sidebar" onBlur={onBlur}>
         <div className="sidebar-top">
           <Brand />
-          <button type="button" className="button secondary small menu-button" aria-expanded={open}
+          <button type="button" className="button secondary small menu-button" aria-expanded={open} ref={menuButton}
                   aria-controls="sidebar-panel" onClick={() => setOpen(!open)}>
             <Icon name={open ? "close" : "menu"} />
             Menu

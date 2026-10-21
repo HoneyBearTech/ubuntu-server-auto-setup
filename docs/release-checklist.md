@@ -148,6 +148,10 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
 
 - [ ] A run's output streams to the page as it happens, and the finished run is in **History** with its
   log.
+- [ ] The [screen-reader walk-through](accessibility.md#screen-reader-walk-through) with VoiceOver on
+  macOS and with NVDA on Windows, on the image under test before its first-run setup (it starts with the
+  first-run page). Add a row per screen reader to its results table in the release pull request, and an
+  issue for each problem. Until a release has done this, the docs say it hasn't been run.
 - [ ] The version in the page footer is the version being released, and the API says the same:
 
   ```bash
@@ -214,6 +218,8 @@ Real Proxmox run (docs/release-checklist.md), <date>
 - Hand checks: key-only SSH, password and root refused, UFW, Fail2Ban, unattended-upgrades, hostname,
   sudo needs a password, SSH port change (or: not tested, why)
 - Web UI: setup, sign-in, cross-site and token-less posts refused, run streamed, version <version>
+- Screen readers: VoiceOver <version> with Safari <version>, NVDA <version> with <browser> <version>:
+  steps passed, problems and their issues (or: not run, why)
 - Anything that failed, and the issue or pull request that fixes it
 ```
 

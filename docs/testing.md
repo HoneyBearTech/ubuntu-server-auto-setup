@@ -10,6 +10,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
+| Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
@@ -134,8 +135,28 @@ TLS; its log streams, contains no secret and lands in the history. Finally it ch
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
-The pages were also checked with axe-core in a real browser (with contrast) and by keyboard by hand; see
-[accessibility.md](accessibility.md).
+### The browser tests
+
+`tests/webui-browser.sh` (`make webui-browser`) runs the app in a real browser with
+[Playwright](https://playwright.dev/) (Chromium; `webui/frontend/e2e/`). It sets up what the smoke test
+does, without Docker: a certificate for `tests/mock_pve.py` and a published key, the mock, and the web UI
+from the checkout on `127.0.0.1` with an empty data directory, whose first-run setup code goes to the
+tests; the VM the run provisions already exists in the mock, so the run is a real `ansible-playbook` run
+that needs no SSH. The tests run in two projects (`playwright.config.ts`):
+
+| File | What |
+| --- | --- |
+| `flow.spec.ts` | by keyboard only, the way someone without a mouse does it: the skip link; the first-run setup; the Proxmox form typed field by field, the connection test failing on the certificate, saving the CA, the test passing, picking the node from its dropdown (arrow keys, Escape, Tab) and saving; a provisioning run chosen with the arrow keys, started with Enter and followed to the end with focus left where it was and the status changing in a polite live region; then signing in again, with a wrong password first. Leaves a signed-in session for `pages.spec.ts` |
+| `pages.spec.ts` | every page: axe-core (WCAG 2.0 and 2.1, A and AA) with real layout in the dark and light themes and "System" with the browser preferring each, with each accent palette (one, Ember, for now), also with a form error and with the phone menu open; Tab order, focus outlines that are visible and not covered, no keyboard trap, Shift+Tab back; the phone menu (Enter, Escape, focus back on the button, closing when focus leaves); the servers table's add and remove; the theme switch with the arrow keys |
+| `helpers.ts` | walking a page with Tab (`tabCycle`, `checkKeyboard`), axe-core (`checkAxe`), and posting a form as the app does for the pages the flow doesn't fill in by keyboard |
+
+A failing test leaves a screenshot and a trace in `webui/frontend/test-results/` (CI uploads them as the
+`playwright-results` artifact); open a trace with `npx playwright show-trace <file>` in `webui/frontend`.
+To watch the tests, pass Playwright's options through: `tests/webui-browser.sh --headed`, or
+`--debug -g "phone"` for one test.
+
+What a screen reader says can't be tested this way; the [screen-reader
+walk-through](accessibility.md#screen-reader-walk-through) is done by hand before each release.
 
 ## Running them
 
@@ -151,7 +172,10 @@ make test
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
 Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free. The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
-test needs Docker and ports 18006 and 18080 (`make smoke`).
+test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
+app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install
+chromium`), and ports 18106, 18180 and 18181 (`make webui-browser`; `APP_PORT`, `MOCK_PORT` and
+`KEYS_PORT` change them).
 
 ## Adding a case
 
@@ -165,6 +189,7 @@ test needs Docker and ports 18006 and 18080 (`make smoke`).
   for its valid and invalid values in `webui/tests/test_schema.py`.
 - A change to the web UI's server: a test in `webui/tests/` for what should happen and what should be
   refused. A change to the app: a test in `webui/frontend/test/` for what it shows and posts; a new page
-  goes into `PAGES` in `a11y.test.tsx` (and the server's `PAGES` in `main.py`), and a new colour into
-  `tokens.css` and a pair in `contrast.test.ts`.
+  goes into `PAGES` in `a11y.test.tsx` and in `e2e/pages.spec.ts` (and the server's `PAGES` in `main.py`),
+  a new colour into `tokens.css` and a pair in `contrast.test.ts`, a new accent palette into `PALETTES` in
+  `e2e/pages.spec.ts`, and a new way of using the keyboard (a menu, a dialog) into the browser tests.
 - A bug fix: add the check that would have caught the bug before fixing it, and see it fail.
