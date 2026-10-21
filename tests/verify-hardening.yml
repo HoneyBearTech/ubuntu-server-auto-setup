@@ -1,0 +1,259 @@
+---
+# Checks the optional hardening and notifications that tests/hardening-vars.yml turns on. run.sh passes the
+# same variables (and on a developer's machine, nulls for the kernel-wide sysctl keys).
+- name: Verify the optional hardening and notifications
+  hosts: srv-01
+  become: true
+  gather_facts: true
+  vars_files:
+    - hardening-vars.yml
+  vars:
+    verify_sysctl_present: "{{ verify_sysctl.keys() | select('in', verify_sysctl_names.stdout_lines) | list }}"
+  tasks:
+    - name: Read the role's default sysctl set
+      ansible.builtin.include_vars:
+        file: ../roles/hardening/defaults/main.yml
+        name: verify_hardening_defaults
+
+    - name: Work out the expected sysctl settings
+      ansible.builtin.set_fact:
+        verify_sysctl: "{{ verify_hardening_defaults.hardening_sysctl | combine(hardening_sysctl_extra)
+          | dict2items | rejectattr('value', 'none') | list | items2dict }}"
+        verify_sysctl_removed: "{{ hardening_sysctl_extra | dict2items | selectattr('value', 'none')
+          | map(attribute='key') | list }}"
+
+    - name: Read the sysctl drop-in
+      ansible.builtin.slurp:
+        src: /etc/sysctl.d/90-usas-hardening.conf
+      register: verify_sysctl_file
+
+    - name: Check the drop-in has each setting once and nothing else
+      ansible.builtin.assert:
+        that:
+          - verify_lines | sort == verify_sysctl | dict2items | map(attribute='key') | zip(verify_sysctl.values())
+            | map('join', ' = ') | sort
+          - verify_sysctl_removed | select('in', (verify_sysctl_file.content | b64decode)) | list | length == 0
+      vars:
+        verify_lines: "{{ (verify_sysctl_file.content | b64decode).splitlines() | reject('match', '^(#|$)') | list }}"
+
+    # A container can't see some kernel-wide keys (net.core.bpf_jit_harden); the role reports and skips those.
+    - name: List the settings this kernel has
+      ansible.builtin.command: sysctl --all --names
+      register: verify_sysctl_names
+      changed_when: false
+
+    - name: Read the live sysctl values
+      ansible.builtin.command:
+        argv: "{{ ['sysctl', '-n'] + verify_sysctl_present }}"
+      register: verify_sysctl_live
+      changed_when: false
+
+    - name: Check the live values
+      ansible.builtin.assert:
+        that:
+          - verify_sysctl_present | select('match', 'net\.ipv4\.') | list | length >= 10
+          - verify_sysctl_live.stdout_lines == verify_sysctl_present | map('extract', verify_sysctl) | map('string') | list
+        fail_msg: "{{ verify_sysctl_present | zip(verify_sysctl_live.stdout_lines) | list | string }}"
+
+    - name: Read the audit rules
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - /etc/audit/rules.d/60-usas-hardening.rules
+        - /etc/audit/rules.d/99-usas-immutable.rules
+      register: verify_audit_files
+
+    - name: Check the audit rules
+      ansible.builtin.assert:
+        that:
+          - verify_rules is search('(?m)^-w /etc/shadow -p wa -k identity$')
+          - verify_rules is search('(?m)^-w /etc/sudoers.d -p wa -k sudoers$')
+          - verify_rules is search('(?m)^-w /etc/ssh/sshd_config.d -p wa -k sshd$')
+          - verify_rules is search('(?m)^-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change$')
+          - verify_rules is search('(?m)^-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules$')
+          - verify_rules is search('(?m)^-w /var/log/audit -p wa -k audit-log$')
+          - (ansible_facts.architecture == 'x86_64') == (verify_rules is search('arch=b32'))
+          - (verify_audit_files.results[1].content | b64decode) is search('(?m)^-e 2$')
+      vars:
+        verify_rules: "{{ verify_audit_files.results[0].content | b64decode }}"
+
+    - name: Explain why the live audit rules aren't checked
+      ansible.builtin.debug:
+        msg: >-
+          Skipping the live audit check: the kernel's audit interface belongs to the host's network namespace, so
+          auditd can't run in this container. The rules files are checked above; docs/release-checklist.md covers
+          a real VM.
+      when: ansible_facts.virtualization_type == 'docker'
+
+    - name: Read the loaded audit rules
+      ansible.builtin.command: auditctl -l
+      register: verify_auditctl
+      changed_when: false
+      when: ansible_facts.virtualization_type != 'docker'
+
+    - name: Check the loaded audit rules
+      ansible.builtin.assert:
+        that:
+          - verify_auditctl.stdout is search('-k identity')
+          - verify_auditctl.stdout is search('-k modules')
+      when: ansible_facts.virtualization_type != 'docker'
+
+    - name: Read whether AppArmor is enabled at boot and in the kernel
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - systemctl is-enabled apparmor
+        - aa-enabled
+      register: verify_apparmor
+      changed_when: false
+      failed_when: false
+
+    - name: Check AppArmor is enabled at boot
+      ansible.builtin.assert:
+        that: verify_apparmor.results[0].stdout | trim == 'enabled'
+
+    - name: Read the AppArmor profiles
+      ansible.builtin.command: aa-status --json
+      register: verify_aa_status
+      changed_when: false
+      when: verify_apparmor.results[1].rc == 0
+
+    - name: Check AppArmor has profiles loaded
+      ansible.builtin.assert:
+        that: (verify_aa_status.stdout | from_json).profiles | length > 0
+      when: verify_apparmor.results[1].rc == 0
+
+    - name: Explain why AppArmor's profiles aren't checked
+      ansible.builtin.debug:
+        msg: >-
+          Skipping the AppArmor profile check: the host's kernel doesn't offer it here
+          (aa-enabled: {{ verify_apparmor.results[1].stdout | trim }}).
+      when: verify_apparmor.results[1].rc != 0
+
+    - name: Read the unattended-upgrades mail settings as apt sees them
+      ansible.builtin.command: apt-config dump Unattended-Upgrade::Mail Unattended-Upgrade::MailReport
+      register: verify_apt_mail
+      changed_when: false
+
+    - name: Check the unattended-upgrades mail settings
+      ansible.builtin.assert:
+        that:
+          - verify_apt_mail.stdout is search('(?m)^Unattended-Upgrade::Mail "updates@example.com";$')
+          - verify_apt_mail.stdout is search('(?m)^Unattended-Upgrade::MailReport "only-on-error";$')
+
+    - name: Read the relay's files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: [/etc/msmtprc, /etc/msmtp-password, /usr/sbin/sendmail]
+      register: verify_msmtp_files
+
+    - name: Check the relay's files are root-only
+      ansible.builtin.assert:
+        that:
+          - verify_msmtp_files.results[0].stat.mode == '0600' and verify_msmtp_files.results[0].stat.pw_name == 'root'
+          - verify_msmtp_files.results[1].stat.mode == '0600' and verify_msmtp_files.results[1].stat.pw_name == 'root'
+          - verify_msmtp_files.results[2].stat.exists
+
+    - name: Read the relay password file
+      ansible.builtin.slurp:
+        src: /etc/msmtp-password
+      register: verify_msmtp_password
+      no_log: true
+
+    - name: Check the password reached the file unchanged
+      ansible.builtin.assert:
+        that: verify_msmtp_password.content | b64decode == mail_relay_password
+      no_log: true
+
+    # --pretend parses the configuration and prints the settings msmtp would use, without sending.
+    - name: Ask msmtp which settings it would use
+      ansible.builtin.command:
+        argv: [msmtp, --pretend, root@example.com]
+        stdin: ""
+      register: verify_msmtp
+      changed_when: false
+
+    - name: Check msmtp's settings
+      ansible.builtin.assert:
+        that:
+          - verify_msmtp.stdout is search('(?m)^host\s*=\s*localhost$')
+          - verify_msmtp.stdout is search('(?m)^port\s*=\s*2525$')
+          - verify_msmtp.stdout is search('(?m)^from\s*=\s*srv-01@example.com$')
+          - verify_msmtp.stdout is search('(?m)^user\s*=\s*relay-user$')
+          - verify_msmtp.stdout is search('(?m)^tls_starttls\s*=\s*on$')
+
+    - name: Read the sshd jail's actions
+      ansible.builtin.command: fail2ban-client get sshd actions
+      register: verify_actions
+      changed_when: false
+
+    - name: Read the webhook action's file
+      ansible.builtin.stat:
+        path: /etc/fail2ban/action.d/usas-webhook.conf
+      register: verify_webhook_file
+
+    - name: Check the Fail2Ban notifications
+      ansible.builtin.assert:
+        that:
+          - verify_actions.stdout is search('sendmail-whois')
+          - verify_actions.stdout is search('usas-webhook')
+          - verify_webhook_file.stat.mode == '0600'
+
+    - name: Start a webhook listener
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --unit=usas-webhook-listener
+          - --collect
+          - python3
+          - -c
+          - |
+            import http.server
+            class H(http.server.BaseHTTPRequestHandler):
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers["Content-Length"]))
+                    with open("/run/usas-webhook.txt", "wb") as f:
+                        f.write(self.path.encode() + b"\n" + body)
+                    self.send_response(200)
+                    self.end_headers()
+            http.server.HTTPServer(("127.0.0.1", 8099), H).serve_forever()
+      changed_when: true
+
+    - name: Wait for the listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8099
+        timeout: 15
+
+    - name: Ban a documentation address
+      ansible.builtin.command: fail2ban-client set sshd banip 192.0.2.10
+      changed_when: true
+
+    - name: Wait for the webhook
+      ansible.builtin.wait_for:
+        path: /run/usas-webhook.txt
+        search_regex: 192\.0\.2\.10
+        timeout: 30
+
+    - name: Read what the webhook received
+      ansible.builtin.slurp:
+        src: /run/usas-webhook.txt
+      register: verify_webhook
+
+    - name: Lift the ban and stop the listener
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - fail2ban-client set sshd unbanip 192.0.2.10
+        - systemctl stop usas-webhook-listener
+        - rm -f /run/usas-webhook.txt
+      changed_when: true
+
+    - name: Check the webhook's request
+      ansible.builtin.assert:
+        that:
+          - verify_request[0] == '/usas-test?token=abc-123&priority=4'
+          - verify_body.text is search('^Banned 192\.0\.2\.10 in jail sshd on \S+ after [0-9]+ failures\.$')
+          - verify_body.message == verify_body.text and verify_body.content == verify_body.text
+          - verify_body.title is search('^Fail2Ban on ')
+      vars:
+        verify_request: "{{ (verify_webhook.content | b64decode).split('\n', 1) }}"
+        verify_body: "{{ verify_request[1] | from_json }}"

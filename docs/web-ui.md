@@ -117,7 +117,10 @@ The overview lists the steps and whether each is done.
    optionally cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
    `5432/tcp from 10.0.0.0/24`, separated by commas). Empty sizes use the role defaults.
 5. **Hardening**: the SSH port, the users allowed to log in over SSH, root login, passwordless sudo, the
-   firewall's SSH sources and rules for every server, and the Fail2Ban settings.
+   firewall's SSH sources and rules for every server, and the Fail2Ban settings. Below them, off until you
+   turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
+   (mail addresses, a webhook), and a mail relay. The relay password and the webhook URL are kept in the
+   Vault; tick **Remove the saved value** to delete one.
 6. **VMs**: every VM and container on the cluster, read-only: its node, status (an icon and a word), CPU and
    memory use (as bars with the numbers beside them), the address the playbooks would use and where it
    came from, and whether the playbooks support it. The address comes from the VM's QEMU guest agent if it
@@ -153,7 +156,7 @@ directories):
 | Path | What |
 | --- | --- |
 | `inventory/hosts.yml` | The inventory: every setting you saved, the servers, the Proxmox node. |
-| `inventory/group_vars/all/vault.yml` | The admin password and the API token, encrypted with Ansible Vault (AES-256). |
+| `inventory/group_vars/all/vault.yml` | The admin password and the API token (and the mail relay password and webhook URL, if set), encrypted with Ansible Vault (AES-256). |
 | `.vault-pass` | The Vault password: 32 random bytes made on the first start (see below). |
 | `ssh/id_ed25519`, `ssh/id_ed25519.pub` | The UI's SSH key pair. |
 | `ssh/known_hosts` | The trusted host keys: the Proxmox node's, and each new VM's (added by provisioning). |

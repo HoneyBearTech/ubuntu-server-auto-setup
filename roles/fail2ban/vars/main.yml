@@ -6,3 +6,9 @@ fail2ban_ignoreip_pattern: '^[A-Za-z0-9.:/_-]+\Z'
 fail2ban_time_pattern: '^-?[0-9]+([a-z]+([0-9]+[a-z]+)*)?\Z'
 fail2ban_banaction_pattern: '^[A-Za-z0-9_.,=\[\]-]*\Z'
 fail2ban_sshd_modes: [normal, ddos, extra, aggressive]
+# Notification addresses and the webhook URL: no spaces, quotes, "%" (Fail2Ban's interpolation), "<" or ">"
+# (its tags) or line breaks, so a value can't add settings to jail.local or arguments to the curl command.
+fail2ban_email_pattern: '^[A-Za-z0-9._+-]+@[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\Z'
+fail2ban_webhook_url_pattern: '^https?://[A-Za-z0-9][A-Za-z0-9.-]{0,252}(:[0-9]{1,5})?(/[A-Za-z0-9._~/+=-]*)?(\?[A-Za-z0-9._~/+=&-]*)?\Z'
+fail2ban_webhook_formats: [text, json]
+fail2ban_webhook_action_file: /etc/fail2ban/action.d/usas-webhook.conf

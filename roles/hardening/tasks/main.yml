@@ -1,0 +1,35 @@
+---
+# In a container these belong to the host: auditd can't run, and AppArmor's policy is the host's.
+- name: Note whether the server is a container
+  ansible.builtin.set_fact:
+    hardening_in_container: "{{ ansible_facts.virtualization_role == 'guest'
+      and ansible_facts.virtualization_type in hardening_container_types }}"
+  when: hardening_sysctl_enabled | bool or hardening_auditd_enabled | bool or hardening_apparmor_enabled | bool
+
+- name: Apply the kernel and network settings
+  ansible.builtin.import_tasks: sysctl.yml
+  when: hardening_sysctl_enabled | bool
+
+- name: Set up auditd
+  ansible.builtin.import_tasks: auditd.yml
+  when: hardening_auditd_enabled | bool
+
+- name: Set up AppArmor
+  ansible.builtin.import_tasks: apparmor.yml
+  when: hardening_apparmor_enabled | bool
+
+# Turning a part off removes its files; the kernel keeps the settings and rules it has until the next reboot.
+- name: Remove the sysctl settings when they are turned off
+  ansible.builtin.file:
+    path: "{{ hardening_sysctl_file }}"
+    state: absent
+  when: not hardening_sysctl_enabled | bool
+
+- name: Remove the audit rules when they are turned off
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ hardening_audit_rules_file }}"
+    - "{{ hardening_audit_immutable_file }}"
+  when: not hardening_auditd_enabled | bool

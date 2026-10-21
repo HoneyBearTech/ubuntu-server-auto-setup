@@ -1,0 +1,50 @@
+---
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+  register: hardening_auditd_install
+
+- name: Write the audit rules
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: "{{ hardening_audit_rules_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load the audit rules
+
+# augenrules always puts the last -e line at the end of the rules it loads.
+- name: Make the audit rules immutable until the next reboot
+  ansible.builtin.copy:
+    content: "## Managed by ubuntu-server-auto-setup (hardening_auditd_immutable)\n-e 2\n"
+    dest: "{{ hardening_audit_immutable_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+  when: hardening_auditd_immutable | bool
+  notify: Load the audit rules
+
+- name: Keep the audit rules changeable
+  ansible.builtin.file:
+    path: "{{ hardening_audit_immutable_file }}"
+    state: absent
+  when: not hardening_auditd_immutable | bool
+  notify: Load the audit rules
+
+# In check mode a service this run would install doesn't exist yet.
+- name: Enable auditd
+  ansible.builtin.systemd_service:
+    name: auditd
+    enabled: true
+    state: started
+  when:
+    - not hardening_in_container
+    - not (ansible_check_mode and hardening_auditd_install is changed)
+
+- name: Report that auditd can't run in a container
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is a container ({{ ansible_facts.virtualization_type }}): the audit rules are
+      installed, but auditing belongs to the host's kernel, so auditd isn't started here.
+  when: hardening_in_container

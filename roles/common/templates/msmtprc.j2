@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# Every message leaves through mail_relay_host, from mail_relay_from. Only root can read this file, so only
+# root (unattended-upgrades, Fail2Ban, cron jobs run as root) can send.
+defaults
+syslog LOG_MAIL
+{% if mail_relay_tls == 'off' %}
+tls off
+{% else %}
+tls on
+tls_starttls {{ 'on' if mail_relay_tls == 'starttls' else 'off' }}
+tls_trust_file system
+{% endif %}
+set_from_header on
+allow_from_override off
+
+account default
+host {{ mail_relay_host }}
+port {{ mail_relay_port }}
+from {{ mail_relay_from }}
+{% if mail_relay_user | length > 0 %}
+auth on
+user {{ mail_relay_user }}
+passwordeval "cat {{ common_msmtp_password_file }}"
+{% else %}
+auth off
+{% endif %}

@@ -1,0 +1,27 @@
+---
+# Every optional hardening and notification setting turned on, for tests/run.sh and tests/verify-hardening.yml.
+hardening_sysctl_enabled: true
+# A changed key and a removed one, as an operator would write them.
+hardening_sysctl_extra:
+  net.ipv4.conf.all.rp_filter: 2
+  net.ipv4.icmp_ignore_bogus_error_responses: null
+hardening_auditd_enabled: true
+hardening_auditd_immutable: true
+hardening_apparmor_enabled: true
+
+unattended_upgrades_mail: updates@example.com
+unattended_upgrades_mail_report: only-on-error
+mail_relay_enabled: true
+# Nothing listens there: mail fails at once instead of waiting for a real relay.
+mail_relay_host: localhost
+mail_relay_port: 2525
+mail_relay_from: srv-01@example.com
+mail_relay_user: relay-user
+# Quotes, a backslash, spaces and a "#" must reach msmtp unchanged.
+mail_relay_password: 'p@ss "word" \ with # spaces'
+
+fail2ban_destemail: security@example.com
+fail2ban_sender: fail2ban@example.com
+# A listener verify-hardening.yml starts in the container.
+fail2ban_webhook_url: http://127.0.0.1:8099/usas-test?token=abc-123&priority=4
+fail2ban_webhook_format: json

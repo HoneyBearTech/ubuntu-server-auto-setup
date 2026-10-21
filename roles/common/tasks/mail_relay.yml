@@ -1,0 +1,38 @@
+---
+- name: Read the installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+# msmtp-mta conflicts with every other mail transfer agent, so installing it would remove that one.
+- name: Refuse to replace another mail server
+  ansible.builtin.assert:
+    that: common_other_mtas | select('in', ansible_facts.packages) | list | length == 0
+    fail_msg: >-
+      mail_relay_enabled would replace {{ common_other_mtas | select('in', ansible_facts.packages) | join(', ') }}
+      on {{ inventory_hostname }}. Point that mail server at your relay instead and set mail_relay_enabled: false.
+    quiet: true
+
+- name: Install msmtp as the server's sendmail
+  ansible.builtin.apt:
+    name: msmtp-mta
+    state: present
+
+- name: Configure the mail relay
+  ansible.builtin.template:
+    src: msmtprc.j2
+    dest: /etc/msmtprc
+    owner: root
+    group: root
+    mode: "0600"
+
+# Read by msmtp's passwordeval, so the password needs no quoting in msmtprc.
+- name: Store the relay password
+  ansible.builtin.copy:
+    content: "{{ mail_relay_password }}"
+    dest: "{{ common_msmtp_password_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: mail_relay_password | length > 0
+  no_log: true
+  diff: false

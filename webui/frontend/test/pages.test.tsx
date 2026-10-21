@@ -55,6 +55,8 @@ describe("the Proxmox page", () => {
     expect(input(/API host/).value).toBe("pve.example.lan");
     expect(input(/Token secret/).value).toBe("");
     expect(screen.getByText("A value is saved. Leave this empty to keep it.")).toBeTruthy();
+    // A required secret can be replaced but not removed.
+    expect(screen.queryByLabelText("Remove the saved value")).toBeNull();
     const node = screen.getByLabelText(/Node name/) as HTMLSelectElement;
     expect(node.tagName).toBe("SELECT");
     expect([...node.options].map((o) => o.text)).toEqual(["ares (online)", "hephaestus (online)", "hermes (offline)"]);
@@ -245,17 +247,41 @@ describe("the defaults page", () => {
 });
 
 describe("the hardening page", () => {
-  it("groups SSH, the firewall and Fail2Ban, and saves", async () => {
+  it("groups SSH, the firewall, Fail2Ban, the extras, notifications and the relay, and saves", async () => {
     const api = new FakeApi({ "POST /api/hardening": () => ({ message: "Saved the hardening settings." }) });
     renderAt("/hardening");
     await loaded();
     const form = document.querySelector("main form") as HTMLFormElement;
     expect([...form.querySelectorAll("fieldset > legend")].map((l) => l.textContent)).toEqual(
-      ["SSH", "Firewall (UFW)", "Fail2Ban"]);
+      ["SSH", "Firewall (UFW)", "Fail2Ban", "Extra hardening (off by default)", "Notifications", "Mail relay"]);
+    expect(input("Kernel and network settings (sysctl)").checked).toBe(false);
+    expect(input("Webhook for bans").type).toBe("password");
+    // Nothing is saved yet, so there is nothing to remove.
+    expect(screen.queryByLabelText("Remove the saved value")).toBeNull();
     expect(screen.getByText("Wrong values can lock you out")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Saved the hardening settings.");
     expect(api.posts("/api/hardening")[0].body.ssh_port).toBe("22");
+  });
+
+  it("offers to remove saved optional secrets", async () => {
+    const fields = fixtures.hardening.fields.map((f) =>
+      f.kind === "secret" ? { ...f, saved: true } : f);
+    const api = new FakeApi({
+      "GET /api/hardening": () => ({ ...fixtures.hardening, fields }),
+      "POST /api/hardening": () => ({ message: "Saved the hardening settings." }),
+    });
+    renderAt("/hardening");
+    await loaded();
+    const webhook = within(input("Webhook for bans").closest(".field") as HTMLElement);
+    expect(webhook.getByText("A value is saved. Leave this empty to keep it.")).toBeTruthy();
+    await userEvent.click(webhook.getByLabelText("Remove the saved value"));
+    expect(screen.getAllByLabelText("Remove the saved value")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved the hardening settings.");
+    const body = api.posts("/api/hardening")[0].body;
+    expect(body.fail2ban_webhook_url__clear).toBe("on");
+    expect(body.mail_relay_password__clear).toBeUndefined();
   });
 });
 

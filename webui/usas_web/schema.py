@@ -17,7 +17,16 @@ import yaml
 
 from .problems import Problem
 
-ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban")
+ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
+         "hardening")
+
+# Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
+# doesn't edit, and the rest are file paths and package or platform lists.
+NOT_FORM_FORMATS = frozenset({
+    "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
+    "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
+    "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file",
+})
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
 # roles/*/tasks/main.yml; tests/test_schema.py reads those tasks to check).
@@ -221,6 +230,31 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("fail2ban_sshd_mode", "sshd filter mode", "choice", "fail2ban", choices_var="fail2ban_sshd_modes"),
         S("fail2ban_banaction", "Ban action", "text", "fail2ban", pattern_var="fail2ban_banaction_pattern",
           advanced=True),
+        S("hardening_sysctl_enabled", "Kernel and network settings (sysctl)", "bool", "hardening"),
+        S("hardening_auditd_enabled", "Audit changes with auditd", "bool", "hardening"),
+        S("hardening_auditd_immutable", "Lock the audit rules until a reboot", "bool", "hardening", advanced=True),
+        S("hardening_apparmor_enabled", "Keep AppArmor on and report profiles in complain mode", "bool", "hardening"),
+        S("unattended_upgrades_mail", "Mail update reports to", "text", "common", pattern_var="common_email_pattern"),
+        S("unattended_upgrades_mail_report", "Which update reports", "choice", "common",
+          choices_var="common_mail_report_values"),
+        S("fail2ban_destemail", "Mail bans to", "text", "fail2ban", pattern_var="fail2ban_email_pattern"),
+        S("fail2ban_sender", "Ban mail sender", "text", "fail2ban", pattern_var="fail2ban_email_pattern",
+          advanced=True),
+        S("fail2ban_webhook_url", "Webhook for bans", "secret", pattern_var="fail2ban_webhook_url_pattern",
+          vault="vault_fail2ban_webhook_url", default="",
+          help="An ntfy, Gotify, Slack, Discord or Mattermost URL that gets a message for every ban. It often holds "
+               "a token, so it is kept in the Vault."),
+        S("fail2ban_webhook_format", "Webhook message format", "choice", "fail2ban",
+          choices_var="fail2ban_webhook_formats"),
+        S("mail_relay_enabled", "Send mail through a relay (msmtp)", "bool", "common"),
+        S("mail_relay_host", "Relay host", "text", "common", pattern_var="common_mail_host_pattern"),
+        S("mail_relay_port", "Relay port", "int", "common", minimum=PORT_RANGE[0], maximum=PORT_RANGE[1]),
+        S("mail_relay_tls", "Relay encryption", "choice", "common", choices_var="common_mail_tls_values"),
+        S("mail_relay_from", "Sender address", "text", "common", pattern_var="common_email_pattern"),
+        S("mail_relay_user", "Relay user", "text", "common", pattern_var="common_mail_user_pattern"),
+        S("mail_relay_password", "Relay password", "secret", pattern_var="common_mail_password_pattern",
+          vault="vault_mail_relay_password", default="",
+          help="Kept in the Vault; on the server only root can read it."),
     ),
 }
 

@@ -34,10 +34,11 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | `ubuntu_release` | Shared defaults only: the Ubuntu release, ISO names and URLs, and the ISO storage location. | `roles/ubuntu_release/` |
 | `installer_iso` | Downloads and verifies the Ubuntu ISO on a Proxmox node and remasters it for hands-off installs. | `roles/installer_iso/` |
 | `proxmox_vm` | Creates one VM per host through the Proxmox API, with a per-host seed ISO, and waits for the install. | `roles/proxmox_vm/` |
-| `common` | Packages and upgrades, hostname, timezone, the admin user, sudo, GitHub keys, unattended upgrades, the guest agent. | `roles/common/` |
+| `common` | Packages and upgrades, hostname, timezone, the admin user, sudo, GitHub keys, unattended upgrades (and their optional mail report), an optional msmtp mail relay, the guest agent. | `roles/common/` |
 | `firewall` | UFW: default policies, SSH (rate-limited), extra allow rules. | `roles/firewall/` |
 | `ssh_hardening` | The sshd drop-in, the optional port change and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
-| `fail2ban` | The `sshd` jail. | `roles/fail2ban/` |
+| `fail2ban` | The `sshd` jail, and optional ban notifications by mail or webhook. | `roles/fail2ban/` |
+| `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on. | `roles/hardening/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
 | Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
 | Container image | ansible-core, the collections, the playbooks and roles, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
@@ -101,7 +102,11 @@ For each host, after checking that the required variables are set:
    the new port from the host key read over the existing connection, reconnect on the new port, and only
    then remove the port 22 firewall rule.
 5. `fail2ban`: write `/etc/fail2ban/jail.local` with the `sshd` jail on the systemd journal, on `ssh_port`,
-   with incremental bans and `fail2ban_ignoreip`.
+   with incremental bans and `fail2ban_ignoreip`, and, when asked for, a mail (`action_mw`) and a webhook
+   action (`/etc/fail2ban/action.d/usas-webhook.conf`, root-only) for every ban.
+6. `hardening`: only what is turned on: the `sysctl` drop-in, applied and checked live; auditd with its
+   rules loaded by `augenrules` (or left for the next reboot when they are immutable); AppArmor enabled,
+   with complain-mode profiles reported. Parts that are off have their files removed.
 
 `site.yml` runs the three playbooks in that order. `make keys` runs only the `ssh_keys` tasks of the
 baseline.

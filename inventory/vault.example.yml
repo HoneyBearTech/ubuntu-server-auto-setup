@@ -5,3 +5,7 @@
 vault_admin_password: "change-me"            # admin user's password (sudo and console login); SSH stays key-only
 vault_pve_api_token_id: "automation"         # the token name only, without user@realm!
 vault_pve_api_token_secret: "00000000-0000-0000-0000-000000000000"
+# Optional, for notifications (inventory: mail_relay_password: "{{ vault_mail_relay_password }}" and
+# fail2ban_webhook_url: "{{ vault_fail2ban_webhook_url }}"):
+# vault_mail_relay_password: "relay-password"
+# vault_fail2ban_webhook_url: "https://ntfy.sh/your-private-topic"

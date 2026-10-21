@@ -33,7 +33,7 @@ The variables below are the project's interface: names and meanings change only 
 1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
 full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
 `roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/common`, `roles/firewall`,
-`roles/ssh_hardening` and `roles/fail2ban`. Where a role's default and the example inventory differ, the
+`roles/ssh_hardening`, `roles/fail2ban` and `roles/hardening`. Where a role's default and the example inventory differ, the
 example shows a typical value.
 
 **Shared by provisioning and the baseline**
@@ -146,6 +146,31 @@ example shows a typical value.
 | `fail2ban_banaction` | `""` | Ban action; empty keeps Ubuntu's default (nftables). |
 | `fail2ban_sshd_mode` | `normal` | The `sshd` filter mode: `normal`, `ddos`, `extra` or `aggressive`. |
 
+**Baseline: extra hardening** (`hardening`; each part off by default, see [security.md](security.md#optional-hardening-and-notifications))
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `hardening_sysctl_enabled` | `false` | Write `hardening_sysctl` and `hardening_sysctl_extra` to `/etc/sysctl.d/90-usas-hardening.conf` and apply them. |
+| `hardening_sysctl` | kernel and network settings (see `roles/hardening/defaults/main.yml`) | The vetted set, as a mapping of sysctl names to values. |
+| `hardening_sysctl_extra` | `{}` | Merged over `hardening_sysctl`; a key set to `null` is left out. |
+| `hardening_auditd_enabled` | `false` | Install auditd with rules in `/etc/audit/rules.d/60-usas-hardening.rules`. |
+| `hardening_auditd_immutable` | `false` | Lock the audit rules until the next reboot (`-e 2`). |
+| `hardening_apparmor_enabled` | `false` | Keep AppArmor installed, enabled and running; report profiles in complain mode. |
+
+**Baseline: notifications** (`common`, `fail2ban`; all off by default)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `unattended_upgrades_mail` | `""` | Mail unattended-upgrades' report here (needs a mail transfer agent). |
+| `unattended_upgrades_mail_report` | `on-change` | `always`, `only-on-error` or `on-change`. |
+| `mail_relay_enabled` | `false` | Install `msmtp-mta` as the server's `sendmail`, relaying through `mail_relay_host`. Refuses to replace another mail server. |
+| `mail_relay_host`, `mail_relay_port`, `mail_relay_tls` | `""`, `587`, `starttls` | The smarthost, its port and `starttls`, `tls` (implicit, usually port 465) or `"off"`. |
+| `mail_relay_from` | `""` | The sender address of everything the server mails. |
+| `mail_relay_user`, `mail_relay_password` | `""` | Sign in to the relay; the password from the Vault (`"{{ vault_mail_relay_password }}"`). |
+| `fail2ban_destemail`, `fail2ban_sender` | `""` | Mail every ban, with a whois report, to this address (Fail2Ban's `action_mw`); optional sender. |
+| `fail2ban_webhook_url` | `""` | POST a message for every ban to this http(s) URL, normally from the Vault (`"{{ vault_fail2ban_webhook_url }}"`). |
+| `fail2ban_webhook_format` | `text` | `text` (the message is the body, for ntfy) or `json` (`title`, `text`, `message` and `content`, for Slack, Mattermost, Gotify and Discord). |
+
 ### Vault variables
 
 | Variable | Used by | Meaning |
@@ -153,6 +178,8 @@ example shows a typical value.
 | `vault_admin_password` | `admin_password` (and `ansible_become_password` if passwordless sudo is off) | The admin account's password. |
 | `vault_pve_api_token_id` | `pve_api_token_id` | The token's name, without `user@realm!`. |
 | `vault_pve_api_token_secret` | `pve_api_token_secret` | The token's secret. |
+| `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
+| `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
 
 ### Commands
 
@@ -160,14 +187,14 @@ example shows a typical value.
 | --- | --- | --- | --- |
 | `make build-installer` | `playbooks/build-installer.yml` | `proxmox_nodes` | Download, verify and remaster the Ubuntu ISO. Changes only the node's ISO storage and `xorriso`. |
 | `make provision` | `playbooks/provision-vms.yml` | `ubuntu_servers` | Create and install each VM whose `pve_vmid` doesn't exist. Erases the new VM's disk only. |
-| `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings. |
+| `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
 | `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `ubuntu_servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
 | `make deps`, `make lint`, `make syntax` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
 
 `LIMIT=` becomes `--limit` (not for `build-installer`), `ARGS=` is passed to `ansible-playbook` unchanged,
-and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh` and
-`fail2ban`, so `ARGS="--tags firewall"` runs one of them. Exit codes are `ansible-playbook`'s: 0 on success,
+and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh`,
+`fail2ban` and `hardening`, so `ARGS="--tags firewall"` runs one of them. Exit codes are `ansible-playbook`'s: 0 on success,
 non-zero on any failed or unreachable host. `--check --diff` is supported by the baseline (provisioning
 needs to really create the VM, so it isn't meaningful there).
 

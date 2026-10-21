@@ -53,7 +53,20 @@ run; your own `~/.ssh` is never touched. The steps:
    Fail2Ban follows, and a rerun on the new port changes nothing.
 7. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
    become password.
-8. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
+8. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
+   that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
+   expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
+   AppArmor is enabled, apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
+   reads the relay settings, the relay password reached its file unchanged (quotes, a backslash and `#`
+   included), and Fail2Ban has both actions. A ban of a documentation address must reach a webhook
+   listener in the container with the right message. A check run must report no changes, values that could
+   inject settings must be refused, and turning everything off must remove the files again. In a container
+   auditd can't run and AppArmor's policy is the host's, so those two live checks are skipped with the
+   reason in the log (the [pre-release checklist](release-checklist.md) covers them on a real VM).
+   Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
+   leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
+   (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
+9. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
    the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
@@ -75,7 +88,8 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words |
 | `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm` and `common` | both roles agree; every entry is one trimmed line of the input that starts with a key type |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
-| `fuzz_configs.py` | the sshd drop-in and `jail.local` | every setting appears once with exactly the given value; nothing else is added |
+| `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
+| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
 
 `make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it
 runs in CI (`.github/workflows/fuzz.yml`) or on such a machine:
@@ -97,7 +111,7 @@ without touching any system. They cover:
 
 | File | What |
 | --- | --- |
-| `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used; defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
+| `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used (except the ones `NOT_FORM_FORMATS` lists: the sysctl mapping's formats, file paths and package lists); defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
 | `test_store.py` | the inventory and Vault round-trip; files are `0600` and the Vault is encrypted; typed values are tagged `!unsafe`, and `ansible` reads the inventory without templating them |
 | `test_auth.py` | argon2id hashing and rehashing, the setup code, throttling, sessions and their expiry, CSRF tokens |
 | `test_app.py` | first run, sign-in and sign-out, open redirects, throttling, password change, the CSRF header (a token in the form isn't enough), `Origin` and `Sec-Fetch-Site`, no cross-origin answers, allowed hosts and HTTPS, cookies and security headers, the page shell and the built app's files, the theme cookie, every page's API and form with its errors, the connection test, the CA, the SSH key and host keys, the servers table, runs, streaming, history and stopping |

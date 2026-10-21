@@ -90,6 +90,12 @@ export function Field({ field, values, error, list }: {
         <p className="saved" id={`${id}-saved`}>
           {field.saved ? "A value is saved. Leave this empty to keep it." : "Not set yet."}
         </p>
+        {field.saved && !field.required ? (
+          <div className="check">
+            <input type="checkbox" id={`${id}-clear`} name={`${field.name}__clear`} />
+            <label htmlFor={`${id}-clear`}>Remove the saved value</label>
+          </div>
+        ) : null}
       </>
     );
   } else {

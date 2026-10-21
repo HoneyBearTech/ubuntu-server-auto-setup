@@ -115,6 +115,55 @@ and in [web-ui.md](web-ui.md#security).
   pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
   release runs for a `v*` tag (the `release` environment).
 
+## Optional hardening and notifications
+
+These are off by default and each has its own switch, because each can get in the way of something a
+server legitimately does, and a baseline that breaks a working server on its next run is worse than one that
+does a little less. Turn on what fits your servers, then run in check mode first. Turning one off again
+removes its files; settings already loaded in the kernel stay until the next reboot.
+
+- **Kernel and network settings** (`hardening_sysctl_enabled`): `/etc/sysctl.d/90-usas-hardening.conf`
+  hides kernel addresses and the kernel log from unprivileged users, turns off unprivileged BPF and
+  hardens its JIT, limits `ptrace` to a process's descendants, protects hard links, symbolic links, FIFOs
+  and regular files in shared directories, turns off core dumps of setuid programs, uses strict reverse-path
+  filtering, refuses ICMP redirects and source-routed packets (and sends no redirects), and keeps TCP SYN
+  cookies on. Live values are checked and corrected on every run; a key the kernel doesn't have (IPv6
+  turned off at boot, or a container) stays in the file but is reported instead of applied. IP forwarding and IPv6 router
+  advertisements are left alone, so Docker and a Proxmox guest's networking keep working. Off by default
+  because strict reverse-path filtering drops traffic on hosts with asymmetric routing (several interfaces,
+  VPN gateways such as a Tailscale subnet router), and because debugging and profiling tools (`perf`, `strace`
+  on unrelated processes) stop working. Change single keys with `hardening_sysctl_extra` (a key set to
+  `null` is left out), or replace `hardening_sysctl` entirely.
+- **auditd** (`hardening_auditd_enabled`): the kernel records changes to users, groups and passwords, to
+  sudoers, to the sshd configuration, to the clock and time zone, to the audit configuration and logs,
+  and every kernel module loaded or removed (`ausearch -k identity`, `-k sudoers`, `-k sshd`,
+  `-k time-change`, `-k modules`, `-k audit-config`, `-k audit-log`). Off by default because it costs disk
+  space and some performance, and its logs are only useful if someone reads them or ships them elsewhere.
+  `hardening_auditd_immutable` adds `-e 2`: nobody, root included, can change or stop auditing until the
+  next reboot, so new rules from a later run wait for a reboot too. auditd can't run in a container (the
+  rules are installed, the service isn't started).
+- **AppArmor** (`hardening_apparmor_enabled`): installs AppArmor, keeps the service enabled and running so
+  the profiles Ubuntu and your packages ship are loaded in the mode they ship with, fails if the kernel has
+  AppArmor turned off, and reports profiles in complain mode. It never changes a profile's mode: some
+  packages ship complain-mode profiles on purpose, and forcing them to enforce can break the service. Ubuntu
+  has AppArmor on already; the switch makes sure it stays that way.
+- **Notifications**: `unattended_upgrades_mail` mails unattended-upgrades' report (`MailReport`
+  `on-change` by default); `fail2ban_destemail` mails every ban with a whois report (Fail2Ban's
+  `action_mw`); `fail2ban_webhook_url` posts a message for every ban to an ntfy, Gotify, Slack, Discord or
+  Mattermost URL (`fail2ban_webhook_format`: `text` or `json`). Mail needs a mail transfer agent on the
+  server. `mail_relay_enabled` installs `msmtp-mta` as a send-only `sendmail` that hands every message to
+  your smarthost (`mail_relay_host`, `mail_relay_port`, `mail_relay_tls`: `starttls`, `tls` or `off`), from
+  `mail_relay_from`; it refuses to replace an existing mail server (Postfix, Exim and the like). Off by
+  default because they need an outside service and send information about the server (its name, the
+  addresses it bans, its package updates) to it.
+- **Secrets for notifications**: the relay password (`vault_mail_relay_password`) and the webhook URL, which
+  usually holds a token (`vault_fail2ban_webhook_url`), belong in the Vault like the other secrets. On the
+  server they are in root-owned `0600` files (`/etc/msmtp-password`, read by msmtp's `passwordeval`, and
+  `/etc/fail2ban/action.d/usas-webhook.conf`), so only root can send mail through the relay; the tasks that
+  write or check them hide their values from the output. Addresses, the relay's host and user, and the URL are
+  checked against `\Z`-anchored allowlist patterns (no spaces, quotes, line breaks, `%`, `<` or `>`), so a
+  value can't add settings to apt, msmtp or Fail2Ban, or arguments to the webhook's `curl` command.
+
 ## Pinning the Proxmox nodes' keys
 
 The checks above stop a run when a Proxmox node's SSH host key or the API's certificate isn't the one the
