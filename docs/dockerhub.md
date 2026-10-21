@@ -58,7 +58,7 @@ choice, is one click away.
 
 | Tag | What |
 | --- | --- |
-| `X.Y.Z` | A release, such as `0.3.1`. |
+| `X.Y.Z` | A release, such as `0.4.0`. |
 | `X.Y` | The latest patch release of that minor version. |
 | `latest` | The latest release. |
 
