@@ -102,6 +102,15 @@ and in [web-ui.md](web-ui.md#security).
   pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
   release runs for a `v*` tag (the `release` environment).
 
+## Pinning the Proxmox nodes' keys
+
+The checks above stop a run when a Proxmox node's SSH host key or the API's certificate isn't the one the
+control node trusts, but only after something has been trusted the first time. [host-keys.md](host-keys.md)
+shows how to read the node's host key fingerprints and the API's certificate on the node's console, compare
+them with what the control node sees, and pin them: `known_hosts` entries checked with
+`StrictHostKeyChecking=yes` (for every node of a cluster), `pve_validate_certs: true` with the cluster's CA
+in the trust store, and how to do the same in the web UI's data volume.
+
 ## What it does not protect against
 
 - **A compromised control node.** It holds the Vault password (when you type it), the API token, your SSH

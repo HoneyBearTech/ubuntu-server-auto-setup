@@ -288,6 +288,7 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 | Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |
 | Container image | Windows (Docker Desktop with WSL 2), Linux and macOS; `linux/amd64` and `linux/arm64`; Python 3.14 and ansible-core 2.20 inside |
 
+Each release's notes list the exact ansible-core and collection versions its checks ran with.
 [SUPPORT.md](SUPPORT.md) says which releases get fixes, and for how long.
 
 ## Running it securely
@@ -301,6 +302,9 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 - **Keep `pve_validate_certs: true`.** If your Proxmox node uses its self-signed certificate, add the
   cluster's CA (`/etc/pve/pve-root-ca.pem`) to your control node's trust store instead of turning
   verification off, or the API token can be intercepted.
+- **Pin the Proxmox node's SSH host key and the API's certificate** before the first run: compare their
+  fingerprints with the node's console instead of trusting whatever answers first
+  ([docs/host-keys.md](docs/host-keys.md)).
 - **Protect your GitHub account with two-factor authentication.** Whoever controls it controls which keys
   can log in to your servers: `make keys` and the baseline install exactly the keys GitHub lists.
 - **Provision on a network you trust.** The control node learns a new VM's SSH host key by scanning it the

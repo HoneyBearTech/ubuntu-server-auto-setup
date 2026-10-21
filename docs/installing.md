@@ -44,6 +44,9 @@ make deps
 `make deps` installs `requirements.txt` (ansible-core, proxmoxer, requests, passlib) and
 `requirements-dev.txt` (ansible-lint, yamllint) with pip, and the collections in `requirements.yml`
 (`community.proxmox`, `community.general`, `ansible.posix`) with `ansible-galaxy` into `collections/`.
+Both files allow a range of versions; the release notes of each release list the exact ansible-core and
+collection versions its checks ran with, and `ansible --version` and `ansible-galaxy collection list` show
+the ones you have.
 
 ## 2. Create the Proxmox API token
 
@@ -83,7 +86,10 @@ the API's certificate can be verified (keep `pve_validate_certs: true`). Copy `/
 from the node, then on Debian or Ubuntu
 `sudo cp pve-root-ca.pem /usr/local/share/ca-certificates/pve-root-ca.crt && sudo update-ca-certificates`,
 or on macOS add it to the System keychain and point Python at it (`export SSL_CERT_FILE=...`,
-`export REQUESTS_CA_BUNDLE=...` with a bundle that includes it).
+`export REQUESTS_CA_BUNDLE=...` with a bundle that includes it). In a virtual environment the Proxmox
+modules don't read the system's trust store, so set `REQUESTS_CA_BUNDLE` on Linux too (for example to
+`/etc/ssl/certs/ca-certificates.crt`). [host-keys.md](host-keys.md) shows how to check the CA's and the
+node's SSH host key's fingerprints against the node's console before you trust them.
 
 ## 3. Write the inventory
 

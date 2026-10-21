@@ -17,6 +17,8 @@
 - [Upgrading, backups and rotating secrets](upgrading.md).
 - [Verifying releases](verifying-releases.md): check the signatures, checksums, provenance and tags, and
   the container image.
+- [Pinning the Proxmox node's host key and API certificate](host-keys.md): compare them with the node's
+  console before the first run, for one node or a cluster, from a checkout or the web UI.
 - [The web UI and the container image](web-ui.md): run everything from Docker on Windows, Linux or macOS,
   with forms for every option.
 
