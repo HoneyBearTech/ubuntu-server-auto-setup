@@ -8,6 +8,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-21
+
+Fixes from the first run on a real Proxmox VE cluster: node names, API timeouts and shared ISO storage.
+
 ### Added
 
 - The web UI's connection test lists every node in the cluster with its status (and the cluster's name),
@@ -188,7 +192,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.3
 [0.2.2]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.2
 [0.2.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.1
 [0.2.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.0
