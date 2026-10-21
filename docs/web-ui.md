@@ -78,7 +78,7 @@ Below 960 pixels wide it folds into a top bar with a **Menu** button; the UI wor
 phone screen. Movement is kept to a minimum (a pulsing dot on a running run), and none at all when the
 system asks for reduced motion.
 
-![The Proxmox page in the light theme: the API settings and the last connection test with the cluster's nodes](images/webui-proxmox-light.png)
+![The Proxmox page in the light theme: the node name is a dropdown of the cluster's nodes, beside the last connection test](images/webui-proxmox-light.png)
 
 The UI is an app in the browser and needs JavaScript; without it, each page says so. Every value it sends
 is checked again on the server, which is the only place that decides what is saved.

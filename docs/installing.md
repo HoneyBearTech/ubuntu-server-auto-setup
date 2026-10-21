@@ -6,7 +6,7 @@ and the ISO files the playbooks create. For a shorter walk-through, see the [qui
 
 ## What you need
 
-- **A control node**: Linux or macOS, Python 3.11 or later, `git`, `make` and an SSH client
+- **A control node**: Linux or macOS, Python 3.12 or later, `git`, `make` and an SSH client
   (`ssh-keyscan` included). This is where your inventory, your Vault and your SSH private key live, so
   use a machine you trust.
 - **Proxmox VE 8 or 9**, with SSH access as `root` using a key (`ssh root@<node>` must work without a

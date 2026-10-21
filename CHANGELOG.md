@@ -27,6 +27,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   system's choice, remembered for the browser (in the `usas_theme` cookie) and applied before the page is
   drawn. The fonts are Atkinson Hyperlegible Next and Mono (SIL Open Font License 1.1), served from the
   image, so the UI needs no internet access. The icon is redrawn as the USAS mark.
+- The README opens with the USAS banner (dark and light versions), an overview diagram, screenshots of the
+  web UI in both themes and a table of supported versions. Docker Hub gets its own shorter page,
+  `docs/dockerhub.md`, with absolute image links it can show (the README's HTML images and its length don't
+  suit Docker Hub); `tests/check_dockerhub.py` checks it in CI, and the release workflow publishes it with
+  the next release.
 - The web UI's app has its own tests in CI (part of the required "Web UI tests" check): every page with
   axe-core's WCAG 2.1 AA rules and structural accessibility checks, the WCAG contrast of every colour pair
   in both themes, and what each page shows and posts. CodeQL now also analyses its TypeScript.
@@ -44,6 +49,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The control node needs Python 3.12 or later, as ansible-core 2.20 does; the README and the docs said 3.11.
+  The README no longer says the ISOs always go to `/var/lib/vz/template/iso` (the folder is asked from
+  Proxmox since 0.2.3).
 - The web UI's stylesheet and script are versioned with a hash of their contents, so browsers no longer keep
   stale files after an upgrade (the URLs said `?v=0.2.0.dev0` in every release). The page footer shows the
   image's release version, which the release workflow sets from the tag.

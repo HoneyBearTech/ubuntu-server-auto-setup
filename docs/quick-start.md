@@ -5,7 +5,7 @@ it is the installer running). It assumes you already have the Proxmox API token 
 [installing.md](installing.md#2-create-the-proxmox-api-token); that page also explains every step in more
 detail.
 
-You need: a Linux or macOS machine with Python 3.11+ and `git`; root SSH access with a key to a Proxmox VE
+You need: a Linux or macOS machine with Python 3.12+ and `git`; root SSH access with a key to a Proxmox VE
 8 or 9 node; a free VM ID and a free static IP address; and your SSH public keys on your GitHub account
 (check `https://github.com/<you>.keys`).
 
