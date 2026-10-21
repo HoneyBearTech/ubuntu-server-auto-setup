@@ -351,9 +351,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if submitted:
             values.update({k: v for k, v in submitted.items() if not (k in schema.by_name
                                                                       and schema.by_name[k].kind == "secret")})
+        if section == "proxmox":
+            extra.setdefault("cluster", store.cluster())
         return render(request, f"{section}.html", status, title=SECTION_TITLES[section], fields=fields,
                       values=values, errors=(problems.errors if problems else {}), config=config,
                       timezones=timezones, **extra)
+
+    def node_problem(name: str) -> str:
+        """Why name can't be the node, if the last connection test listed the cluster's nodes; else ""."""
+        nodes = store.cluster().get("nodes") or {}
+        if not nodes or not name or name in nodes:
+            return ""
+        same = [n for n in nodes if n.lower() == name.lower()]
+        hint = f" Node names are case-sensitive: did you mean {same[0]}?" if same else ""
+        return f"{name} isn't a node in the cluster ({', '.join(sorted(nodes))}).{hint}"
 
     @app.get("/proxmox", response_class=HTMLResponse)
     async def proxmox_page(request: Request):
@@ -394,7 +405,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except RemoteProblem as exc:
                 return section_page(request, "proxmox", config, submitted, status=200, ca=saved_ca(settings),
                                     test_error=str(exc))
+            # The node list (names and status only) is kept for the node dropdown; the form isn't saved.
+            store.save_cluster(result.cluster, result.status)
             return section_page(request, "proxmox", config, submitted, ca=saved_ca(settings), test_result=result)
+        problem = node_problem(str(config.values.get("pve_node") or ""))
+        if problem:
+            return section_page(request, "proxmox", config, submitted, Problems({"pve_node": problem}), 422,
+                                ca=saved_ca(settings))
         store.save(config)
         flash(request, "Saved the Proxmox settings.")
         raise Redirect("/proxmox")

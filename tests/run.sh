@@ -129,6 +129,10 @@ play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-
 play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
   -e '{"admin_user": "sysadmin\n"}'
 
+step "provision-vms: a node name the cluster doesn't have is refused, with the real names"
+play_fails "pve_node 'PVE-Test' isn't a node in this cluster; its nodes are pve-test" playbooks/provision-vms.yml \
+  --limit srv-01 -e pve_node=PVE-Test -e pve_ssh_host=pve-test
+
 step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml

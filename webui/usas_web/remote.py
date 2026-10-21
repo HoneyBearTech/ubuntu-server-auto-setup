@@ -1,7 +1,7 @@
 """Checks against outside systems: the Proxmox API (test connection) and the GitHub keys (preview)."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
@@ -19,7 +19,9 @@ class RemoteProblem(RuntimeError):
 @dataclass
 class PveResult:
     version: str
-    nodes: list[str]
+    nodes: list[str]  # node names, sorted
+    status: dict[str, str] = field(default_factory=dict)  # node name -> "online", "offline", ...
+    cluster: str = ""  # the cluster's name; empty for a single node, or if the token can't read it
 
 
 def api_url(host: str, port: int) -> str:
@@ -55,10 +57,22 @@ def test_proxmox(host: str, port: int, user: str, token_id: str, secret: str, va
         raise RemoteProblem("That doesn't look like a Proxmox VE API.") from None
     try:
         data = version.json()["data"]
-        names = sorted(str(n["node"]) for n in nodes.json()["data"])
+        status = {str(n["node"]): str(n.get("status", "unknown")) for n in nodes.json()["data"]}
     except (ValueError, KeyError, TypeError):
         raise RemoteProblem("That doesn't look like a Proxmox VE API.") from None
-    return PveResult(version=str(data.get("version", "?")), nodes=names)
+    return PveResult(version=str(data.get("version", "?")), nodes=sorted(status), status=status,
+                     cluster=cluster_name(base, headers, verify))
+
+
+def cluster_name(base: str, headers: dict[str, str], verify: bool | str) -> str:
+    """The cluster's name from /cluster/status, or "" for a single node or a token without Sys.Audit."""
+    try:
+        response = requests.get(f"{base}/cluster/status", headers=headers, verify=verify, timeout=TIMEOUT)
+        response.raise_for_status()
+        entries = response.json()["data"]
+        return next((str(e["name"]) for e in entries if e.get("type") == "cluster"), "")
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        return ""
 
 
 def keys_url(template: str, github_user: str) -> str:

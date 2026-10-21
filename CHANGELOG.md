@@ -8,6 +8,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- The web UI's connection test lists every node in the cluster with its status (and the cluster's name),
+  and the Proxmox node becomes a dropdown of those nodes. A node name that isn't in the cluster is refused,
+  with a hint when only the capitalisation differs.
+- Provisioning checks `pve_node` against the cluster's nodes before anything is created, and names the real
+  nodes when it doesn't match (node names are case-sensitive), instead of failing later inside the API call
+  that creates the VM.
+
 ## [0.2.2] - 2026-10-21
 
 Publishes the changes listed under 0.2.1, with the image fix below.

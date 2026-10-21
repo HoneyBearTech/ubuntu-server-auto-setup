@@ -491,3 +491,46 @@ def test_module_entry_point(monkeypatch, settings, capsys):
     record = entry.logging.LogRecord("uvicorn.access", 20, "", 0, '"GET /healthz HTTP/1.1" 200', None, None)
     assert not entry._QuietHealthChecks().filter(record)
 
+
+
+def test_the_node_is_picked_from_the_cluster(ui, monkeypatch):
+    # Before a connection test the node is free text, with a pointer to the test.
+    r = ui.get("/proxmox")
+    assert 'name="pve_node" value=' in t(r) and "pick the node from a list" in t(r)
+
+    monkeypatch.setattr(m, "test_proxmox", lambda *a: PveResult(
+        version="9.1.1", nodes=["hephaestus", "zeus"], status={"hephaestus": "online", "zeus": "offline"},
+        cluster="homelab"))
+    r = post(ui, "/proxmox", {"action": "test", **PROXMOX, "pve_node": ""})
+    assert "cluster homelab" in t(r) and "now a list" in t(r)
+    assert ui.app_state.store.load().values == {}  # the test still saves no form values
+    assert ui.app_state.store.cluster() == {"name": "homelab", "nodes": {"hephaestus": "online", "zeus": "offline"}}
+
+    # From now on the node is a dropdown of the cluster's nodes, with their status.
+    page = t(ui.get("/proxmox"))
+    assert '<select id="f-pve_node" name="pve_node"' in page
+    assert ">hephaestus (online)</option>" in page and ">zeus (offline)</option>" in page
+    assert "Choose a node" in page and "The nodes of cluster <strong>homelab</strong>" in page
+
+    # A name that isn't in the cluster is refused, with a hint when only the case differs.
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_node": "Hephaestus"})
+    assert r.status_code == 422
+    assert "Hephaestus isn&#39;t a node in the cluster (hephaestus, zeus)" in r.text
+    assert "case-sensitive: did you mean hephaestus?" in t(r)
+    assert ">Hephaestus (not in the cluster)</option>" in t(r)
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_node": "athena"})
+    assert r.status_code == 422 and "did you mean" not in t(r)
+
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_node": "hephaestus"})
+    assert "Saved the Proxmox settings" in t(r)
+    assert ui.app_state.store.load().values["pve_node"] == "hephaestus"
+    assert '<option value="hephaestus" selected>hephaestus (online)</option>' in t(ui.get("/proxmox"))
+
+
+def test_a_damaged_settings_file_is_ignored(ui, settings):
+    settings.settings_file.write_text("{not json")
+    assert ui.app_state.store.cluster() == {}
+    settings.settings_file.write_text('{"cluster": {"name": "x", "nodes": ["not", "a", "dict"]}}')
+    assert ui.app_state.store.cluster() == {}
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX})  # no node list: any valid name is accepted
+    assert "Saved the Proxmox settings" in t(r)
