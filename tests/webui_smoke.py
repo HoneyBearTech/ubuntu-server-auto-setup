@@ -118,6 +118,40 @@ def check_shell(ui: UI) -> None:
           f"the page carries the version ({version.group(1) if version else 'none'})", text)
 
 
+def check_vms(ui: UI) -> None:
+    """The VMs page against the mock's fixture VMs (mock_pve.py --fixture-vms) and the VM the run found."""
+    status, url, _, _ = ui.page("/vms")
+    check(status == 200 and url.endswith("/vms"), "the VMs page opens")
+    started = time.time()
+    status, data = ui.get("/vms")
+    took = time.time() - started
+    check(status == 200 and data.get("version") == "9.1.1", "the VMs page lists the cluster", data)
+    check(took < 20, f"the list waits for the guest agents only so long ({took:.1f} s)")
+    rows = {row["vmid"]: row for row in data["vms"]}
+    web = rows.get(101, {})
+    check((web.get("agent"), web.get("ip"), web.get("ip_source"), web.get("support")) ==
+          ("ok", "10.10.10.21", "agent", "supported"),
+          "a VM's address comes from its guest agent, in the servers' subnet, over verified TLS", web)
+    check(rows.get(4061, {}).get("ip") == "10.10.10.61" and rows[4061]["ip_source"] == "inventory",
+          "a VM without an agent gets its address from the inventory", rows.get(4061))
+    check(rows.get(104, {}).get("ip_source") == "ipconfig0", "or from cloud-init", rows.get(104))
+    check(rows.get(111, {}).get("agent") == "forbidden" and
+          any("VM.GuestAgent.Audit" in n["message"] for n in data.get("notes", [])),
+          "a token that may not ask an agent is explained", data.get("notes"))
+    check(rows.get(110, {}).get("agent") in ("timeout", "pending"), "a slow agent doesn't hold the list up",
+          rows.get(110))
+    check([rows.get(i, {}).get("support") for i in (105, 106, 108, 112, 200)] ==
+          ["unsupported", "unsupported", "unsupported", "override", "unsupported"],
+          "Debian, Windows, templates and containers aren't supported; other Ubuntu releases need an override",
+          {i: rows.get(i) for i in (105, 106, 108, 112, 200)})
+    hostile = rows.get(109, {})
+    shown = json.dumps(hostile)
+    check(hostile.get("ip") == "10.10.10.29" and hostile.get("hostname") == "" and not hostile.get("name_ok") and
+          "\\u202e" not in shown and "\\u001b" not in shown and len(hostile.get("reason", "")) < 200,
+          "a hostile guest's strings are cleaned and shortened", hostile)
+    check(TOKEN_SECRET not in json.dumps(data), "the list doesn't contain the token secret")
+
+
 def main() -> None:
     ui = UI(ARGS.url)
     check_shell(ui)
@@ -233,6 +267,8 @@ def main() -> None:
           "the run is in the history", data)
     status, data = ui.get(run_path)
     check("PLAY RECAP" in data.get("log", "") and data["run"]["done"], "the run's log is kept", data)
+
+    check_vms(ui)
 
     state = mock_call(ARGS.mock, "GET", "/mock/state")
     calls = [r for r in state["data"]["requests"] if r["path"] == "/cluster/resources"]

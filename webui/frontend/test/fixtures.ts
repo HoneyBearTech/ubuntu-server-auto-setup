@@ -1,7 +1,7 @@
 // What the API answers, for the tests. sections.json is the server's own output for the settings pages
 // (webui/tests/test_frontend_fixtures.py checks it still matches the fields schema.py builds).
 
-import type { OverviewData, Run, RunPageData, SectionData, ServersData, SshData } from "../src/types";
+import type { OverviewData, Run, RunPageData, SectionData, ServersData, SshData, Vm, VmsData } from "../src/types";
 import sections from "./fixtures/sections.json";
 
 export const proxmox = sections.proxmox as unknown as SectionData;
@@ -74,3 +74,43 @@ export const log = [
   "[WARNING]: Platform linux on host web-01 is using the discovered Python interpreter",
   "",
 ].join("\n");
+
+const vmBase: Vm = {
+  vmid: 101, name: "web-01", node: "hephaestus", type: "qemu", status: "running", template: false, lock: "",
+  tags: ["ubuntu", "ansible"], cpu: 0.12, maxcpu: 4, mem: 1610612736, maxmem: 4294967296, uptime: 86400,
+  agent: "ok", addresses: ["10.0.0.21", "192.168.50.21"], ip: "10.0.0.21", ip_source: "agent",
+  os: "Ubuntu 26.04 LTS", hostname: "web-01", support: "supported", reason: "Ubuntu 26.04 LTS (reported by the guest).",
+  inventory_name: "web-01", ours: true, name_ok: true,
+};
+
+export const vmList: Vm[] = [
+  vmBase,
+  { ...vmBase, vmid: 102, name: "db-01", node: "ares", cpu: 0.53, maxcpu: 2, mem: 3221225472, addresses: [],
+    ip: "10.0.0.22", ip_source: "inventory", agent: "forbidden", os: "", hostname: "", support: "unknown",
+    reason: "The guest agent didn't report the OS: confirm it is Ubuntu before running a playbook.", ours: false,
+    inventory_name: "database", tags: [] },
+  { ...vmBase, vmid: 103, name: "jammy", status: "stopped", cpu: 0, mem: 0, agent: "stopped", addresses: [],
+    ip: "10.0.0.23", ip_source: "ipconfig0", os: "", hostname: "", support: "override",
+    reason: "Ubuntu 22.04 LTS (reported by the guest): only 26.04 and 24.04 are tested.", ours: false,
+    inventory_name: "", tags: [] },
+  { ...vmBase, vmid: 104, name: "win-11", status: "paused", agent: "ok", addresses: [], ip: "", ip_source: null,
+    os: "Windows 11 Pro", hostname: "WIN-11", support: "unsupported",
+    reason: "Windows: the playbooks set up Ubuntu Server only.", ours: false, inventory_name: "", tags: [],
+    lock: "backup" },
+  { ...vmBase, vmid: 200, name: "ct-dns", type: "lxc", agent: "none", addresses: [], ip: "", ip_source: null,
+    os: "", hostname: "", support: "unsupported", reason: "A container (LXC), not a VM: the playbooks set up whole servers.",
+    ours: false, inventory_name: "", tags: ["dns"] },
+  { ...vmBase, vmid: 105, name: "golden", template: true, status: "stopped", agent: "none", addresses: [], ip: "",
+    ip_source: null, os: "", hostname: "", support: "unsupported", reason: "A template: clone it into a VM first.",
+    ours: false, inventory_name: "", tags: [] },
+];
+
+export const vms: VmsData = {
+  version: "9.1.1",
+  vms: vmList,
+  complete: true,
+  forbidden: 1,
+  notes: [{ kind: "warning", message: "The token may not ask the guest agents of 1 VM(s) for their addresses: add VM.GuestAgent.Audit to its role (see docs/installing.md)." }],
+  cluster: "olympus",
+  fetched: 1792591331,
+};

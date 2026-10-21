@@ -25,7 +25,7 @@ leaves the machine except the container image builds:
 | --- | --- |
 | A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`) |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
-| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. With `--fixture-vms` (the image smoke test) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
 

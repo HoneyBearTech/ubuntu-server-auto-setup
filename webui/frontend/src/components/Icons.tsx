@@ -67,6 +67,17 @@ const PATHS = {
   download: <path d="M10 3.5v9M6 9l4 4 4-4M4 16.5h12" />,
   stop: <rect x="5" y="5" width="10" height="10" rx="1.5" />,
   plus: <path d="M10 4.5v11M4.5 10h11" />,
+  vms: (
+    <>
+      <rect x="2.5" y="3.5" width="15" height="10" rx="1.4" />
+      <path d="M7 16.5h6M10 13.5v3M6 7.5h4M6 10h2.5" />
+    </>
+  ),
+  refresh: <path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.5v3h-3" />,
+  pause: <path d="M7 5v10M13 5v10" />,
+  sort: <path d="m6.5 8 3.5-3.5L13.5 8M6.5 12l3.5 3.5 3.5-3.5" />,
+  "sort-up": <path d="m6 12 4-4 4 4" />,
+  "sort-down": <path d="m6 8 4 4 4-4" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;
