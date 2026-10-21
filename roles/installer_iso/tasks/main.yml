@@ -7,6 +7,11 @@
     fail_msg: ubuntu_iso_name may contain only letters, digits, dots, underscores, plus signs and hyphens.
     quiet: true
 
+# As gpgv prints it: capitals, no spaces.
+- name: Normalize the signing key's fingerprint
+  ansible.builtin.set_fact:
+    installer_signing_fpr: "{{ installer_signing_fingerprint | string | replace(' ', '') | upper }}"
+
 - name: Check the signing key's fingerprint
   ansible.builtin.assert:
     that: installer_signing_fpr is match('^[0-9A-F]{40}\\Z')

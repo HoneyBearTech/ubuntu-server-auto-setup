@@ -29,9 +29,12 @@ RUN mkdir -p /srv/iso-tree/casper /srv/ubuntu/tampered /srv/ubuntu/unsigned /srv
 
 FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 ENV DEBIAN_FRONTEND=noninteractive
+# The empty package lists are dated in the past: Ansible's apt module judges the cache's age by that
+# directory, and would otherwise skip the update the role asks for and find no packages to install.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-server python3 python3-apt xorriso ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
+ && touch -d 2000-01-01 /var/lib/apt/lists \
  && mkdir -p /run/sshd /root/.ssh /var/lib/vz/template/iso /mnt/pve/synology-nfs/template/iso \
  && chmod 700 /root/.ssh \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/10-test.conf

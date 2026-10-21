@@ -2,5 +2,3 @@
 # What the ISO file name may contain: it becomes a path on the Proxmox node and part of the checksum lookup,
 # so no slashes, spaces or line breaks. tests/fuzz/ reads it from here.
 installer_iso_name_pattern: '^[A-Za-z0-9._+-]+\Z'
-# The pinned fingerprint as gpgv prints it: capitals, no spaces.
-installer_signing_fpr: "{{ installer_signing_fingerprint | string | replace(' ', '') | upper }}"
