@@ -8,9 +8,24 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-21
+
+Publishes the changes listed under 0.2.1, with the image fix below.
+
+### Security
+
+- The container image no longer contains pip. Nothing installs packages at run time, and pip's vendored
+  libraries in the Python 3.14 base image (certifi, msgpack, setuptools, urllib3) carried fixable advisories,
+  including GHSA-6q48-6c7w-9gw2 (critical); the release's Trivy gate stopped 0.2.1 on them. The web UI's own
+  copies of those libraries were already fixed versions.
+- Pull requests now run the release's Trivy scan on the image too (in the Image smoke test check), so a
+  vulnerable base image is caught before a release is cut.
+
 ## [0.2.1] - 2026-10-21
 
-The container image moves to Python 3.14, and dependency lower bounds skip more vulnerable versions.
+**Not published:** the release run stopped at the image vulnerability scan before pushing anything, and
+the tag can't be moved, so these changes ship in 0.2.2. The container image moves to Python 3.14, and
+dependency lower bounds skip more vulnerable versions.
 
 ### Security
 
@@ -153,7 +168,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.2
 [0.2.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.1
 [0.2.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.0
 [0.1.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0

@@ -138,7 +138,7 @@ group names and starts `ansible-playbook -i /data/inventory/hosts.yml --vault-pa
 public key to `admin_extra_ssh_keys`, so the baseline can log in to the servers it installed. The browser
 follows the log through `/runs/<id>/stream`.
 
-The image is built in two stages from `python:3.14-slim` (pinned by digest; Python 3.14 is the newest that ansible-core 2.20 supports): the first installs the
+The image is built in two stages from `python:3.14-slim` (pinned by digest; Python 3.14 is the newest that ansible-core 2.20 supports); the runtime image carries no pip: the first installs the
 hash-pinned `requirements-webui.txt` (wheels only) into a virtual environment and the collections from
 `requirements.yml`; the second adds `openssh-client` and `tzdata`, the security updates published since the
 base image, the playbooks, roles and web UI, and runs as UID 10001 with everything it writes in `/data`.

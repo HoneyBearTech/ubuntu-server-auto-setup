@@ -14,6 +14,9 @@ RUN python -m venv /opt/venv \
 RUN /opt/venv/bin/ansible-galaxy collection install -r requirements.yml -p /opt/collections \
  && find /opt/collections -type d -name tests -prune -exec rm -rf {} + \
  && /opt/venv/bin/ansible-galaxy collection list -p /opt/collections > /opt/collections/VERSIONS.txt
+# Nothing installs packages at run time, so the copied environment carries no pip (and none of the libraries
+# pip vendors, which scanners rightly report when they fall behind).
+RUN /opt/venv/bin/python -m pip uninstall --yes pip
 
 FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
 # Security fixes published since the pinned base image. A release passes its run ID, so a build cache
@@ -27,6 +30,8 @@ RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends openssh-client tzdata \
  && rm -rf /var/lib/apt/lists/* \
+ && python -m pip uninstall --yes pip \
+ && rm -rf /usr/local/lib/python3.*/ensurepip/_bundled \
  && useradd --uid 10001 --user-group --create-home --home-dir /home/usas --shell /usr/sbin/nologin usas \
  && install -d -m 0700 -o usas -g usas /data
 COPY --from=build /opt/venv /opt/venv
