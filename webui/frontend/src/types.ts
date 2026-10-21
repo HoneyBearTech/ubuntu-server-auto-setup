@@ -122,3 +122,46 @@ export interface Notice {
   kind: "ok" | "warning" | "error" | "info";
   message: string;
 }
+
+// The VMs page (GET /api/vms): the cluster's VMs and containers, read-only.
+export type VmSupport = "supported" | "override" | "unknown" | "unsupported";
+
+export type IpSource = "agent" | "inventory" | "ipconfig0";
+
+export interface Vm {
+  vmid: number;
+  name: string;
+  node: string;
+  type: "qemu" | "lxc";
+  status: string;
+  template: boolean;
+  lock: string;
+  tags: string[];
+  cpu: number; // share of maxcpu in use, 0 to 1
+  maxcpu: number;
+  mem: number; // bytes
+  maxmem: number;
+  uptime: number;
+  // ok, pending, off, stopped, not-running, forbidden, timeout, error, unknown, none (containers, templates)
+  agent: string;
+  addresses: string[];
+  ip: string;
+  ip_source: IpSource | null;
+  os: string;
+  hostname: string;
+  support: VmSupport;
+  reason: string;
+  inventory_name: string;
+  ours: boolean;
+  name_ok: boolean;
+}
+
+export interface VmsData {
+  version: string;
+  vms: Vm[];
+  complete: boolean;
+  forbidden: number;
+  notes: Notice[];
+  cluster: string;
+  fetched: number;
+}

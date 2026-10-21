@@ -1,0 +1,22 @@
+---
+# Proxmox answers a start request straight away with the ID of a task that starts the VM in the background.
+# Until that task has finished, the VM's status still reads "stopped", so wait for the task first.
+- name: Wait for Proxmox to finish starting VM {{ pve_vmid }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_node }}/tasks/{{ pve_vm_start.json.data | urlencode }}/status"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_vm_start_task
+  until: pve_vm_start_task.json is defined and pve_vm_start_task.json.data.status == 'stopped'
+  retries: 90
+  delay: 2
+  delegate_to: localhost
+  become: false
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Fail unless the VM started
+  ansible.builtin.assert:
+    that: pve_vm_start_task.json.data.exitstatus == 'OK'
+    fail_msg: "Proxmox couldn't start VM {{ pve_vmid }}: {{ pve_vm_start_task.json.data.exitstatus }}"
+    quiet: true

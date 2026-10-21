@@ -29,6 +29,11 @@ updates:
       frontend-dev:
         dependency-type: "development"
         update-types: ["minor", "patch"]
+    ignore:
+      # @types/node describes the Node.js release the app is built and tested with (24, the Dockerfile's
+      # front-end stage and CI); its major version moves with that, not on its own.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

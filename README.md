@@ -97,7 +97,11 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    - UFW: deny incoming, rate-limited SSH, and any extra allow rules you list;
    - Fail2Ban: an `sshd` jail on the systemd journal, banning through nftables, with longer bans for
      repeat offenders and an `ignoreip` list for your own networks;
-   - unattended security upgrades, and `qemu-guest-agent`.
+   - unattended security upgrades, and `qemu-guest-agent`;
+   - optional, each off until you turn it on: kernel and network `sysctl` hardening, auditd rules,
+     an AppArmor check, and notifications (unattended-upgrades reports and Fail2Ban bans by mail through an
+     msmtp relay, or bans to an ntfy, Gotify, Slack or Discord webhook). See
+     [docs/security.md](docs/security.md#optional-hardening-and-notifications).
 
 ## Getting started
 
@@ -215,7 +219,7 @@ Everything is configured through the inventory (`inventory/hosts.yml`, copied fr
 The variables you are most likely to set are below. [docs/interfaces.md](docs/interfaces.md) describes them
 in more detail, and every role lists all of its variables, with defaults and comments, in
 `roles/<role>/defaults/main.yml` (`installer_iso`, `ubuntu_release`, `proxmox_vm`, `common`, `firewall`,
-`ssh_hardening`, `fail2ban`).
+`ssh_hardening`, `fail2ban`, `hardening`).
 
 **Secrets (Vault)**
 
@@ -224,6 +228,7 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `vault_admin_password` | The admin user's password, for the console (and `sudo` if you turn passwordless sudo off). SSH stays key-only. |
 | `vault_pve_api_token_id` | The Proxmox API token's name only (`automation`, not `ansible@pve!automation`). |
 | `vault_pve_api_token_secret` | The token's secret (a UUID). |
+| `vault_mail_relay_password`, `vault_fail2ban_webhook_url` | Optional: the mail relay's password and the Fail2Ban webhook URL (it usually holds a token). |
 
 **All hosts**
 
@@ -277,6 +282,8 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 | `apt_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
 | `reboot_if_required` | `false` | Reboot after upgrades when the server asks for it (otherwise the run reports it). |
 | `unattended_upgrades_auto_reboot` | `false` | Let unattended upgrades reboot the server, at `unattended_upgrades_reboot_time` (`04:00`). |
+| `hardening_sysctl_enabled`, `hardening_auditd_enabled`, `hardening_apparmor_enabled` | `false` | Optional extra hardening: kernel and network settings, audit rules, AppArmor kept on ([what each does](docs/security.md#optional-hardening-and-notifications)). |
+| `unattended_upgrades_mail`, `fail2ban_destemail`, `fail2ban_webhook_url` | `""` | Where update reports and ban notices go. Mail needs a mail server on the server, or `mail_relay_enabled` with `mail_relay_host`. |
 
 ## Supported versions
 

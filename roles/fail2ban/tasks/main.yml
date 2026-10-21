@@ -14,12 +14,51 @@
       fail2ban_maxretry a number; fail2ban_sshd_mode one of {{ fail2ban_sshd_modes | join(', ') }}.
     quiet: true
 
+- name: Check the Fail2Ban notification settings
+  ansible.builtin.assert:
+    that:
+      - fail2ban_destemail | length == 0 or fail2ban_destemail is match(fail2ban_email_pattern)
+      - fail2ban_sender | length == 0 or fail2ban_sender is match(fail2ban_email_pattern)
+      - fail2ban_webhook_format in fail2ban_webhook_formats
+    fail_msg: >-
+      fail2ban_destemail and fail2ban_sender must be plain mail addresses, and fail2ban_webhook_format one of
+      {{ fail2ban_webhook_formats | join(', ') }}.
+    quiet: true
+
+# The URL may hold a token, so it is checked (and written) without showing it.
+- name: Check the Fail2Ban webhook URL
+  ansible.builtin.assert:
+    that: fail2ban_webhook_url | length == 0 or fail2ban_webhook_url is match(fail2ban_webhook_url_pattern)
+    fail_msg: >-
+      fail2ban_webhook_url must be an http(s) URL without spaces, quotes, "%", "<", ">" or line breaks.
+    quiet: true
+  no_log: true
+
 # python3-systemd lets Fail2Ban read the journal (Ubuntu servers no longer log SSH to auth.log by default).
 - name: Install Fail2Ban
   ansible.builtin.apt:
-    name: [fail2ban, python3-systemd]
+    name: "{{ ['fail2ban', 'python3-systemd'] + (['curl'] if fail2ban_webhook_url | length > 0 else []) }}"
     state: present
   register: fail2ban_install
+
+- name: Write the webhook action
+  ansible.builtin.template:
+    src: usas-webhook.conf.j2
+    dest: "{{ fail2ban_webhook_action_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: fail2ban_webhook_url | length > 0
+  no_log: true
+  diff: false
+  notify: Restart fail2ban
+
+- name: Remove an unused webhook action
+  ansible.builtin.file:
+    path: "{{ fail2ban_webhook_action_file }}"
+    state: absent
+  when: fail2ban_webhook_url | length == 0
+  notify: Restart fail2ban
 
 - name: Configure Fail2Ban
   ansible.builtin.template:

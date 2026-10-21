@@ -27,7 +27,8 @@ def test_every_field_names_a_role_variable(sch):
 
 def test_every_pattern_in_the_roles_is_used(sch):
     """A new allowlist pattern in roles/*/vars/main.yml must reach the UI."""
-    assert sch.roles.all_var_names() <= sch.pattern_vars_used()
+    assert sch.roles.all_var_names() - s.NOT_FORM_FORMATS <= sch.pattern_vars_used()
+    assert sch.roles.all_var_names() >= s.NOT_FORM_FORMATS
 
 
 def test_defaults_and_patterns_come_from_the_role_files(sch):
@@ -86,6 +87,12 @@ def test_comments_parser():
     ("ubuntu_point_release", "26.04.2", "26.04.2"),
     ("ssh_allow_users", "sysadmin, deploy@10.0.0.*", ["sysadmin", "deploy@10.0.0.*"]),
     ("admin_password", " spaces kept ", " spaces kept "),
+    ("unattended_upgrades_mail", "", ""),
+    ("unattended_upgrades_mail", "ops+updates@mail.example.com", "ops+updates@mail.example.com"),
+    ("fail2ban_webhook_url", "https://hooks.slack.com/services/T0/B0/x-Y_z", "https://hooks.slack.com/services/T0/B0/x-Y_z"),
+    ("fail2ban_webhook_url", "https://gotify.example.com:8443/message?token=A.b-c", "https://gotify.example.com:8443/message?token=A.b-c"),
+    ("mail_relay_password", 'p "w" # x', 'p "w" # x'),
+    ("hardening_sysctl_enabled", "on", True),
     ("ufw_allow", "443/tcp\n6000:6007/udp from 10.0.0.0/24", [
         {"port": "443", "proto": "tcp"}, {"port": "6000:6007", "proto": "udp", "from": "10.0.0.0/24"}]),
 ])
@@ -110,6 +117,13 @@ def test_valid_values(sch, name, raw, expected):
     ("ubuntu_point_release", "26.04.1/../x", "format"),
     ("ssh_permit_root_login", "maybe", "one of"),
     ("admin_password", "two\nlines", "control characters"),
+    ("unattended_upgrades_mail", "root", "format"),
+    ("fail2ban_destemail", "a@example.com b@example.com", "format"),
+    ("fail2ban_webhook_url", "ftp://example.com/x", "format"),
+    ("fail2ban_webhook_url", "https://example.com/<ip>", "format"),
+    ("mail_relay_host", "-oProxyCommand=x", "format"),
+    ("mail_relay_port", "0", "between"),
+    ("mail_relay_tls", "ssl", "one of"),
     ("timezone", "{{ lookup('pipe', 'id') }}", "format"),
     ("admin_extra_ssh_keys", "not a key", "format"),
     ("ufw_allow", "443/sctp", "port must be"),

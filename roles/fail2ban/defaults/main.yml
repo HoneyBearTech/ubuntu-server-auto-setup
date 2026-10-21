@@ -11,3 +11,16 @@ fail2ban_ignoreip: []
 # Empty keeps Ubuntu's default (nftables).
 fail2ban_banaction: ""
 fail2ban_sshd_mode: normal       # normal, ddos, extra or aggressive
+
+# --- Notifications ---
+# Mail every ban, with a whois report of the address, to this address (Fail2Ban's action_mw). Needs a mail
+# transfer agent on the server, such as the common role's msmtp relay (mail_relay_enabled).
+fail2ban_destemail: ""
+# The sender address; empty keeps Fail2Ban's default (root@<host>). The msmtp relay sends from mail_relay_from.
+fail2ban_sender: ""
+# POST a message to this URL for every ban (ntfy, Gotify, Slack, Discord, Mattermost...). The URL often holds
+# a token, so keep it in the Vault ("{{ vault_fail2ban_webhook_url }}"); on the server it is root-only.
+fail2ban_webhook_url: ""
+# text sends the message as the body (ntfy); json sends {"title", "text", "message", "content"} (Slack,
+# Mattermost, Gotify, Discord).
+fail2ban_webhook_format: text

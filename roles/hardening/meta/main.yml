@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: HoneyBearTech
+  description: Optional extra hardening (kernel and network sysctl settings, auditd rules, AppArmor), all off by default
+  license: MIT
+  min_ansible_version: "2.20"
+  platforms:
+    - name: Ubuntu
+      versions: [noble, resolute]
+dependencies: []

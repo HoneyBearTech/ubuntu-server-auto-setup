@@ -10,10 +10,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [0.3.1] - 2026-10-21
 
-Ubuntu's GPG signature on `SHA256SUMS` is verified before the ISO checksum is trusted; extra SSH keys, the
-web UI's own included, are installed again; `--check --diff` works on a server the baseline hasn't run on
-yet; a pre-release checklist on real Proxmox VE, the tested ansible-core and collection versions in the
-release notes, and how to pin the Proxmox host key and certificate.
+Provisioning no longer detaches the installer before a slow-starting VM is running; Ubuntu's GPG signature
+on `SHA256SUMS` is verified before the ISO checksum is trusted; extra SSH keys, the web UI's own included,
+are installed again; `--check --diff` works on a fresh server. New: optional extra hardening and update and
+ban notifications (all off by default), a read-only VMs page in the web UI, browser and screen-reader
+checks of the web UI, and a pre-release checklist on real Proxmox VE.
 
 ### Upgrading
 
@@ -23,6 +24,18 @@ release notes, and how to pin the Proxmox host key and certificate.
   doesn't have it.
 
 ### Added
+
+- A **VMs** page in the web UI (first under Playbooks): a read-only list of every VM and container on the
+  cluster with its node, status, CPU and memory use, the address the playbooks would use and where it came
+  from (the QEMU guest agent, the Servers page or cloud-init), and whether the playbooks support it
+  (Ubuntu 26.04 and 24.04; other Ubuntu releases, an unknown OS, other systems, templates and containers
+  are labelled with the reason). It refreshes every 30 seconds while visible. The browser tests check it by
+  keyboard and with axe-core at phone width in both themes. Selecting VMs and running
+  the baseline against them comes in a later release. **New attack surface**: what guest agents report
+  reaches the UI; it is treated as untrusted (see docs/security.md and the assurance case's boundary B12).
+  The guest agents need the read-only `VM.GuestAgent.Audit` privilege on Proxmox VE 9; on an existing role,
+  add it with `pveum role modify UbuntuAutoSetup --privs VM.GuestAgent.Audit --append 1`. On Proxmox VE 8
+  the page works without the agents ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)).
 
 - A pre-release checklist on real Proxmox VE (`docs/release-checklist.md`): what the maintainer checks on
   a real cluster before tagging a release, beyond what CI covers (the ISO in shared storage, a real install
@@ -36,9 +49,46 @@ release notes, and how to pin the Proxmox host key and certificate.
   certificate instead of trusting them on first use: comparing fingerprints with the node's console,
   `StrictHostKeyChecking=yes`, clustered nodes, the cluster CA with `pve_validate_certs: true`, and giving
   the web UI's container a `known_hosts` entry.
+- Browser tests of the web UI in CI (Playwright, Chromium; `tests/webui-browser.sh`, `make webui-browser`),
+  in the "Web UI tests" check: the whole setup and a provisioning run by keyboard only, against the server
+  and the mock Proxmox API; Tab order, a visible and uncovered focus outline and no keyboard trap on every
+  page; where focus goes after each action; the run's status in a polite live region while the output
+  streams without moving focus; and axe-core's WCAG 2.1 A and AA rules with real layout, so with contrast,
+  on every page in the dark, light and system themes. See [docs/testing.md](docs/testing.md#the-browser-tests).
+- A screen-reader walk-through with VoiceOver and NVDA, with what each step should announce and a table for
+  each release's results ([docs/accessibility.md](docs/accessibility.md#screen-reader-walk-through)), now part
+  of the pre-release checklist. It hasn't been run yet.
+
+- Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
+  `hardening_sysctl_enabled` (kernel and network settings in `/etc/sysctl.d/90-usas-hardening.conf`,
+  applied and checked live on every run (keys the kernel lacks are reported, not applied), overridable with `hardening_sysctl` and `hardening_sysctl_extra`;
+  IP forwarding and router advertisements left alone for Docker and Proxmox guests),
+  `hardening_auditd_enabled` (auditd with rules for identity files, sudoers, the sshd configuration, time
+  changes, kernel modules and the audit configuration and logs; `hardening_auditd_immutable` locks them
+  until a reboot) and `hardening_apparmor_enabled` (AppArmor kept installed, enabled and running, with
+  complain-mode profiles reported, never forced). The role is tagged `hardening`.
+- Optional notifications: `unattended_upgrades_mail` (with `unattended_upgrades_mail_report`) for
+  unattended-upgrades' report; `fail2ban_destemail` and `fail2ban_sender` to mail every ban (`action_mw`);
+  `fail2ban_webhook_url` and `fail2ban_webhook_format` to post every ban to an ntfy, Gotify, Slack, Discord
+  or Mattermost webhook; and `mail_relay_enabled` to install `msmtp-mta` as a send-only `sendmail` through
+  your smarthost (`mail_relay_host`, `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`,
+  `mail_relay_user`, and `mail_relay_password` from the Vault). The relay password and webhook URL are
+  stored on the server in root-only `0600` files, and every value is checked against `\Z`-anchored
+  allowlist patterns. With the defaults, a rerun changes nothing on existing servers.
+- The web UI's Hardening page has the new switches and notification settings, in groups of their own. The
+  relay password and webhook URL are kept in the Vault, and a saved optional secret can now be removed
+  ("Remove the saved value").
+- Tests: an integration scenario that turns every option on (`tests/hardening-vars.yml`,
+  `tests/verify-hardening.yml`, including a real ban reaching a webhook listener), injection cases, and the
+  fuzz target `fuzz_baseline_extras.py`; `fuzz_configs.py` now covers the Fail2Ban notifications.
 
 ### Fixed
 
+- Provisioning could leave a new VM booting from an empty disk (since 0.1.0). Proxmox answers a start
+  request before the VM is running, and when the start took a moment the first status check still read
+  "stopped": the run took the install as finished and detached the installer and seed ISOs before the VM
+  had even started. It now waits for Proxmox's start task to finish, and stops if the start failed, before
+  it waits for the installer to power the VM off.
 - Keys in `admin_extra_ssh_keys`, including the web UI's own key, were left out of `authorized_keys` and the
   installer's configuration whenever `github_user` was set (since 0.2.0), and the baseline's exclusive key
   sync removed them. They are installed again.
@@ -47,6 +97,9 @@ release notes, and how to pin the Proxmox host key and certificate.
   Fail2Ban and other services that the run would install are skipped in check mode until they exist. A check
   run with a new `ssh_port` no longer tries to reconnect on a port sshd isn't using yet, and one with an
   `admin_user` that doesn't exist yet no longer fails on its `authorized_keys`.
+- Web UI: on narrow screens, Escape now closes the open menu and puts focus back on the **Menu** button,
+  and moving focus out of the menu closes it, so it no longer covers the part of the page that has focus.
+
 - [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
   virtual environment the Proxmox modules don't read the system's trust store.
 

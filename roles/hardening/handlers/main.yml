@@ -1,0 +1,26 @@
+---
+# With -e 2 loaded, the kernel refuses rule changes until the next reboot.
+- name: Read the audit status
+  ansible.builtin.command: auditctl -s
+  register: hardening_audit_status
+  changed_when: false
+  when:
+    - not hardening_in_container
+    - not (ansible_check_mode and hardening_auditd_install | default({}) is changed)
+  listen: Load the audit rules
+
+- name: Load the audit rules into the kernel
+  ansible.builtin.command: augenrules --load
+  changed_when: true
+  when:
+    - hardening_audit_status is not skipped
+    - hardening_audit_status.stdout is not search('(?m)^enabled 2$')
+  listen: Load the audit rules
+
+- name: Report that the audit rules wait for a reboot
+  ansible.builtin.debug:
+    msg: The audit rules are immutable until the next reboot; reboot {{ inventory_hostname }} to load the new ones.
+  when:
+    - hardening_audit_status is not skipped
+    - hardening_audit_status.stdout is search('(?m)^enabled 2$')
+  listen: Load the audit rules

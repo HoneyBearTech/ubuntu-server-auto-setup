@@ -10,6 +10,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
+| Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | Real installer ISO | Ubuntu's real signature on `SHA256SUMS`, checked with the shipped key, and the remastering of the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
@@ -24,7 +25,7 @@ leaves the machine except the container image builds:
 | --- | --- |
 | A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`) |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
-| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
 
@@ -52,7 +53,20 @@ run; your own `~/.ssh` is never touched. The steps:
    Fail2Ban follows, and a rerun on the new port changes nothing.
 7. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
    become password.
-8. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
+8. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
+   that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
+   expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
+   AppArmor is enabled, apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
+   reads the relay settings, the relay password reached its file unchanged (quotes, a backslash and `#`
+   included), and Fail2Ban has both actions. A ban of a documentation address must reach a webhook
+   listener in the container with the right message. A check run must report no changes, values that could
+   inject settings must be refused, and turning everything off must remove the files again. In a container
+   auditd can't run and AppArmor's policy is the host's, so those two live checks are skipped with the
+   reason in the log (the [pre-release checklist](release-checklist.md) covers them on a real VM).
+   Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
+   leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
+   (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
+9. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
    the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
@@ -74,7 +88,8 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words |
 | `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm` and `common` | both roles agree; every entry is one trimmed line of the input that starts with a key type |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
-| `fuzz_configs.py` | the sshd drop-in and `jail.local` | every setting appears once with exactly the given value; nothing else is added |
+| `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
+| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
 
 `make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it
 runs in CI (`.github/workflows/fuzz.yml`) or on such a machine:
@@ -96,7 +111,7 @@ without touching any system. They cover:
 
 | File | What |
 | --- | --- |
-| `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used; defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
+| `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used (except the ones `NOT_FORM_FORMATS` lists: the sysctl mapping's formats, file paths and package lists); defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
 | `test_store.py` | the inventory and Vault round-trip; files are `0600` and the Vault is encrypted; typed values are tagged `!unsafe`, and `ansible` reads the inventory without templating them |
 | `test_auth.py` | argon2id hashing and rehashing, the setup code, throttling, sessions and their expiry, CSRF tokens |
 | `test_app.py` | first run, sign-in and sign-out, open redirects, throttling, password change, the CSRF header (a token in the form isn't enough), `Origin` and `Sec-Fetch-Site`, no cross-origin answers, allowed hosts and HTTPS, cookies and security headers, the page shell and the built app's files, the theme cookie, every page's API and form with its errors, the connection test, the CA, the SSH key and host keys, the servers table, runs, streaming, history and stopping |
@@ -136,8 +151,30 @@ TLS; its log streams, contains no secret and lands in the history. Finally it ch
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
-The pages were also checked with axe-core in a real browser (with contrast) and by keyboard by hand; see
-[accessibility.md](accessibility.md).
+### The browser tests
+
+`tests/webui-browser.sh` (`make webui-browser`) runs the app in a real browser with
+[Playwright](https://playwright.dev/) (Chromium; `webui/frontend/e2e/`). It sets up what the smoke test
+does, without Docker: a certificate for `tests/mock_pve.py` and a published key, the mock, and the web UI
+from the checkout on `127.0.0.1` with an empty data directory, whose first-run setup code goes to the
+tests; the VM the run provisions already exists in the mock, so the run is a real `ansible-playbook` run
+that needs no SSH. The mock runs with `--fixture-vms`, so the VMs page has guests to list. The tests run in
+two projects (`playwright.config.ts`):
+
+| File | What |
+| --- | --- |
+| `flow.spec.ts` | by keyboard only, the way someone without a mouse does it: the skip link; the first-run setup; the Proxmox form typed field by field, the connection test failing on the certificate, saving the CA, the test passing, picking the node from its dropdown (arrow keys, Escape, Tab) and saving; a provisioning run chosen with the arrow keys, started with Enter and followed to the end with focus left where it was and the status changing in a polite live region; then signing in again, with a wrong password first. Leaves a signed-in session for `pages.spec.ts` |
+| `pages.spec.ts` | every page: axe-core (WCAG 2.0 and 2.1, A and AA) with real layout in the dark and light themes and "System" with the browser preferring each, with each accent palette (one, Ember, for now), also with a form error and with the phone menu open; Tab order, focus outlines that are visible and not covered, no keyboard trap, Shift+Tab back; the phone menu (Enter, Escape, focus back on the button, closing when focus leaves); the servers table's add and remove; the theme switch with the arrow keys |
+| `vms.spec.ts` | the VMs page against the fixture guests: sorting with Enter and Space (`aria-sort`, the caption, focus kept), the filters by keyboard with the count in its live region, each address's source, a hostile guest's markup shown as text, a refresh (with the browser's clock run forward) that keeps the rows and the focus, and axe-core at 375 pixels in the dark and light themes without sideways scrolling. Runs in the `pages` project |
+| `helpers.ts` | walking a page with Tab (`tabCycle`, `checkKeyboard`), axe-core (`checkAxe`), and posting a form as the app does for the pages the flow doesn't fill in by keyboard |
+
+A failing test leaves a screenshot and a trace in `webui/frontend/test-results/` (CI uploads them as the
+`playwright-results` artifact); open a trace with `npx playwright show-trace <file>` in `webui/frontend`.
+To watch the tests, pass Playwright's options through: `tests/webui-browser.sh --headed`, or
+`--debug -g "phone"` for one test.
+
+What a screen reader says can't be tested this way; the [screen-reader
+walk-through](accessibility.md#screen-reader-walk-through) is done by hand before each release.
 
 ## Running them
 
@@ -153,7 +190,10 @@ make test
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
 Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free. The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
-test needs Docker and ports 18006 and 18080 (`make smoke`).
+test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
+app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install
+chromium`), and ports 18106, 18180 and 18181 (`make webui-browser`; `APP_PORT`, `MOCK_PORT` and
+`KEYS_PORT` change them).
 
 ## Adding a case
 
@@ -167,6 +207,7 @@ test needs Docker and ports 18006 and 18080 (`make smoke`).
   for its valid and invalid values in `webui/tests/test_schema.py`.
 - A change to the web UI's server: a test in `webui/tests/` for what should happen and what should be
   refused. A change to the app: a test in `webui/frontend/test/` for what it shows and posts; a new page
-  goes into `PAGES` in `a11y.test.tsx` (and the server's `PAGES` in `main.py`), and a new colour into
-  `tokens.css` and a pair in `contrast.test.ts`.
+  goes into `PAGES` in `a11y.test.tsx` and in `e2e/pages.spec.ts` (and the server's `PAGES` in `main.py`),
+  a new colour into `tokens.css` and a pair in `contrast.test.ts`, a new accent palette into `PALETTES` in
+  `e2e/pages.spec.ts`, and a new way of using the keyboard (a menu, a dialog) into the browser tests.
 - A bug fix: add the check that would have caught the bug before fixing it, and see it fail.

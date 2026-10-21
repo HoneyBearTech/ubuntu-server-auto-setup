@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# Kernel and network hardening (hardening_sysctl and hardening_sysctl_extra).
+{% for key, value in hardening_sysctl_settings | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}

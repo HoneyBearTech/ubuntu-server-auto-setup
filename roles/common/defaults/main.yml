@@ -36,3 +36,20 @@ unattended_upgrades_origins:
 unattended_upgrades_auto_reboot: false
 unattended_upgrades_reboot_time: "04:00"
 unattended_upgrades_remove_unused: true
+# Mail unattended-upgrades' report to this address (empty: no mail). Sending needs a mail transfer agent on
+# the server: an existing one, or the msmtp relay below.
+unattended_upgrades_mail: ""
+unattended_upgrades_mail_report: on-change   # always, only-on-error or on-change
+
+# --- Mail relay (msmtp) ---
+# Install msmtp-mta as the server's sendmail, passing all mail to mail_relay_host. It replaces no other mail
+# server: the run stops if one (Postfix, Exim...) is installed.
+mail_relay_enabled: false
+mail_relay_host: ""
+mail_relay_port: 587
+mail_relay_tls: starttls     # starttls, tls (implicit TLS, usually port 465) or "off"
+# The sender address of the mail the server sends.
+mail_relay_from: ""
+# Sign in to the relay when set; the password belongs in the Vault ("{{ vault_mail_relay_password }}").
+mail_relay_user: ""
+mail_relay_password: ""

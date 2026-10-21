@@ -38,3 +38,6 @@
       tags: [ssh]
     - role: fail2ban
       tags: [fail2ban]
+    # Off unless hardening_sysctl_enabled, hardening_auditd_enabled or hardening_apparmor_enabled is set.
+    - role: hardening
+      tags: [hardening]

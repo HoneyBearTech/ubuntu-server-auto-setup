@@ -9,6 +9,18 @@ ignoreip = {{ (['127.0.0.1/8', '::1'] + fail2ban_ignoreip) | join(' ') }}
 {% if fail2ban_banaction | length > 0 %}
 banaction = {{ fail2ban_banaction }}
 {% endif %}
+{% if fail2ban_destemail | length > 0 %}
+destemail = {{ fail2ban_destemail }}
+{% if fail2ban_sender | length > 0 %}
+sender = {{ fail2ban_sender }}
+{% endif %}
+{% endif %}
+{% if fail2ban_destemail | length > 0 or fail2ban_webhook_url | length > 0 %}
+action = %(action_{{ 'mw' if fail2ban_destemail | length > 0 else '' }})s
+{% if fail2ban_webhook_url | length > 0 %}
+         usas-webhook
+{% endif %}
+{% endif %}
 
 [sshd]
 enabled = true

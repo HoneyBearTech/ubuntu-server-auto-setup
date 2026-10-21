@@ -41,6 +41,7 @@ wiped disk); the project's release artifacts, including the container image.
 | Upstream supply chain | What we install | A tampered ISO, a malicious Ansible collection or Python package, a compromised GitHub Action. |
 | Malicious contributor | Opening pull requests | Smuggle a backdoor into a role (an extra key, a weakened setting), exfiltrate CI credentials. |
 | A web page open in the operator's browser | Nothing | Drive the web UI through the browser: cross-site form posts (CSRF), DNS rebinding to reach `127.0.0.1`, framing the UI (clickjacking), injecting script through stored values (XSS). |
+| A malicious guest (whoever controls a VM on the cluster) | Their own VM | Feed the web UI false or hostile data through the VM's guest agent: another VM's address or a made-up OS to mislead the operator, markup, control or text-direction characters to inject script or disguise text, huge or slow answers to stall the UI. |
 | Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
 | Another user or process on the Docker host | Their own account | Read the data volume or the container's memory. (Treated as trusted: see "Out of scope".) |
 
@@ -65,7 +66,9 @@ themselves; anything on the servers beyond the baseline.
 | B8 | Contributors → `main` → releases | Code changes, release artifacts, the Docker Hub token | Protected `main` (pull request, required checks), DCO, lint and secret scanning, read-only workflow tokens, pinned actions, keyless signing and provenance (`.github/workflows/`). The Docker Hub token is a secret of the `release` environment, which only `v*` tags can deploy to, so pull requests and branches can't read it; release tags are protected from being moved or deleted. |
 | B9 | Browser → web UI | Sign-in, form values, the API token and admin password once, run requests | Published on `127.0.0.1` only; allowed host names (DNS rebinding) and HTTPS for any other name; argon2id password with a first-run setup code and throttling; server-side sessions in an `HttpOnly`, `SameSite=Strict` cookie, renewed at sign-in; a CSRF token on every form plus `Origin`/`Sec-Fetch-Site` checks; CSP, no framing; secrets never sent back (`webui/usas_web/main.py`, `auth.py`). |
 | B10 | Web UI → inventory, Vault and `ansible-playbook` | Validated values, the run's options | Values checked against the roles' own allowlist patterns (`schema.py`, read from `roles/*/vars/main.yml`) and written with `!unsafe`; secrets only in the Vault; files `0600`; `ansible-playbook`, `ssh` and `ssh-keyscan` started with argument lists; `--limit` only from inventory names; run IDs from a fixed format (`store.py`, `runner.py`, `sshkeys.py`). |
+| B12 | Guest agents (through the Proxmox API) → web UI | Each VM's addresses, OS release and host name, as the guest reports them | Read-only: `GET` calls with `VM.GuestAgent.Audit` (no command execution or file access; `VM.Monitor` on Proxmox VE 8 stays opt-in), over the verified API connection. VM IDs and node names are checked before they go into an API path. Answers are parsed by `webui/usas_web/vms.py`: IPv4 only, special-use ranges dropped, at most 16 addresses, strings stripped of control and direction characters and cut to 120 characters, host names checked against the roles' pattern. The data is display-only, labelled with its source, and shown as text by React. At most 4 agent calls at a time, 5 seconds each, 15 seconds per refresh, with caches shared by every session and negative caching of silent agents, all in a worker thread (`webui/usas_web/remote.py`). |
 | B11 | Registry (Docker Hub, or the GHCR mirror) → the operator's Docker | The container image | Built by the release workflow from a digest-pinned base and hash-pinned packages, scanned and smoke-tested, signed keylessly with cosign, with SBOM and SLSA provenance; `start.ps1 -Verify` and [verifying-releases.md](verifying-releases.md) check the signature. |
+| B12 | Servers → mail relay and webhook (optional, off by default) | Update reports and ban notices (host name, banned addresses), the relay password, the webhook URL's token | Only when the operator sets a relay or a URL. The relay password and URL come from the Vault and live on the server in root-only `0600` files; msmtp verifies the relay's certificate against the system's CAs (`tls_trust_file system`) unless `mail_relay_tls: "off"`; addresses, host, user and URL pass `\Z`-anchored allowlist patterns, fuzzed for injection (`roles/common/`, `roles/fail2ban/`, `tests/fuzz/`). |
 
 ### Attack surface
 
@@ -79,6 +82,7 @@ themselves; anything on the servers beyond the baseline.
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
 | The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in, sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `schema.py` |
+| Guest agents, through the VMs page | whoever controls a VM on the cluster | read-only privilege, parsing and limits in `vms.py`, display-only, bounded fan-out and timeouts | `webui/usas_web/vms.py`, `webui/usas_web/remote.py` |
 | The data volume | the Docker host's administrators | file modes `0600`/`0700`, Vault encryption (optionally with the password outside the volume), non-root container user | `webui/usas_web/store.py`, `Dockerfile` |
 | The container image | anyone pulling it | signed, SBOM, provenance, vulnerability scan before release | `Dockerfile`, `.github/workflows/release.yml` |
 
@@ -117,7 +121,8 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
 - **Input validation with allowlists.** Required variables are asserted before provisioning starts (a
   numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
   files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
-  user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times), anchored
+  user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times, sysctl names
+  and values, notification addresses, the mail relay's host and user, the webhook URL), anchored
   with `\Z` so a trailing line break can't slip through. Keys are split on every line break and filtered to
   known public-key prefixes. The installer configuration is built as data and written with `to_nice_yaml`.
   The [fuzz targets](testing.md#fuzzing) check that no accepted value can change a file's structure. The
@@ -147,6 +152,8 @@ this kind:
 | **Template injection into Ansible** (CWE-1336) | Every value the UI writes into the inventory or the Vault is tagged `!unsafe`, so Ansible never evaluates it (`webui/usas_web/store.py`; a unit test runs Ansible on such values). |
 | **Argument injection** (CWE-88) and **path traversal** (CWE-22) | `--limit=` takes only inventory host and group names; host names for `ssh` and `ssh-keyscan` are checked and passed after `--`; run IDs must match a fixed format before any file is opened. |
 | **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. |
+| **Improper input validation** (CWE-20) and **insufficient verification of data authenticity** (CWE-345) | What guest agents report is parsed defensively (`webui/usas_web/vms.py`): only usable IPv4 addresses, length and count limits, control and direction characters removed, VM IDs and node names checked before they reach an API path. The guest's claims are never trusted to decide anything: the OS classification is labelled as reported by the guest, every address shows its source (agent, inventory or cloud-init), and nothing on the VMs page starts a run. Unit tests and the image smoke test feed it hostile strings. |
+| **Allocation of resources without limits** (CWE-770) | The VMs page's API calls run in a pool of 4 worker threads, never on the event loop that streams the run logs, with a 10-second timeout per API call, 5 seconds per agent call and a 15-second budget per refresh; answers are cached for every session, silent agents for 2 minutes; the app polls every 30 seconds only while its tab is visible and backs off to 2 minutes after an error. |
 | **Open redirect** (CWE-601) | The sign-in page returns only to the UI's own pages. |
 | **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never sent back (the API says only whether one is saved); run logs mask the Vault's values; pages and API answers are `Cache-Control: no-store`. |
 | **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), the web UI's server is Python and its app TypeScript run by the browser, all memory-safe runtimes. |
@@ -162,8 +169,10 @@ this kind:
   sessions, the CSRF header and Origin checks, the host check, every form's API and its validation against
   the roles' patterns, the inventory and Vault files Ansible reads back, runs and their logs; the app's
   tests of every page against a stand-in API, with axe-core, structural accessibility checks and the
-  contrast of every colour pair; and a smoke test that builds the image and drives the UI against the mock
-  Proxmox API through a real `ansible-playbook` run ([testing.md](testing.md#the-web-ui)). Release images
+  contrast of every colour pair; browser tests in Chromium of the whole setup by keyboard only, focus on
+  every page and axe-core with real layout in every theme; and a smoke test that builds the image and drives
+  the UI against the mock Proxmox API through a real `ansible-playbook` run and the VMs page with fixture
+  guests (a slow agent, a forbidden one, hostile strings) ([testing.md](testing.md#the-web-ui)). Release images
   are also scanned with Trivy and fail on fixable high or critical vulnerabilities.
 - **Secret scanning**: gitleaks over the whole history on every change, plus GitHub secret scanning with
   push protection.

@@ -1,0 +1,55 @@
+---
+# A key set to null in hardening_sysctl_extra is left out.
+- name: Collect the sysctl settings
+  ansible.builtin.set_fact:
+    hardening_sysctl_settings: "{{ hardening_sysctl | combine(hardening_sysctl_extra)
+      | dict2items | rejectattr('value', 'none') | list | items2dict }}"
+
+- name: Check the sysctl settings
+  ansible.builtin.assert:
+    that:
+      - hardening_sysctl_settings.keys() | map('string') | select('match', hardening_sysctl_key_pattern) | list | length
+        == hardening_sysctl_settings | length
+      - hardening_sysctl_settings.values() | map('string') | select('match', hardening_sysctl_value_pattern) | list | length
+        == hardening_sysctl_settings | length
+    fail_msg: >-
+      hardening_sysctl and hardening_sysctl_extra keys must be sysctl names like net.ipv4.tcp_syncookies, and
+      values numbers or words separated by single spaces, with no line breaks or "=".
+    quiet: true
+
+- name: Write the sysctl settings
+  ansible.builtin.template:
+    src: sysctl.conf.j2
+    dest: "{{ hardening_sysctl_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Some keys exist only on some kernels or in the host's own network namespace (net.core.bpf_jit_harden in a
+# container, net.ipv6.* with IPv6 off at boot).
+- name: List the settings this kernel has
+  ansible.builtin.command: sysctl --all --names
+  register: hardening_sysctl_names
+  changed_when: false
+  check_mode: false
+
+- name: Report settings this kernel doesn't have
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}'s kernel has no {{ hardening_sysctl_missing | join(', ') }}: kept in
+      {{ hardening_sysctl_file }}, but not applied.
+  vars:
+    hardening_sysctl_missing: "{{ hardening_sysctl_settings.keys() | reject('in', hardening_sysctl_names.stdout_lines) | list }}"
+  when: hardening_sysctl_missing | length > 0
+
+# The module compares each live value and sets it only if it differs, so drift is corrected on every run.
+- name: Apply the sysctl settings now
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value | string }}"
+    sysctl_file: "{{ hardening_sysctl_file }}"
+    sysctl_set: true
+    reload: false
+  loop: "{{ hardening_sysctl_settings | dict2items | selectattr('key', 'in', hardening_sysctl_names.stdout_lines) }}"
+  loop_control:
+    label: "{{ item.key }} = {{ item.value }}"

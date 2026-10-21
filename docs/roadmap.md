@@ -31,9 +31,12 @@ that run on each pull request.
 - Running the ISO build as a non-root user on the Proxmox node.
 
 **Baseline**
-- Optional extra hardening, each off by default and documented: kernel and network `sysctl` settings,
-  auditd, time synchronisation settings, and limiting `sudo` to a password after provisioning.
-- Notifications (mail or a webhook) from unattended-upgrades and Fail2Ban.
+- Done: optional extra hardening, each off by default and documented: kernel and network `sysctl`
+  settings, auditd and an AppArmor check ([security.md](security.md#optional-hardening-and-notifications)).
+  Limiting `sudo` to a password after provisioning is the default since 0.3.0.
+- Done: notifications from unattended-upgrades (mail) and Fail2Ban (mail or a webhook), with an optional
+  msmtp relay.
+- Time synchronisation settings (chrony or `systemd-timesyncd` servers).
 
 **The web UI and the container image**
 - Done: a container image (amd64 and arm64, signed, with an SBOM and provenance) with a web UI that lays
@@ -43,8 +46,9 @@ that run on each pull request.
 - Several Proxmox nodes per inventory (choosing the node per server).
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
-- An automated keyboard check of the pages in CI (a real browser), and a screen-reader walk-through
-  ([accessibility.md](accessibility.md)).
+- Done: an automated keyboard and axe-core check of every page in a real browser in CI (Playwright,
+  Chromium). Written, not yet run: a screen-reader walk-through with VoiceOver and NVDA, now part of the
+  pre-release checklist ([accessibility.md](accessibility.md#screen-reader-walk-through)).
 
 **Supply chain**
 - Done: CI and the image install hash-pinned sets of Python packages (`requirements-ci.txt`,

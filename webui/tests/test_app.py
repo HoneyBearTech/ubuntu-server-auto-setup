@@ -7,14 +7,16 @@ import time
 from dataclasses import replace
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from usas_web import main as m
+from usas_web import remote
 from usas_web.remote import PveResult, RemoteProblem
 from usas_web.sshkeys import HostKey, KeyProblem
 
 from .conftest import DEFAULTS, HARDENING, PASSWORD, PROXMOX, TOKEN_SECRET, configure, csrf, make_client, post, sign_up
 
-PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/run", "/runs", "/account"]
+PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account"]
 API = ["/api/overview", "/api/proxmox", "/api/ssh", "/api/defaults", "/api/servers", "/api/hardening", "/api/run",
        "/api/runs"]
 
@@ -510,6 +512,57 @@ def test_hardening(ui):
     assert r.status_code == 422 and len(r.json()["errors"]) == 2
 
 
+EXTRAS = {
+    "hardening_sysctl_enabled": "on", "hardening_auditd_enabled": "on", "hardening_apparmor_enabled": "on",
+    "unattended_upgrades_mail": "updates@example.com", "unattended_upgrades_mail_report": "only-on-error",
+    "fail2ban_destemail": "security@example.com", "fail2ban_webhook_url": "https://ntfy.example.com/bans?auth=tk_1",
+    "fail2ban_webhook_format": "text", "mail_relay_enabled": "on", "mail_relay_host": "smtp.example.com",
+    "mail_relay_port": "465", "mail_relay_tls": "tls", "mail_relay_from": "srv@example.com",
+    "mail_relay_user": "relay", "mail_relay_password": 'p "w" \\ x',
+}
+
+
+def test_hardening_extras_and_notifications(ui, settings):
+    r = post(ui, "/hardening", {**HARDENING, **EXTRAS})
+    assert r.json()["message"] == "Saved the hardening settings."
+    store = ui.app_state.store
+    values = store.load().values
+    assert values["hardening_sysctl_enabled"] is True and "hardening_auditd_immutable" not in values  # the default
+    assert values["mail_relay_port"] == 465 and values["unattended_upgrades_mail_report"] == "only-on-error"
+    secrets = store.read_secrets()
+    assert secrets["vault_fail2ban_webhook_url"] == EXTRAS["fail2ban_webhook_url"]
+    assert secrets["vault_mail_relay_password"] == EXTRAS["mail_relay_password"]
+    text = settings.inventory_file.read_text()
+    assert "fail2ban_webhook_url: '{{ vault_fail2ban_webhook_url }}'" in text and "tk_1" not in text
+    assert "mail_relay_password: '{{ vault_mail_relay_password }}'" in text
+    data = get(ui, "/api/hardening").json()
+    fields = {f["name"]: f for f in data["fields"]}
+    assert fields["fail2ban_webhook_url"]["saved"] is True and data["values"]["fail2ban_webhook_url"] == ""
+
+    # Leaving a saved secret empty keeps it; ticking "Remove the saved value" removes it from the Vault and
+    # the inventory.
+    post(ui, "/hardening", {**HARDENING, **EXTRAS, "fail2ban_webhook_url": "", "mail_relay_password": ""})
+    assert store.read_secrets()["vault_fail2ban_webhook_url"] == EXTRAS["fail2ban_webhook_url"]
+    post(ui, "/hardening", {**HARDENING, **EXTRAS, "fail2ban_webhook_url": "", "fail2ban_webhook_url__clear": "on"})
+    assert "vault_fail2ban_webhook_url" not in store.read_secrets()
+    assert "fail2ban_webhook_url" not in settings.inventory_file.read_text()
+
+
+@pytest.mark.parametrize("name,raw", [
+    ("fail2ban_webhook_url", "https://ntfy.example.com/x'$(id)'"),
+    ("fail2ban_webhook_url", "https://ntfy.example.com/%(action_)s"),
+    ("fail2ban_destemail", "a@example.com\naction = x"),
+    ("unattended_upgrades_mail", 'a@example.com";'),
+    ("mail_relay_host", "smtp.example.com host"),
+    ("mail_relay_user", 'relay"'),
+    ("mail_relay_password", "two\nlines"),
+    ("mail_relay_tls", "maybe"),
+])
+def test_notification_values_that_could_inject_settings_are_refused(ui, name, raw):
+    r = post(ui, "/hardening", {**HARDENING, **EXTRAS, name: raw})
+    assert r.status_code == 422 and set(r.json()["errors"]) == {name}
+
+
 def test_servers(ui):
     configure(ui, servers=2)
     data = get(ui, "/api/servers").json()
@@ -810,3 +863,88 @@ def test_the_iso_storage_is_picked_from_the_storages_that_allow_isos(ui, monkeyp
     assert ui.app_state.store.load().values["pve_iso_storage"] == "synology-nfs"
     r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "bad;id"})
     assert r.status_code == 422
+
+
+# --- VMs ----------------------------------------------------------------------------------------------------
+
+
+def fake_pve(monkeypatch, version="9.1.1", agent_status=200, resources=None, calls=None):
+    """Answers the VMs page's API calls: two VMs, one with an agent."""
+    def get(url, **kw):
+        path = url.split("/api2/json", 1)[1]
+        if calls is not None:
+            calls.append((url, kw))
+        data = {
+            "/version": {"version": version},
+            "/cluster/resources?type=vm": [
+                {"vmid": 4000, "name": "web-00", "node": "pve-1", "type": "qemu", "status": "running"},
+                {"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu", "status": "running"},
+            ] if resources is None else resources,
+            "/nodes/pve-1/qemu/4000/config": {"ostype": "l26"},
+            "/nodes/pve-1/qemu/101/config": {"agent": "1", "ostype": "l26"},
+            "/nodes/pve-1/qemu/101/agent/network-get-interfaces": {"result": [
+                {"name": "eth0", "ip-addresses": [{"ip-address": "10.0.0.51", "ip-address-type": "ipv4"}]}]},
+            "/nodes/pve-1/qemu/101/agent/get-osinfo": {"result": {"id": "ubuntu", "version-id": "26.04"}},
+            "/nodes/pve-1/qemu/101/agent/get-host-name": {"result": {"host-name": "app"}},
+        }.get(path)
+        status = agent_status if "/agent/" in path else 200 if data is not None else 500
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps({"data": data} if status < 400 else {"data": None, "message": "nope"}).encode()
+        return response
+    monkeypatch.setattr(remote.requests, "get", get)
+
+
+def test_vms_needs_sign_in_and_the_api(ui, monkeypatch):
+    r = get(ui, "/api/vms")
+    assert r.status_code == 409 and r.json()["setup"] == "/proxmox" and "Proxmox API first" in r.json()["error"]
+    post(ui, "/logout")
+    r = get(ui, "/api/vms")
+    assert r.status_code == 401 and r.json()["redirect"] == "/login?next=/vms"
+
+
+def test_vms_lists_the_cluster(ui, monkeypatch):
+    configure(ui)
+    calls = []
+    fake_pve(monkeypatch, calls=calls)
+    r = get(ui, "/api/vms")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["version"] == "9.1.1" and data["complete"] and data["notes"] == [] and data["fetched"] > 0
+    rows = {row["vmid"]: row for row in data["vms"]}
+    # The inventory knows VM 4000 (web-00); the guest agent knows VM 101.
+    assert (rows[4000]["ip"], rows[4000]["ip_source"], rows[4000]["inventory_name"]) == \
+        ("10.0.0.10", "inventory", "web-00")
+    assert (rows[101]["ip"], rows[101]["ip_source"], rows[101]["support"]) == ("10.0.0.51", "agent", "supported")
+    url, kw = calls[0]
+    assert url.startswith("https://pve.example.lan:8006/api2/json/")
+    assert kw["headers"]["Authorization"] == f"PVEAPIToken=ansible@pve!automation={TOKEN_SECRET}"
+    assert kw["verify"] is True and kw["timeout"] == m.VM_API_TIMEOUT  # verified TLS, a short timeout
+    assert TOKEN_SECRET not in r.text
+
+
+@pytest.mark.parametrize("version,words", [("9.1.1", "add VM.GuestAgent.Audit"), ("8.4.14", "needs VM.Monitor")])
+def test_vms_explains_a_forbidden_agent(ui, monkeypatch, version, words):
+    configure(ui)
+    fake_pve(monkeypatch, version=version, agent_status=403)
+    data = get(ui, "/api/vms").json()
+    assert data["forbidden"] == 1 and len(data["notes"]) == 1 and words in data["notes"][0]["message"]
+
+
+def test_vms_without_tls_verification_says_so(ui, monkeypatch):
+    configure(ui)
+    post(ui, "/proxmox", {"action": "save", **{**PROXMOX, "pve_validate_certs": ""}})
+    calls = []
+    fake_pve(monkeypatch, calls=calls)
+    data = get(ui, "/api/vms").json()
+    assert calls[0][1]["verify"] is False and "isn't verified" in data["notes"][0]["message"]
+
+
+def test_vms_when_the_cluster_cant_be_listed(ui, monkeypatch):
+    configure(ui)
+
+    def down(url, **kw):
+        raise requests.exceptions.ConnectionError()
+    monkeypatch.setattr(remote.requests, "get", down)
+    r = get(ui, "/api/vms")
+    assert r.status_code == 502 and "Couldn't connect to pve.example.lan:8006" in r.json()["error"]

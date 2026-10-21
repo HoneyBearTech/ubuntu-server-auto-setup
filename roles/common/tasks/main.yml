@@ -7,6 +7,33 @@
     fail_msg: admin_user must be a lowercase Linux user name and server_hostname a valid host name.
     quiet: true
 
+- name: Check the mail settings
+  ansible.builtin.assert:
+    that:
+      - unattended_upgrades_mail | length == 0 or unattended_upgrades_mail is match(common_email_pattern)
+      - unattended_upgrades_mail_report in common_mail_report_values
+      - not (mail_relay_enabled | bool) or (mail_relay_host is match(common_mail_host_pattern)
+        and mail_relay_port | string is match('^[0-9]+\Z') and 1 <= (mail_relay_port | int) <= 65535
+        and mail_relay_tls in common_mail_tls_values
+        and mail_relay_from is match(common_email_pattern)
+        and mail_relay_user is match(common_mail_user_pattern))
+    fail_msg: >-
+      unattended_upgrades_mail and mail_relay_from must be plain mail addresses and unattended_upgrades_mail_report
+      one of {{ common_mail_report_values | join(', ') }}; with mail_relay_enabled, mail_relay_host must be a host
+      name or address, mail_relay_port a port, mail_relay_tls one of {{ common_mail_tls_values | join(', ') }} and
+      mail_relay_user a user name without spaces, quotes or line breaks.
+    quiet: true
+
+- name: Check the mail relay password
+  ansible.builtin.assert:
+    that:
+      - mail_relay_password is match(common_mail_password_pattern)
+      - (mail_relay_user | length == 0) == (mail_relay_password | length == 0)
+    fail_msg: mail_relay_user and mail_relay_password go together, and the password can't contain line breaks.
+    quiet: true
+  when: mail_relay_enabled | bool
+  no_log: true
+
 - name: Check for cloud-init
   ansible.builtin.stat:
     path: /usr/bin/cloud-init
@@ -117,6 +144,32 @@
 - name: Install SSH keys
   ansible.builtin.include_tasks: ssh_keys.yml
   tags: [ssh_keys]
+
+- name: Set up the mail relay
+  ansible.builtin.import_tasks: mail_relay.yml
+  when: mail_relay_enabled | bool
+
+# Also when the relay is turned off: the password shouldn't stay behind on the server.
+- name: Remove an unused relay password
+  ansible.builtin.file:
+    path: "{{ common_msmtp_password_file }}"
+    state: absent
+  when: not (mail_relay_enabled | bool and mail_relay_password | length > 0)
+
+- name: Look for a mail transfer agent
+  ansible.builtin.stat:
+    path: /usr/sbin/sendmail
+  register: common_sendmail
+  when: unattended_upgrades_mail | length > 0 and not mail_relay_enabled | bool
+
+- name: Report that update mail can't be sent
+  ansible.builtin.debug:
+    msg: >-
+      unattended_upgrades_mail is set, but {{ inventory_hostname }} has no mail transfer agent (/usr/sbin/sendmail),
+      so the report can't be sent. Set mail_relay_enabled with a relay host, or install one yourself.
+  when:
+    - common_sendmail is not skipped
+    - not common_sendmail.stat.exists
 
 - name: Configure unattended upgrades
   ansible.builtin.template:

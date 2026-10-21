@@ -27,4 +27,7 @@ __pycache__/
 # The web UI's app (webui/frontend): dependencies, test coverage, and the build that FastAPI serves
 webui/frontend/node_modules/
 webui/frontend/coverage/
+webui/frontend/test-results/
+webui/frontend/playwright-report/
+webui/frontend/e2e/.auth/
 webui/usas_web/static/app/

@@ -1,0 +1,10 @@
+---
+# What a sysctl key and value may contain: dotted names and plain numbers or words, no spaces around "=",
+# line breaks or comments, so an entry can't add another setting. tests/fuzz/ reads them from here.
+hardening_sysctl_key_pattern: '^[a-z][a-z0-9_]*(\.[A-Za-z0-9_-]+)+\Z'
+hardening_sysctl_value_pattern: '^[A-Za-z0-9_.:/-]+( [A-Za-z0-9_.:/-]+)*\Z'
+hardening_sysctl_file: /etc/sysctl.d/90-usas-hardening.conf
+hardening_audit_rules_file: /etc/audit/rules.d/60-usas-hardening.rules
+hardening_audit_immutable_file: /etc/audit/rules.d/99-usas-immutable.rules
+# Auditing and loading kernel settings or AppArmor policy belong to the host kernel, not a container.
+hardening_container_types: [docker, podman, container, containerd, lxc, systemd-nspawn, openvz, wsl]
