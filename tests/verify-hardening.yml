@@ -4,11 +4,17 @@
 - name: Verify the optional hardening and notifications
   hosts: srv-01
   become: true
-  gather_facts: true
+  gather_facts: false
   vars_files:
     - hardening-vars.yml
   vars:
     verify_sysctl_present: "{{ verify_sysctl.keys() | select('in', verify_sysctl_names.stdout_lines) | list }}"
+  pre_tasks:
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
+
+    - name: Gather facts
+      ansible.builtin.setup:
   tasks:
     - name: Read the role's default sysctl set
       ansible.builtin.include_vars:

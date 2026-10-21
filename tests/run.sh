@@ -272,6 +272,13 @@ docker exec "$SRV" sh -c '! test -e /etc/sysctl.d/90-usas-hardening.conf && ! te
 cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 
+step "baseline: sudo-rs without the classic sudo is refused before anything changes"
+cool_down
+docker exec "$SRV" mv /usr/bin/sudo.ws /usr/bin/sudo.ws.hidden
+play_fails "whose password prompt Ansible doesn't recognise" playbooks/baseline.yml --limit srv-01 \
+  -e ssh_port=2222 -e ansible_port=2222 -e admin_sudo_nopasswd=false
+docker exec "$SRV" mv /usr/bin/sudo.ws.hidden /usr/bin/sudo.ws
+
 step "Task coverage"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE"
 
