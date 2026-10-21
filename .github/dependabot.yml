@@ -13,6 +13,18 @@ updates:
       interval: "weekly"
     assignees: ["HoneyBearTech"]
 
+  # The web UI's app (webui/frontend/package.json, locked with integrity hashes in package-lock.json).
+  # Development tools are grouped so a routine update is one pull request.
+  - package-ecosystem: "npm"
+    directory: "/webui/frontend"
+    schedule:
+      interval: "weekly"
+    assignees: ["HoneyBearTech"]
+    groups:
+      frontend-dev:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

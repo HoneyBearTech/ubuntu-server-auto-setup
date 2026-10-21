@@ -7,9 +7,9 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 
 | Suite | What it covers | Command | In CI |
 | --- | --- | --- | --- |
-| Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile) | `make lint`, `make syntax` | every pull request and push to `main` (required) |
+| Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
-| Web UI unit tests | the web UI against the real roles and ansible-core: sign-in, guards, every form and its validation, the inventory and Vault it writes, runs, accessibility structure; at least 80% statement coverage | `make webui-test` | every pull request and push to `main` |
+| Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
@@ -79,7 +79,12 @@ integration tests that the fix refuses.
 
 ## The web UI
 
-**Unit tests** (`webui/tests/`, pytest, run with `make webui-test` or `cd webui && python -m pytest`) use
+The web UI is two parts: the server (`webui/usas_web`, Python) and the app in the browser
+(`webui/frontend`, TypeScript and React). Each has its own tests; `make webui-test` runs both.
+
+### The server
+
+**Unit tests** (`webui/tests/`, pytest, run with `cd webui && python -m pytest`) use
 FastAPI's test client with a temporary data directory and the real roles of the checkout. A stand-in
 `ansible-playbook` script prints its arguments, so runs, logs, redaction, streaming and stopping are tested
 without touching any system. They cover:
@@ -89,16 +94,36 @@ without touching any system. They cover:
 | `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used; defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
 | `test_store.py` | the inventory and Vault round-trip; files are `0600` and the Vault is encrypted; typed values are tagged `!unsafe`, and `ansible` reads the inventory without templating them |
 | `test_auth.py` | argon2id hashing and rehashing, the setup code, throttling, sessions and their expiry, CSRF tokens |
-| `test_app.py` | first run, sign-in and sign-out, open redirects, throttling, password change, CSRF, `Origin` and `Sec-Fetch-Site`, allowed hosts and HTTPS, cookies and security headers, every page and form with its errors, the connection test, the CA, the SSH key and host keys, the servers table, runs, streaming, history and stopping |
+| `test_app.py` | first run, sign-in and sign-out, open redirects, throttling, password change, the CSRF header (a token in the form isn't enough), `Origin` and `Sec-Fetch-Site`, no cross-origin answers, allowed hosts and HTTPS, cookies and security headers, the page shell and the built app's files, the theme cookie, every page's API and form with its errors, the connection test, the CA, the SSH key and host keys, the servers table, runs, streaming, history and stopping |
 | `test_runner.py`, `test_remote.py`, `test_sshkeys.py`, `test_config.py` | the command line and environment of runs, `--limit` checks, the Proxmox and GitHub checks against stand-in responses, key formats and fingerprints, `known_hosts` handling, settings |
-| `test_accessibility.py` | the structure of every page, empty, filled and with errors: language, one `h1`, landmarks, a label for every control, unique IDs, and references that resolve ([accessibility.md](accessibility.md)) |
+| `test_accessibility.py` | the HTML the server sends for every page: language, title, one `h1`, landmarks, the skip link, unique IDs, a message without JavaScript, and nothing inline the Content Security Policy would block ([accessibility.md](accessibility.md)) |
+| `test_frontend_fixtures.py` | the API answers the app's tests use (`webui/frontend/test/fixtures/sections.json`) are still what the server answers; after a change to a field, write them again with `USAS_UPDATE_FIXTURES=1 python -m pytest tests/test_frontend_fixtures.py` |
 
 The run fails below 80% statement coverage (`webui/pytest.ini`; about 98% at the time of writing).
 
+### The app
+
+**Unit tests** (`webui/frontend/test/`, [Vitest](https://vitest.dev/) with jsdom and Testing Library,
+run with `npm test` in `webui/frontend` after `npm ci`) render the app as the browser would, against a
+stand-in for the server's API (`test/server.ts`) that records every call, with the server's real answers
+for the settings pages (`test/fixtures/sections.json`):
+
+| File | What |
+| --- | --- |
+| `a11y.test.tsx` | every page, signed in and out, empty and with errors, with axe-core's WCAG 2.1 A and AA rules and the same structural checks as `test_accessibility.py` |
+| `contrast.test.ts` | the WCAG contrast of every colour pair, from `src/styles/tokens.css`, in both themes |
+| `app.test.tsx` | the theme switch and what it posts, the router (links, back and forward, titles, focus), sign-in, sign-out, first run, the password change, an expired session, the API client |
+| `pages.test.tsx` | every page: what it shows from the API, what its forms post (field names, the CSRF header, the button's `action`), errors by field and in the summary, the connection test and the node dropdown, the servers table's rows, the SSH key and host keys, starting, following and stopping a run, the log's colours |
+
+`npm run check` type-checks the app and its tests (TypeScript, strict). The run fails below 80% statement
+coverage (`vite.config.ts`; about 98% at the time of writing).
+
 **The smoke test** (`tests/webui-smoke.sh`, `make smoke`) builds the image, starts it next to
 `tests/mock_pve.py` on a private Docker network with the hardening from `docker-compose.yml` (read-only
-root, no capabilities), and drives it with `tests/webui_smoke.py` (standard library only): a wrong setup
-code, a form without its CSRF token and one from another origin are refused; the first password is set;
+root, no capabilities), and drives it with `tests/webui_smoke.py` (standard library only) the way the app
+does: the page shell links the app the image built, its script, stylesheet and fonts are served, and
+nothing is inline; a wrong setup code, a post without its CSRF token and one from another origin are
+refused; the first password is set; the theme is remembered;
 the connection test fails on the mock's certificate until its CA is saved, then passes; every page is
 saved; invalid values are refused with the roles' patterns; a provisioning run for a VM that already exists
 goes through `ansible-playbook`, which reads the token from the Vault and calls the mock API over verified
@@ -106,7 +131,7 @@ TLS; its log streams, contains no secret and lands in the history. Finally it ch
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
-The pages were also checked with axe-core and by keyboard in a browser by hand; see
+The pages were also checked with axe-core in a real browser (with contrast) and by keyboard by hand; see
 [accessibility.md](accessibility.md).
 
 ## Running them
@@ -121,8 +146,9 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free. The web UI's tests need only the Python
-packages (`make webui-test`); the smoke test needs Docker and ports 18006 and 18080 (`make smoke`).
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free. The web UI's tests need the Python
+packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
+test needs Docker and ports 18006 and 18080 (`make smoke`).
 
 ## Adding a case
 
@@ -134,6 +160,8 @@ packages (`make webui-test`); the smoke test needs Docker and ports 18006 and 18
 - A new or changed role variable that the web UI shows: add or change its field in
   `webui/usas_web/schema.py` (the schema tests fail until a new allowlist pattern has a field), and a case
   for its valid and invalid values in `webui/tests/test_schema.py`.
-- A change to the web UI: a test in `webui/tests/` for what should happen and what should be refused, and,
-  for a new page or form, the accessibility test picks it up once it is in `PAGES` or posted with errors.
+- A change to the web UI's server: a test in `webui/tests/` for what should happen and what should be
+  refused. A change to the app: a test in `webui/frontend/test/` for what it shows and posts; a new page
+  goes into `PAGES` in `a11y.test.tsx` (and the server's `PAGES` in `main.py`), and a new colour into
+  `tokens.css` and a pair in `contrast.test.ts`.
 - A bug fix: add the check that would have caught the bug before fixing it, and see it fail.

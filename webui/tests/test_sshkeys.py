@@ -116,8 +116,16 @@ def test_scan_trust_forget(keys, settings, monkeypatch):
         raise subprocess.TimeoutExpired(argv, 1)
 
     monkeypatch.setattr(k.subprocess, "run", boom)
-    with pytest.raises(KeyProblem, match="Couldn't scan"):
+    with pytest.raises(KeyProblem, match=r"Couldn't scan pve: no answer within 15 seconds\.$") as caught:
         keys.scan("pve")
+    assert caught.value.message == str(caught.value)
+
+    def missing(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", "ssh-keyscan")
+
+    monkeypatch.setattr(k.subprocess, "run", missing)
+    with pytest.raises(KeyProblem, match=r"Couldn't scan pve: No such file or directory\.$"):
+        keys.scan("pve")  # the reason only, not the exception's text with its path
 
 
 def test_ssh_login_and_ca_fetch(keys, settings, monkeypatch):
@@ -141,10 +149,17 @@ def test_ssh_login_and_ca_fetch(keys, settings, monkeypatch):
         keys.fetch_ca("pve")
 
     def boom(argv, **kw):
-        raise OSError("no ssh")
+        raise FileNotFoundError(2, "No such file or directory", "/usr/bin/ssh")
 
     monkeypatch.setattr(k.subprocess, "run", boom)
-    with pytest.raises(KeyProblem, match="no ssh"):
+    with pytest.raises(KeyProblem, match=r"SSH to pve failed: No such file or directory\.$"):
+        keys.test_login("pve")
+
+    def odd(argv, **kw):
+        raise OSError("something without an errno")
+
+    monkeypatch.setattr(k.subprocess, "run", odd)
+    with pytest.raises(KeyProblem, match=r"SSH to pve failed: OSError\.$"):
         keys.test_login("pve")
 
 

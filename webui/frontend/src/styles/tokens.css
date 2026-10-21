@@ -1,0 +1,140 @@
+/* Design tokens. Dark is the default theme; <html data-theme="light"> switches to light, and
+   data-theme="system" follows the browser's prefers-color-scheme. Every colour pair the UI uses is checked
+   for WCAG 2.1 AA contrast by test/contrast.test.ts (4.5:1 for text, 3:1 for borders, icons and the focus
+   ring), which reads this file: change a colour here and that test tells you if it still passes.
+
+   The accent is "Ember": a Proxmox-like orange. */
+
+:root {
+  color-scheme: dark;
+
+  /* Neutrals: a cool, slightly blue grey */
+  --bg: #0d1117;
+  --surface: #151b23;
+  --surface-2: #1c232d;
+  --line: #29313d;          /* dividers and card edges (decorative) */
+  --border: #66717f;        /* form controls: 3:1 or more on bg, surface and surface-2 */
+  --text: #e6eaf0;
+  --muted: #9aa4b2;
+  --log-bg: #0a0e13;
+
+  /* Accent */
+  --accent: #ff9447;
+  --accent-hover: #ffb27a;
+  --accent-soft: #3a2e29;   /* the selected nav item and the open dropdown's glow */
+  --on-accent: #0b0f14;     /* text on an accent background */
+  --focus: #ffb27a;
+
+  /* Status: text colour, and the tint behind a badge or notice */
+  --success: #4fd18b;
+  --success-bg: #11291c;
+  --warning: #f2b84b;
+  --warning-bg: #2e2410;
+  --error: #ff7b72;
+  --error-bg: #33181a;
+  --info: #6cb6ff;
+  --info-bg: #122438;
+
+  /* Type */
+  --font-sans: "Atkinson Hyperlegible Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --leading: 1.55;
+  --leading-tight: 1.25;
+
+  /* Space, on a 4 px grid */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Shape and depth */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-pop: 0 18px 40px -12px rgb(0 0 0 / 0.55);
+
+  /* Layout */
+  --sidebar: 15.5rem;
+  --content: 72rem;
+  --control-height: 2.5rem;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 160ms;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #eceff4;
+  --line: #dbe0e7;
+  --border: #7a8392;
+  --text: #131820;
+  --muted: #525c6b;
+  --log-bg: #f7f8fa;
+  --accent: #b2470a;
+  --accent-hover: #943a06;
+  --accent-soft: #f6ebe4;
+  --on-accent: #ffffff;
+  --focus: #b2470a;
+  --success: #18794a;
+  --success-bg: #e3f4ea;
+  --warning: #8a5a00;
+  --warning-bg: #fbefd6;
+  --error: #c4261d;
+  --error-bg: #fbe6e4;
+  --info: #1f62c7;
+  --info-bg: #e4eefb;
+  --shadow-1: 0 1px 2px rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 18px 40px -12px rgb(16 24 40 / 0.25);
+}
+
+/* "System": the same light values when the browser prefers light. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #eceff4;
+    --line: #dbe0e7;
+    --border: #7a8392;
+    --text: #131820;
+    --muted: #525c6b;
+    --log-bg: #f7f8fa;
+    --accent: #b2470a;
+    --accent-hover: #943a06;
+    --accent-soft: #f6ebe4;
+    --on-accent: #ffffff;
+    --focus: #b2470a;
+    --success: #18794a;
+    --success-bg: #e3f4ea;
+    --warning: #8a5a00;
+    --warning-bg: #fbefd6;
+    --error: #c4261d;
+    --error-bg: #fbe6e4;
+    --info: #1f62c7;
+    --info-bg: #e4eefb;
+    --shadow-1: 0 1px 2px rgb(16 24 40 / 0.06);
+    --shadow-pop: 0 18px 40px -12px rgb(16 24 40 / 0.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration: 0ms;
+  }
+}

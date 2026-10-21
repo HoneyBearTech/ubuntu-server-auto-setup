@@ -106,9 +106,10 @@ baseline.
 
 ```text
  browser ──HTTP, 127.0.0.1:8080──▶ container "usas" (UID 10001)                 /data volume
- (sign-in, forms, live log)        ┌──────────────────────────────────────┐      ────────────
-                                   │ uvicorn + FastAPI (usas_web)         │────▶ inventory/hosts.yml
-                                   │   pages, sign-in, CSRF, host check   │      inventory/group_vars/all/
+ the app (React, built into        ┌──────────────────────────────────────┐      ────────────
+ static/app): pages, forms,        │ uvicorn + FastAPI (usas_web)         │────▶ inventory/hosts.yml
+ live log; JSON from /api/*        │   page shell, /api/*, sign-in, CSRF, │      inventory/group_vars/all/
+                                   │   host check, server-side validation │
                                    │   schema: fields from roles/*/       │        vault.yml (Ansible Vault)
                                    │     defaults and vars                │      .vault-pass
                                    │   runner ──argv──▶ ansible-playbook ─┼──▶   ssh/ (key, known_hosts)
@@ -127,9 +128,10 @@ baseline.
 | `auth.py` | The password (argon2id), the first-run setup code, in-memory sessions, CSRF tokens, throttling of failed sign-ins. | `webui/usas_web/auth.py` |
 | `runner.py` | Runs `ansible-playbook` with an argument list, one run at a time, writes the output (with the Vault's values masked) and the run's details to `runs/`. | `webui/usas_web/runner.py` |
 | `sshkeys.py`, `remote.py` | The UI's key pair, scanning and trusting the node's host key, the cluster CA; the Proxmox connection test and the GitHub keys preview. | `webui/usas_web/` |
-| `main.py`, `templates/`, `static/` | The pages (server-rendered HTML that works without JavaScript), the guard middleware (allowed hosts, sessions, Origin checks, security headers), the live log as server-sent events. | `webui/usas_web/` |
+| `main.py`, `templates/app.html` | The JSON API behind every page and form (the same field names and checks the forms always had), the HTML shell every page URL answers with, the guard middleware (allowed hosts, sessions, Origin checks, the CSRF header, security headers), the live log as server-sent events. | `webui/usas_web/` |
+| The app | The pages in the browser: React and TypeScript, built by Vite into `static/app` (one script, one stylesheet, the fonts; names carry a hash of their contents). Design tokens in `src/styles/tokens.css`; a small router over the History API; the log viewer reads the server-sent events. It only shows what the server answers: every check is the server's. | `webui/frontend/` |
 
-How a run works: the page posts the form; the runner checks the limit against the inventory's host and
+How a run works: the app posts the run form to `/api/run`; the runner checks the limit against the inventory's host and
 group names and starts `ansible-playbook -i /data/inventory/hosts.yml --vault-password-file
 /data/.vault-pass [--check] [--diff] [--limit=...] playbooks/<playbook>.yml` from `/app`, with
 `ANSIBLE_CONFIG=/app/ansible.cfg` and, if a cluster CA was saved, `SSL_CERT_FILE` and
@@ -138,9 +140,12 @@ group names and starts `ansible-playbook -i /data/inventory/hosts.yml --vault-pa
 public key to `admin_extra_ssh_keys`, so the baseline can log in to the servers it installed. The browser
 follows the log through `/runs/<id>/stream`.
 
-The image is built in two stages from `python:3.14-slim` (pinned by digest; Python 3.14 is the newest that ansible-core 2.20 supports); the runtime image carries no pip: the first installs the
-hash-pinned `requirements-webui.txt` (wheels only) into a virtual environment and the collections from
-`requirements.yml`; the second adds `openssh-client` and `tzdata`, the security updates published since the
+The image is built in three stages. The first, from `node:24-slim` (pinned by digest), runs `npm ci` on
+the app's lock file and builds the app; only the built files and the licences of what they contain go on.
+The other two are from `python:3.14-slim` (pinned by digest; Python 3.14 is the newest that ansible-core
+2.20 supports); the runtime image carries no pip, Node or npm: the second installs the hash-pinned
+`requirements-webui.txt` (wheels only) into a virtual environment and the collections from
+`requirements.yml`; the third adds `openssh-client` and `tzdata`, the security updates published since the
 base image, the playbooks, roles and web UI, and runs as UID 10001 with everything it writes in `/data`.
 Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
 
@@ -169,5 +174,5 @@ Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
 | `community.proxmox` and the Proxmox API with a token | A token with a narrow role instead of root credentials for VM management; the `uri` module covers what the collection doesn't (start, status, detach). |
 | UFW, Fail2Ban, OpenSSH drop-ins, unattended-upgrades | The tools Ubuntu ships and documents, so the result is ordinary, inspectable Ubuntu configuration. |
 | GitHub `.keys` endpoint | One place to manage the keys for every server; removing a key there removes it everywhere at the next sync. |
-| FastAPI with server-rendered Jinja pages, a few lines of plain JavaScript | A small UI with no front-end build, no bundled third-party JavaScript, and a strict Content Security Policy; the same Python and Jinja as Ansible itself. |
+| FastAPI with a JSON API, and a React app built by Vite | The server stays small and Python, with every check in one place (`schema.py`, the same patterns as the roles); the app gives a modern interface (live log, inline errors, dark and light themes) as plain static files, so the Content Security Policy stays `'self'` only. The build runs only in a stage of the image; its npm packages are locked with integrity hashes and checked like the Python ones ([dependencies.md](dependencies.md)). |
 | One container image with Docker volumes | Runs the same on Windows (Docker Desktop with WSL 2), Linux and macOS; Ansible doesn't run natively on Windows. |

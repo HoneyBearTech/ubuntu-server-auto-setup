@@ -23,3 +23,8 @@ __pycache__/
 # Project notes live in Chronos, never here
 .obsidian-docs/
 .DS_Store
+
+# The web UI's app (webui/frontend): dependencies, test coverage, and the build that FastAPI serves
+webui/frontend/node_modules/
+webui/frontend/coverage/
+webui/usas_web/static/app/

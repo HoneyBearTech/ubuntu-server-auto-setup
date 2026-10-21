@@ -2,8 +2,8 @@
 name: Dependency review
 
 # Every pull request: block dependencies it adds or changes that have a known vulnerability of moderate or
-# higher severity, or a license outside the allowlist (docs/dependencies.md). GPL-3.0 is allowed for
-# Ansible itself and the Ansible project's lint tools only.
+# higher severity, or a license outside the allowlist (docs/dependencies.md), in the Python and the npm
+# packages. GPL-3.0 is allowed for Ansible itself and the Ansible project's lint tools only.
 on: pull_request  # yamllint disable-line rule:truthy
 
 permissions:
@@ -24,7 +24,8 @@ jobs:
           allow-licenses: >-
             MIT, MIT-0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Zlib, Unlicense, CC0-1.0,
             BlueOak-1.0.0, PSF-2.0, Python-2.0, MPL-2.0, LGPL-2.1-only, LGPL-2.1-or-later,
-            LGPL-3.0-only, LGPL-3.0-or-later
+            LGPL-3.0-only, LGPL-3.0-or-later, OFL-1.1
+          # OFL-1.1: the web UI's fonts (Atkinson Hyperlegible Next and Mono); fonts only.
           # ansible-core, ansible-lint, yamllint: GPL-3.0, allowed for the Ansible tools only.
           # typing-extensions: PSF-2.0, but GitHub's license data reads the license history in its LICENSE
           # file as "GPL-1.0-or-later"; it reaches CI only through the lint tools (black).

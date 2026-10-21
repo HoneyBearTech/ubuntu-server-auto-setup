@@ -16,7 +16,7 @@ API for other programs. What should be reachable from where is described in the
 | Make targets | the operator | [below](#commands); `make help` |
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
-| The web UI (HTML pages and forms on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
+| The web UI (the USAS app and its JSON API on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
 | The container image and its settings (environment variables, the `/data` volume) | the operator, with Docker | [below](#the-web-ui); [web-ui.md](web-ui.md#settings) |
 | `start.ps1` | the operator, on Windows | [web-ui.md](web-ui.md#starting-it); `Get-Help .\start.ps1` |
 
@@ -178,7 +178,10 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 - **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
-  [web-ui.md](web-ui.md#http-endpoints); they are HTML pages and forms, not a stable API.
+  [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
+  uses. That API isn't a stable interface for other programs; use the inventory and `ansible-playbook`.
+- **Look**: a dark theme by default, light or the system's choice from the theme switch (kept in the
+  `usas_theme` cookie).
 - **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
   a limit, the same as the [commands](#commands). Exit status and logs are kept in the run history.
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,

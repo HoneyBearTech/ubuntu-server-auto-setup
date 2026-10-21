@@ -3,7 +3,7 @@ name: CI
 
 # Every pull request and push to main: YAML, Ansible, Python and Dockerfile lint, a syntax check of every
 # playbook, the workflow linter, a secret scan over the whole history, the integration tests (the playbooks
-# run against containers and a mock Proxmox API), the web UI's unit tests, and a smoke test of the container
+# run against containers and a mock Proxmox API), the web UI's unit tests (server and app), and a smoke test of the container
 # image (see docs/testing.md). The job names are the required status checks in the main branch ruleset; keep
 # them stable.
 on:  # yamllint disable-line rule:truthy
@@ -131,11 +131,37 @@ jobs:
       - name: Install the packages (hash-pinned)
         run: python -m pip install --require-hashes -r requirements-ci.txt
 
-      # Unit tests of the web UI against the real roles and ansible-core; fails below 80% statement coverage
-      # (webui/pytest.ini).
-      - name: Run the unit tests
+      # Unit tests of the web UI's server against the real roles and ansible-core; fails below 80% statement
+      # coverage (webui/pytest.ini).
+      - name: Run the server's unit tests
         working-directory: webui
         run: python -m pytest
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: webui/frontend/package-lock.json
+
+      # Exactly the lock file's packages, each checked against its integrity hash; no install scripts
+      # (webui/frontend/.npmrc).
+      - name: Install the app's packages
+        working-directory: webui/frontend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Type-check the app (TypeScript, strict)
+        working-directory: webui/frontend
+        run: npm run check
+
+      # The app's tests: every page against a fake API, axe-core and structural accessibility checks, WCAG
+      # contrast of the colour tokens; fails below 80% statement coverage (vite.config.ts).
+      - name: Run the app's tests
+        working-directory: webui/frontend
+        run: npm test
+
+      - name: Build the app
+        working-directory: webui/frontend
+        run: npm run build
 
   image:
     name: Image smoke test

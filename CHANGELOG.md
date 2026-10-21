@@ -19,6 +19,28 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 ### Added
 
 - The web UI has an icon (a small shield with a server), at `/static/favicon.svg` and `/favicon.ico`.
+- A new look for the web UI, under the name **USAS**: a sidebar with the pages in the order you need them
+  (a top bar with a menu on phones, down to 375 pixels wide), the overview's steps as cards marked done or
+  to do, status badges on runs, errors next to their fields and in a summary that links to them, and a run
+  log with Ansible's status lines coloured, line numbers, a header that stays in view, and switches to
+  follow the output and wrap long lines. It opens in a **dark theme**; a theme switch offers light and the
+  system's choice, remembered for the browser (in the `usas_theme` cookie) and applied before the page is
+  drawn. The fonts are Atkinson Hyperlegible Next and Mono (SIL Open Font License 1.1), served from the
+  image, so the UI needs no internet access. The icon is redrawn as the USAS mark.
+- The web UI's app has its own tests in CI (part of the required "Web UI tests" check): every page with
+  axe-core's WCAG 2.1 AA rules and structural accessibility checks, the WCAG contrast of every colour pair
+  in both themes, and what each page shows and posts. CodeQL now also analyses its TypeScript.
+
+### Changed
+
+- The web UI is now a React app (TypeScript, built with Vite into static files in the image's build
+  stage) on top of a JSON API in the same FastAPI server. The page addresses, the form field names, the
+  checks of every value and the downloads and log stream stay the same; the forms post to `/api/<page>` and
+  carry the CSRF token in an `X-CSRF-Token` header ([docs/web-ui.md](docs/web-ui.md#http-endpoints)). The
+  UI now needs JavaScript. The app's npm packages are locked with integrity hashes, installed without
+  install scripts and watched by Dependabot, OSV and dependency review; the runtime image holds only the
+  built files (no Node or npm). The Content Security Policy allows the app's own fonts (`font-src 'self'`)
+  and still nothing inline.
 
 ### Fixed
 

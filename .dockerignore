@@ -11,4 +11,12 @@
 !inventory/hosts.example.yml
 !inventory/vault.example.yml
 !webui/usas_web/
+!webui/frontend/package.json
+!webui/frontend/package-lock.json
+!webui/frontend/.npmrc
+!webui/frontend/tsconfig.json
+!webui/frontend/vite.config.ts
+!webui/frontend/src/
+# A local build of the app; the image builds its own.
+webui/usas_web/static/app/
 **/__pycache__

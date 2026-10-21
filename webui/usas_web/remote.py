@@ -6,13 +6,14 @@ from pathlib import Path
 
 import requests
 
+from .problems import Problem
 from .sshkeys import describe_public_key
 
 TIMEOUT = 10
 MAX_KEYS_BYTES = 256 * 1024
 
 
-class RemoteProblem(RuntimeError):
+class RemoteProblem(Problem, RuntimeError):
     """A check failed; the message is shown to the user."""
 
 

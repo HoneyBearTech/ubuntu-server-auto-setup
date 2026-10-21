@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from .problems import Problem
+
 ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban")
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
@@ -280,8 +282,8 @@ def _sentence(text: str) -> str:
 # --- Parsing and validation of submitted values ----------------------------------------------------------
 
 
-class Invalid(ValueError):
-    pass
+class Invalid(Problem, ValueError):
+    """A value a field doesn't accept; the message says what it must look like."""
 
 
 def _check(patterns: tuple[str, ...], value: str, what: str) -> None:

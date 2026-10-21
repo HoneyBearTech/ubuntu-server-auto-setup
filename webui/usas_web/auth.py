@@ -9,7 +9,7 @@ import json
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -44,7 +44,6 @@ class Session:
     created: float
     last_seen: float
     authenticated: bool = False
-    flash: list[tuple[str, str]] = field(default_factory=list)
     # Host keys scanned but not trusted yet: the ones the user compared are the ones that get trusted.
     pending_hostkeys: list | None = None
 
