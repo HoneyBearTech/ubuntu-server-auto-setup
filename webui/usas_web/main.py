@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import os
+import time
 import zoneinfo
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,10 +30,10 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__
+from . import __version__, vms
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
-from .remote import RemoteProblem, keys_url, preview_keys, test_proxmox
+from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
 from .runner import PLAYBOOKS, Run, RunError, Runner
 from .schema import Field, Invalid, Schema, display_value, parse_value
 from .sshkeys import KeyProblem, Keys, check_host, describe_public_key, remove_ca, save_ca, saved_ca
@@ -47,6 +48,7 @@ PAGES = {
     "/defaults": "Defaults",
     "/servers": "Servers",
     "/hardening": "Hardening",
+    "/vms": "VMs",
     "/run": "Run",
     "/runs": "History",
     "/account": "Account",
@@ -65,6 +67,7 @@ PUBLIC_PATHS = ("/healthz", "/favicon.ico")
 THEMES = ("dark", "light", "system")  # dark is the default
 THEME_COOKIE = "usas_theme"
 FRONTEND_ENTRY = "src/main.tsx"
+VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
 
 
 def asset_urls(static_dir: Path) -> dict[str, str]:
@@ -154,6 +157,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth = Auth(settings)
     runner = Runner(settings)
     keys = Keys(settings)
+    lister = VmLister()
     store.vault_password()  # creates it on the first run
     try:
         timezones = sorted(zoneinfo.available_timezones())
@@ -163,7 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="ubuntu-server-auto-setup web UI", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.settings, app.state.auth, app.state.store, app.state.runner = settings, auth, store, runner
-    app.state.schema, app.state.keys = schema, keys
+    app.state.schema, app.state.keys, app.state.vm_lister = schema, keys, lister
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(version=__version__, assets=asset_urls(HERE / "static"))
@@ -740,6 +744,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return PlainTextResponse("No key yet.", status_code=404)
         return PlainTextResponse(keys.public_key() + "\n", headers={
             "Content-Disposition": 'attachment; filename="ubuntu-server-auto-setup.pub"'})
+
+    # --- VMs: a read-only list of the cluster's VMs ---------------------------------------------------------
+
+    def setting(config: Config, name: str) -> Any:
+        """A saved value, or the role default the inventory leaves it at."""
+        value = config.values.get(name)
+        return schema.by_name[name].default if value in (None, "") else value
+
+    def pve_api(config: Config) -> PveApi | None:
+        """The API with the saved token, or None until the Proxmox page has the host and the token."""
+        host = str(config.values.get("pve_api_host") or "")
+        token_id = config.secrets.get("vault_pve_api_token_id", "")
+        secret = config.secrets.get("vault_pve_api_token_secret", "")
+        if not (host and token_id and secret):
+            return None
+        return PveApi(host, int(setting(config, "pve_api_port")), str(setting(config, "pve_api_user")), token_id,
+                      secret, verify=tls_verify(bool(setting(config, "pve_validate_certs")), settings.ca_bundle),
+                      timeout=min(int(setting(config, "pve_api_timeout")), VM_API_TIMEOUT))
+
+    def vm_notes(data: dict[str, Any], verified: bool) -> list[dict[str, str]]:
+        """Why some data is missing, and what to do about it."""
+        notes = []
+        if data["forbidden"]:
+            major = data["version"].split(".", 1)[0]
+            if major.isdigit() and int(major) < 9:
+                message = (f"The token may not ask the guest agents of {data['forbidden']} VM(s) for their addresses. "
+                           "On Proxmox VE 8 that needs VM.Monitor, which allows much more than reading: adding it "
+                           "is optional (see docs/installing.md). Without it, addresses come from the inventory "
+                           "or cloud-init.")
+            else:
+                message = (f"The token may not ask the guest agents of {data['forbidden']} VM(s) for their addresses: "
+                           "add VM.GuestAgent.Audit to its role (see docs/installing.md). Until then, addresses "
+                           "come from the inventory or cloud-init.")
+            notes.append({"kind": "warning", "message": message})
+        if not verified:
+            notes.append({"kind": "warning", "message": "The API's TLS certificate isn't verified (turned off on the "
+                                                        "Proxmox page)."})
+        return notes
+
+    @app.get("/api/vms")
+    async def vms_data(request: Request):
+        require_login(request)
+        config = store.load()
+        api = pve_api(config)
+        if api is None:
+            return reply(409, error="Set up the Proxmox API first: the host and the token.", setup="/proxmox")
+        servers = {int(s["pve_vmid"]): {"name": str(s["name"]), "ansible_host": str(s.get("ansible_host") or "")}
+                   for s in config.servers if s.get("pve_vmid")}
+        network = vms.subnet(config.values.get("net_gateway"), setting(config, "net_prefix"))
+        try:
+            # The calls block (and wait for the guest agents), so they run in a thread.
+            data = await asyncio.to_thread(lister.list, api, servers, network)
+        except RemoteProblem as exc:
+            return reply(502, error=exc.message)
+        return reply(**data, notes=vm_notes(data, api.verify is not False), cluster=store.cluster().get("name", ""),
+                     fetched=int(time.time()))
 
     # --- Runs ---------------------------------------------------------------------------------------------
 

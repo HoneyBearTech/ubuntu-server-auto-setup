@@ -8,7 +8,13 @@ the role's failure path.
 
 It also serves a public-keys file over plain HTTP, standing in for https://github.com/<user>.keys.
 
+With --fixture-vms it also lists the fixed VMs in FIXTURE_VMS, for the web UI's VMs page: their configs and
+their guest agents (network-get-interfaces, get-osinfo, get-host-name), including an agent that isn't
+running, a slow one, one the token may not ask, Debian, Windows, a template, a container, and hostile
+strings. Off by default, so the playbook tests see only the VMs they create.
+
 Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
+                   [--fixture-vms]
 The state (VMs, config changes, requests) is at GET /mock/state, for the tests' assertions.
 """
 
@@ -17,6 +23,7 @@ import json
 import re
 import ssl
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -27,6 +34,74 @@ POLLS_BEFORE_POWEROFF = 2
 
 LOCK = threading.Lock()
 STATE = {"vms": {}, "requests": []}
+FIXTURES = {"enabled": False}
+SLOW_AGENT_SECONDS = 7  # longer than the web UI waits for one agent call
+
+
+def _iface(name, *addresses, kind="ipv4"):
+    return {"name": name, "hardware-address": "bc:24:11:00:00:01",
+            "ip-addresses": [{"ip-address": a, "ip-address-type": kind, "prefix": 24} for a in addresses]}
+
+
+def _ubuntu(version, codename):
+    return {"id": "ubuntu", "name": "Ubuntu", "version-id": version, "pretty-name": f"Ubuntu {version} LTS",
+            "version": f"{version} LTS ({codename})", "kernel-release": "6.17.0-5-generic", "machine": "x86_64"}
+
+
+HOSTILE = "<img src=x onerror=alert(1)>\u202e\x1b[31mUbuntu\x00 " + "A" * 400
+# vmid -> the resource entry's extra fields, the config, and the agent: (behaviour, interfaces, osinfo, name).
+FIXTURE_VMS = {
+    101: {"name": "web-2604", "tags": "ansible;ubuntu", "cpu": 0.12, "maxcpu": 4, "mem": 1_610_612_736,
+          "maxmem": 4_294_967_296, "uptime": 86_400,
+          "config": {"agent": "1", "ostype": "l26", "description": "Installed by ubuntu-server-auto-setup (Ubuntu 26.04.1)"},
+          "agent": ("ok", [_iface("lo", "127.0.0.1"), _iface("docker0", "172.17.0.1"), _iface("eth1", "192.168.50.21"),
+                           _iface("eth0", "10.10.10.21", "fe80::1", kind="ipv4"), _iface("eth0", "fd00::21", kind="ipv6")],
+                    _ubuntu("26.04", "Resolute Raccoon"), "web-2604")},
+    102: {"name": "db-2404", "cpu": 0.53, "maxcpu": 2, "mem": 3_221_225_472, "maxmem": 4_294_967_296, "uptime": 3600,
+          "config": {"agent": "enabled=1,fstrim_cloned_disks=1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.22")], _ubuntu("24.04", "Noble Numbat"), "db-2404")},
+    103: {"name": "agent-stopped", "maxcpu": 2, "mem": 1_073_741_824, "maxmem": 2_147_483_648, "uptime": 120,
+          "config": {"agent": "1", "ostype": "l26"}, "agent": ("not-running",)},
+    104: {"name": "no-agent", "maxcpu": 1, "mem": 536_870_912, "maxmem": 1_073_741_824, "uptime": 5000,
+          "config": {"ostype": "l26", "ipconfig0": "ip=10.10.10.24/24,gw=10.10.10.1"}},
+    105: {"name": "debian-13", "maxcpu": 2, "mem": 805_306_368, "maxmem": 2_147_483_648, "uptime": 7200,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.25")],
+                    {"id": "debian", "version-id": "13", "pretty-name": "Debian GNU/Linux 13 (trixie)"}, "debian-13")},
+    106: {"name": "windows-11", "maxcpu": 4, "mem": 6_442_450_944, "maxmem": 8_589_934_592, "uptime": 600,
+          "config": {"agent": "1", "ostype": "win11"},
+          "agent": ("ok", [_iface("Ethernet", "10.10.10.26")],
+                    {"id": "mswindows", "version-id": "11", "pretty-name": "Windows 11 Pro"}, "WIN-11")},
+    107: {"name": "srv-stopped", "status": "stopped", "tags": "ubuntu;ansible", "maxcpu": 2, "maxmem": 2_147_483_648,
+          "config": {"agent": "1", "ostype": "l26", "description": "Installed by ubuntu-server-auto-setup (Ubuntu 26.04.1)"}},
+    108: {"name": "ubuntu-template", "status": "stopped", "template": 1, "maxcpu": 2, "maxmem": 2_147_483_648,
+          "config": {"agent": "1", "ostype": "l26", "template": 1}},
+    109: {"name": "Bad_Name<b>", "tags": "<script>;ok", "maxcpu": 1, "mem": 268_435_456, "maxmem": 536_870_912,
+          "uptime": 10, "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("eth0\u202e", "999.1.1.1", "10.10.10.29; rm -rf /", "169.254.1.1", "224.0.0.1",
+                                  "10.10.10.29")],
+                    {"id": "ubuntu", "version-id": "26.04", "pretty-name": HOSTILE}, "bad_host!")},
+    110: {"name": "slow-agent", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"}, "agent": ("slow", [_iface("ens18", "10.10.10.30")],
+                                                               _ubuntu("26.04", "Resolute Raccoon"), "slow-agent")},
+    111: {"name": "agent-forbidden", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"}, "agent": ("forbidden",)},
+    112: {"name": "jammy", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.32")], _ubuntu("22.04", "Jammy Jellyfish"), "jammy")},
+    200: {"name": "ct-dns", "type": "lxc", "maxcpu": 1, "mem": 67_108_864, "maxmem": 536_870_912, "uptime": 99_999},
+}
+
+
+def fixture_resources():
+    data = []
+    for vmid, vm in FIXTURE_VMS.items():
+        kind = vm.get("type", "qemu")
+        entry = {"vmid": vmid, "id": f"{kind}/{vmid}", "node": NODE, "type": kind,
+                 "status": vm.get("status", "running")}
+        entry.update({k: v for k, v in vm.items() if k not in ("config", "agent", "type", "status")})
+        data.append(entry)
+    return data
 
 
 def upid(action, vmid):
@@ -69,7 +144,41 @@ class PveHandler(BaseHTTPRequestHandler):
         form = self._form() if method in ("POST", "PUT") else {}
         with LOCK:
             STATE["requests"].append({"method": method, "path": path, "query": query, "form": form})
+        fixture = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|agent/[a-z-]+)", path)
+        if FIXTURES["enabled"] and method == "GET" and fixture and int(fixture.group(1)) in FIXTURE_VMS:
+            return self._fixture(FIXTURE_VMS[int(fixture.group(1))], fixture.group(2))
+        with LOCK:
             return self._dispatch(method, path, query, form)
+
+    def _fixture(self, vm, what):
+        """A fixture VM's config or one of its agent's answers, as Proxmox gives them."""
+        if what == "config":
+            return self._reply(200, {"name": vm["name"], **vm.get("config", {})})
+        agent = vm.get("agent")
+        if not vm.get("config", {}).get("agent") or agent is None and vm.get("status") == "stopped":
+            return self._message(500, "No QEMU guest agent configured" if not vm.get("config", {}).get("agent")
+                                 else f"VM {vm['name']} is not running")
+        behaviour = agent[0] if agent else "not-running"
+        if behaviour == "not-running":
+            return self._message(500, "QEMU guest agent is not running")
+        if behaviour == "forbidden":
+            return self._message(403, "Permission check failed (/vms/111, VM.GuestAgent.Audit|VM.GuestAgent.Unrestricted)")
+        if behaviour == "slow":
+            time.sleep(SLOW_AGENT_SECONDS)
+        _, interfaces, osinfo, host = agent
+        results = {"agent/network-get-interfaces": interfaces, "agent/get-osinfo": osinfo,
+                   "agent/get-host-name": {"host-name": host}}
+        if what not in results:
+            return self._reply(501, {"path": f"{what} is not implemented by the mock"})
+        return self._reply(200, {"result": results[what]})
+
+    def _message(self, status, message):
+        body = json.dumps({"data": None, "message": message + "\n"}).encode()
+        self.send_response(status, message)
+        self.send_header("Content-Type", "application/json;charset=UTF-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _dispatch(self, method, path, query, form):
         vms = STATE["vms"]
@@ -87,11 +196,15 @@ class PveHandler(BaseHTTPRequestHandler):
             return self._reply(200, [{"type": "cluster", "name": "mock-cluster", "nodes": 1, "quorate": 1},
                                      {"type": "node", "name": NODE, "online": 1, "local": 1}])
         if method == "GET" and path == "/cluster/resources":
+            if query.get("type", "vm") != "vm":  # only VMs here: no nodes, storages or pools
+                return self._reply(200, [])
             data = [
                 {"vmid": int(v), "name": vm["config"].get("name", ""), "node": NODE, "type": "qemu",
                  "status": vm["status"], "id": f"qemu/{v}"}
                 for v, vm in vms.items()
             ]
+            if FIXTURES["enabled"]:
+                data += fixture_resources()
             return self._reply(200, data)
         m = re.fullmatch(r"/nodes/([^/]+)/tasks/([^/]+)/(status|log)", path)
         if m and method == "GET":
@@ -170,7 +283,9 @@ def main():
     parser.add_argument("--keys-port", type=int, default=8081)
     # The web UI smoke test runs the mock in its own container, reached by name (tests/webui-smoke.sh).
     parser.add_argument("--bind", default="127.0.0.1")
+    parser.add_argument("--fixture-vms", action="store_true", help="also list the fixed VMs of FIXTURE_VMS")
     args = parser.parse_args()
+    FIXTURES["enabled"] = args.fixture_vms
 
     with open(args.keys_file, "rb") as fh:
         KeysHandler.keys = fh.read()

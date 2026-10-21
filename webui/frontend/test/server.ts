@@ -27,6 +27,7 @@ export function defaultRoutes(): Record<string, Handler> {
     "GET /api/ssh": () => fixtures.ssh,
     "GET /api/run": () => fixtures.runPage,
     "GET /api/runs": () => ({ runs: fixtures.runs }),
+    "GET /api/vms": () => fixtures.vms,
     [`GET /api/runs/${fixtures.running.id}`]: () => ({ run: fixtures.running, log: fixtures.log, offset: 512 }),
     [`GET /api/runs/${fixtures.finished.id}`]: () => ({ run: fixtures.finished, log: fixtures.log, offset: 512 }),
     "POST /api/theme": (c) => ({ theme: c.body.theme }),

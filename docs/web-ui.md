@@ -121,7 +121,21 @@ The overview lists the steps and whether each is done.
    turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
    (mail addresses, a webhook), and a mail relay. The relay password and the webhook URL are kept in the
    Vault; tick **Remove the saved value** to delete one.
-6. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
+6. **VMs**: every VM and container on the cluster, read-only: its node, status (an icon and a word), CPU and
+   memory use (as bars with the numbers beside them), the address the playbooks would use and where it
+   came from, and whether the playbooks support it. The address comes from the VM's QEMU guest agent if it
+   runs (IPv4 only, loopback, link-local and container interfaces left out, an address in the servers'
+   subnet first), otherwise from the Servers page (a row with the same VM ID), otherwise from the VM's
+   cloud-init `ipconfig0`. **Playbooks** says *Supported* for Ubuntu 26.04 and 24.04, *Untested release*
+   for other Ubuntu releases, *Confirm the OS* when no agent reported it, and *Not supported* for other
+   systems, Windows, templates and containers, with the reason. The OS is what the guest itself reports,
+   so it is advice, not proof. Sort by any column (the headings are buttons) and filter by name, VMID,
+   address, OS or tag, node, status or support. The list refreshes every 30 seconds while the page is
+   visible, without reordering the rows; **Refresh** asks at once. The guest agents need
+   `VM.GuestAgent.Audit` on Proxmox VE 9 ([installing.md](installing.md#2-create-the-proxmox-api-token));
+   on Proxmox VE 8 the page works without them. Selecting VMs and running the baseline against them is
+   planned for a later release; for now, add a VM to the Servers page to run playbooks against it.
+7. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
    only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers or groups,
    separated by commas). The run's output streams live, with Ansible's status lines coloured (`ok`,
    `changed`, `skipping`, `fatal`, the play recap's counts) and numbered. **Follow the output** keeps the
@@ -231,6 +245,14 @@ What it does to protect them:
   `roles/*/vars/main.yml`), plus formats of its own for values the roles take as they are (the API host,
   the token name, firewall rules); the `--limit` must name hosts or groups in the inventory.
 - **No shell**: `ansible-playbook`, `ssh` and `ssh-keyscan` run with argument lists.
+- **What guests report is untrusted.** The VMs page shows what each VM's guest agent says (its addresses,
+  OS and host name), which whoever controls the VM can make up. The UI keeps IPv4 addresses that aren't
+  special-use, at most 16 per VM, removes control and text-direction characters from the rest and shortens
+  it, shows every address with its source, and shows it all as text. The agents are asked through the
+  Proxmox API with a read-only privilege, at most 4 at a time with 5 seconds each and 15 seconds for a
+  whole refresh; the answers are cached for every session (the VM list for 10 seconds, configs for 5
+  minutes, addresses for a minute, the OS for 10 minutes, an agent that isn't running for 2 minutes), so
+  a slow or silent guest can't hold the page or the run logs up.
 - **The container** runs as an unprivileged user (UID 10001), and with Compose also with a read-only root
   file system, no capabilities and `no-new-privileges`.
 
@@ -272,11 +294,12 @@ For reference:
 | Path | Methods | What |
 | --- | --- | --- |
 | `/healthz` | GET | `ok`; the container's health check. No sign-in. |
-| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
+| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/vms`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
 | `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version and the theme. |
 | `/api/setup`, `/api/login`, `/api/logout`, `/api/account` | POST | First-run password, sign-in, sign-out, password change. |
 | `/api/theme` | POST | Remember the theme (`dark`, `light` or `system`) for this browser. |
 | `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
+| `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, and whether the playbooks support them. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. Read-only. |
 | `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
 | `/api/run` | POST | Start a run. |
 | `/api/runs/<id>/stop` | POST | Interrupt the run. |
@@ -296,6 +319,7 @@ Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms ar
 - One password, no accounts or second factor. Passkeys were considered and are on the
   [roadmap](roadmap.md); they need a stable host name, which a localhost tool doesn't have.
 - One run at a time, and sessions don't survive a restart of the container.
+- The VMs page only lists the cluster's VMs; running playbooks against VMs picked there is planned.
 - It needs JavaScript (any current browser).
 - English only.
 

@@ -61,16 +61,30 @@ with only the privileges it needs:
 | `VM.Audit` | list VMs (to skip existing ones) and watch the installer finish |
 | `Datastore.AllocateSpace`, `Datastore.Audit` | allocate the disks and use the ISOs in the ISO storage |
 | `SDN.Use` | attach the VM to a bridge (Proxmox VE 8 and later check this) |
+| `VM.GuestAgent.Audit` (Proxmox VE 9 and later) | the web UI's VMs page: ask the VMs' guest agents for their addresses, OS and host name, read-only. The playbooks don't use it. |
 
 On a Proxmox node, as root:
 
 ```sh
-pveum role add UbuntuAutoSetup --privs "VM.Allocate VM.Config.Disk VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Network VM.Config.Options VM.Config.HWType VM.Config.Cloudinit VM.PowerMgmt VM.Audit Datastore.AllocateSpace Datastore.Audit SDN.Use"
+pveum role add UbuntuAutoSetup --privs "VM.Allocate VM.Config.Disk VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Network VM.Config.Options VM.Config.HWType VM.Config.Cloudinit VM.PowerMgmt VM.Audit Datastore.AllocateSpace Datastore.Audit SDN.Use VM.GuestAgent.Audit"
 pveum user add ansible@pve --comment "ubuntu-server-auto-setup"
 pveum acl modify / --users ansible@pve --roles UbuntuAutoSetup
 pveum user token add ansible@pve automation --privsep 1
 pveum acl modify / --tokens 'ansible@pve!automation' --roles UbuntuAutoSetup
 ```
+
+On **Proxmox VE 8**, leave `VM.GuestAgent.Audit` out: that version doesn't have it. To add it to a role
+you created with an earlier release, on Proxmox VE 9:
+`pveum role modify UbuntuAutoSetup --privs VM.GuestAgent.Audit --append 1`.
+
+`VM.GuestAgent.Audit` allows only the guest agent's informational commands, such as listing the network
+interfaces and reading the OS release; it doesn't allow running commands in the VM or reading its files
+(those need `VM.GuestAgent.Unrestricted` or `VM.GuestAgent.FileRead`, which the token must not have).
+Proxmox VE 8 has no such privilege: asking a guest agent needs **`VM.Monitor`**, which also allows running
+commands as root in every VM with an agent and using the QEMU monitor. Adding `VM.Monitor` on Proxmox VE 8
+is optional and not recommended. Without it, the VMs page shows each VM's address from the inventory (the
+Servers page) or from its cloud-init settings, and says why the agents' data is missing. If you add it
+anyway, anyone with the Vault or the web UI's password can run commands in those VMs.
 
 The token is created with **privilege separation** (`--privsep 1`): it gets only the permissions given to
 the token itself, and never more than its user has. `ansible@pve` has no password, so nobody can sign in to

@@ -3,7 +3,8 @@
 # with real layout. Sets up what the smoke test (tests/webui-smoke.sh) does, without Docker: a certificate for
 # the mock Proxmox API (tests/mock_pve.py), a published key, the mock itself, and the web UI from this checkout
 # with an empty data directory, whose first-run setup code goes to the tests. The VM the run provisions already
-# exists in the mock, so the run is a real ansible-playbook run that needs no SSH.
+# exists in the mock, so the run is a real ansible-playbook run that needs no SSH. The mock also lists its
+# fixture VMs and guest agents (--fixture-vms) for the VMs page.
 # Needs Python with requirements-ci.txt, the Ansible collections (collections/ or ANSIBLE_COLLECTIONS_PATH),
 # openssl, ssh-keygen, curl, and the app's packages and Playwright's Chromium in webui/frontend
 # (npm ci; npx playwright install chromium). Builds the app first, so the tests see this checkout's code.
@@ -41,7 +42,7 @@ ssh-keygen -q -t ed25519 -N '' -C browser@ubuntu-server-auto-setup -f "$TMP/id_e
 cp "$TMP/id_ed25519.pub" "$TMP/test.keys"
 
 "$PYTHON" tests/mock_pve.py --cert "$TMP/api.crt" --key "$TMP/api.key" --keys-file "$TMP/test.keys" \
-  --port "$MOCK_PORT" --keys-port "$KEYS_PORT" --bind 127.0.0.1 >"$TMP/mock.log" 2>&1 &
+  --port "$MOCK_PORT" --keys-port "$KEYS_PORT" --bind 127.0.0.1 --fixture-vms >"$TMP/mock.log" 2>&1 &
 PIDS+=($!)
 if [ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ] && [ -d collections ]; then
   export ANSIBLE_COLLECTIONS_PATH="$ROOT/collections"

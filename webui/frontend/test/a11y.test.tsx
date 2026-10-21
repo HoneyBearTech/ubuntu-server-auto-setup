@@ -3,7 +3,7 @@
 // skip link), and with axe-core's WCAG 2.1 A and AA rules. Contrast is left to test/contrast.test.ts:
 // jsdom doesn't lay pages out, so axe can't measure it here.
 
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
@@ -53,7 +53,7 @@ async function loaded(): Promise<void> {
   await waitFor(() => expect(document.querySelector(".loading")).toBeNull());
 }
 
-const PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/run", "/runs", "/account",
+const PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account",
   `/runs/${fixtures.running.id}`, `/runs/${fixtures.finished.id}`, "/nowhere"];
 
 describe("every page", () => {
@@ -109,6 +109,23 @@ describe("pages with errors", () => {
     expect(document.activeElement?.id).toBe("error-summary");
     checkStructure(document.body, "/login with an error");
     await checkAxe("/login with an error");
+  });
+
+  it("the VMs page, filtered to nothing, sorted, and before the Proxmox API is set up", async () => {
+    new FakeApi();
+    renderAt("/vms");
+    await loaded();
+    await userEvent.type(screen.getByLabelText("Find"), "nothing-matches");
+    await screen.findByText("No VM matches the filters.");
+    await userEvent.click(screen.getByRole("button", { name: "CPU" }));
+    checkStructure(document.body, "/vms filtered");
+    await checkAxe("/vms filtered");
+    cleanup();
+    new FakeApi({ "GET /api/vms": () => reply(409, { error: "Set up the Proxmox API first: the host and the token.", setup: "/proxmox" }) });
+    renderAt("/vms");
+    await screen.findByText(/Proxmox API first/);
+    checkStructure(document.body, "/vms before the API is set up");
+    await checkAxe("/vms before the API is set up");
   });
 
   it("the phone menu", async () => {

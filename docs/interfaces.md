@@ -204,7 +204,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 `linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
-- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, run, history, account. Each form
+- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (a read-only list of the
+  cluster's VMs), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
@@ -228,6 +229,7 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 | System | From | Protocol and authentication | What for |
 | --- | --- | --- | --- |
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them. |
+| Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso` and `gpgv`, build ISOs and seed ISOs, delete seed files. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |

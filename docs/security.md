@@ -91,6 +91,13 @@ and in [web-ui.md](web-ui.md#security).
 - Every value the UI writes into the inventory is validated against the roles' own allowlist patterns (or
   a stricter format of the UI's) and tagged `!unsafe`, so no value can become an Ansible template; commands
   run with argument lists, never a shell; `--limit` takes only the inventory's own host and group names.
+- The VMs page only reads: it lists the cluster's VMs and asks their guest agents, through the Proxmox API,
+  for addresses, the OS and the host name with the read-only `VM.GuestAgent.Audit` privilege (on Proxmox
+  VE 8, the broader `VM.Monitor` stays optional). What a guest reports is treated as untrusted: only
+  usable IPv4 addresses are kept, other strings are stripped of control characters and shortened, every
+  address shows its source, nothing is shown as HTML, and no guest-reported value decides anything. Agent
+  calls are few, short and bounded (4 at a time, 5 seconds each, 15 seconds per refresh, cached), so a
+  slow or hostile guest can't stall the UI.
 - The Proxmox node's host key is trusted only after the user has compared its fingerprint, and checked on
   every connection; certificate verification for the API stays on, with the cluster's CA added to the
   trust store instead.
@@ -179,6 +186,9 @@ in the trust store, and how to do the same in the web UI's data volume.
 - **A compromised GitHub account.** Whoever controls `github_user` decides which keys can log in to your
   servers at the next provisioning, baseline run or `make keys`. Protect the account with two-factor
   authentication, or use `admin_extra_ssh_keys` and `ssh_keys_exclusive` to depend on it less.
+- **What a guest says about itself.** A VM's guest agent reports whatever the VM's owner wants: another
+  VM's address, Ubuntu when it isn't. The VMs page labels this data as reported by the guest and shows
+  where each address came from; check them before you act on them.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
   installed, read and change VM disks, and run commands inside the VMs through `qemu-guest-agent`.
 - **Trust on first use of a new VM's host key.** The control node accepts the host key it scans when a new

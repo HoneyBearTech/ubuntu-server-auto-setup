@@ -10,6 +10,7 @@ import { RunDetail, RunPage, RunsPage } from "./pages/Runs";
 import { Defaults, Hardening, Proxmox } from "./pages/Sections";
 import { Servers } from "./pages/Servers";
 import { Ssh } from "./pages/Ssh";
+import { Vms } from "./pages/Vms";
 import { Link, runId, useRouter } from "./router";
 
 const PAGES: Record<string, { title: string; page: () => ReactNode }> = {
@@ -19,6 +20,7 @@ const PAGES: Record<string, { title: string; page: () => ReactNode }> = {
   "/defaults": { title: "Defaults", page: () => <Defaults /> },
   "/servers": { title: "Servers", page: () => <Servers /> },
   "/hardening": { title: "Hardening", page: () => <Hardening /> },
+  "/vms": { title: "VMs", page: () => <Vms /> },
   "/run": { title: "Run", page: () => <RunPage /> },
   "/runs": { title: "History", page: () => <RunsPage /> },
   "/account": { title: "Account", page: () => <Account /> },

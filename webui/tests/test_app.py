@@ -7,14 +7,16 @@ import time
 from dataclasses import replace
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from usas_web import main as m
+from usas_web import remote
 from usas_web.remote import PveResult, RemoteProblem
 from usas_web.sshkeys import HostKey, KeyProblem
 
 from .conftest import DEFAULTS, HARDENING, PASSWORD, PROXMOX, TOKEN_SECRET, configure, csrf, make_client, post, sign_up
 
-PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/run", "/runs", "/account"]
+PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account"]
 API = ["/api/overview", "/api/proxmox", "/api/ssh", "/api/defaults", "/api/servers", "/api/hardening", "/api/run",
        "/api/runs"]
 
@@ -861,3 +863,88 @@ def test_the_iso_storage_is_picked_from_the_storages_that_allow_isos(ui, monkeyp
     assert ui.app_state.store.load().values["pve_iso_storage"] == "synology-nfs"
     r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "bad;id"})
     assert r.status_code == 422
+
+
+# --- VMs ----------------------------------------------------------------------------------------------------
+
+
+def fake_pve(monkeypatch, version="9.1.1", agent_status=200, resources=None, calls=None):
+    """Answers the VMs page's API calls: two VMs, one with an agent."""
+    def get(url, **kw):
+        path = url.split("/api2/json", 1)[1]
+        if calls is not None:
+            calls.append((url, kw))
+        data = {
+            "/version": {"version": version},
+            "/cluster/resources?type=vm": [
+                {"vmid": 4000, "name": "web-00", "node": "pve-1", "type": "qemu", "status": "running"},
+                {"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu", "status": "running"},
+            ] if resources is None else resources,
+            "/nodes/pve-1/qemu/4000/config": {"ostype": "l26"},
+            "/nodes/pve-1/qemu/101/config": {"agent": "1", "ostype": "l26"},
+            "/nodes/pve-1/qemu/101/agent/network-get-interfaces": {"result": [
+                {"name": "eth0", "ip-addresses": [{"ip-address": "10.0.0.51", "ip-address-type": "ipv4"}]}]},
+            "/nodes/pve-1/qemu/101/agent/get-osinfo": {"result": {"id": "ubuntu", "version-id": "26.04"}},
+            "/nodes/pve-1/qemu/101/agent/get-host-name": {"result": {"host-name": "app"}},
+        }.get(path)
+        status = agent_status if "/agent/" in path else 200 if data is not None else 500
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps({"data": data} if status < 400 else {"data": None, "message": "nope"}).encode()
+        return response
+    monkeypatch.setattr(remote.requests, "get", get)
+
+
+def test_vms_needs_sign_in_and_the_api(ui, monkeypatch):
+    r = get(ui, "/api/vms")
+    assert r.status_code == 409 and r.json()["setup"] == "/proxmox" and "Proxmox API first" in r.json()["error"]
+    post(ui, "/logout")
+    r = get(ui, "/api/vms")
+    assert r.status_code == 401 and r.json()["redirect"] == "/login?next=/vms"
+
+
+def test_vms_lists_the_cluster(ui, monkeypatch):
+    configure(ui)
+    calls = []
+    fake_pve(monkeypatch, calls=calls)
+    r = get(ui, "/api/vms")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["version"] == "9.1.1" and data["complete"] and data["notes"] == [] and data["fetched"] > 0
+    rows = {row["vmid"]: row for row in data["vms"]}
+    # The inventory knows VM 4000 (web-00); the guest agent knows VM 101.
+    assert (rows[4000]["ip"], rows[4000]["ip_source"], rows[4000]["inventory_name"]) == \
+        ("10.0.0.10", "inventory", "web-00")
+    assert (rows[101]["ip"], rows[101]["ip_source"], rows[101]["support"]) == ("10.0.0.51", "agent", "supported")
+    url, kw = calls[0]
+    assert url.startswith("https://pve.example.lan:8006/api2/json/")
+    assert kw["headers"]["Authorization"] == f"PVEAPIToken=ansible@pve!automation={TOKEN_SECRET}"
+    assert kw["verify"] is True and kw["timeout"] == m.VM_API_TIMEOUT  # verified TLS, a short timeout
+    assert TOKEN_SECRET not in r.text
+
+
+@pytest.mark.parametrize("version,words", [("9.1.1", "add VM.GuestAgent.Audit"), ("8.4.14", "needs VM.Monitor")])
+def test_vms_explains_a_forbidden_agent(ui, monkeypatch, version, words):
+    configure(ui)
+    fake_pve(monkeypatch, version=version, agent_status=403)
+    data = get(ui, "/api/vms").json()
+    assert data["forbidden"] == 1 and len(data["notes"]) == 1 and words in data["notes"][0]["message"]
+
+
+def test_vms_without_tls_verification_says_so(ui, monkeypatch):
+    configure(ui)
+    post(ui, "/proxmox", {"action": "save", **{**PROXMOX, "pve_validate_certs": ""}})
+    calls = []
+    fake_pve(monkeypatch, calls=calls)
+    data = get(ui, "/api/vms").json()
+    assert calls[0][1]["verify"] is False and "isn't verified" in data["notes"][0]["message"]
+
+
+def test_vms_when_the_cluster_cant_be_listed(ui, monkeypatch):
+    configure(ui)
+
+    def down(url, **kw):
+        raise requests.exceptions.ConnectionError()
+    monkeypatch.setattr(remote.requests, "get", down)
+    r = get(ui, "/api/vms")
+    assert r.status_code == 502 and "Couldn't connect to pve.example.lan:8006" in r.json()["error"]
