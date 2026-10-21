@@ -148,6 +148,12 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
 
 - [ ] A run's output streams to the page as it happens, and the finished run is in **History** with its
   log.
+- [ ] **VMs** lists every VM and container of the cluster, as `pvesh get /cluster/resources --type vm`
+  does. `test-01` shows its address from the guest agent (after the baseline) and *Supported*; a VM
+  without an agent shows the address from the Servers page or cloud-init; a template and a container say
+  *Not supported*. On Proxmox VE 9 without `VM.GuestAgent.Audit` on the token, the page says to add it;
+  on Proxmox VE 8 it says `VM.Monitor` is optional. A run log keeps streaming while the VMs page
+  refreshes.
 - [ ] The [screen-reader walk-through](accessibility.md#screen-reader-walk-through) with VoiceOver on
   macOS and with NVDA on Windows, on the image under test before its first-run setup (it starts with the
   first-run page). Add a row per screen reader to its results table in the release pull request, and an

@@ -828,6 +828,7 @@ legend {
 }
 
 input[type="text"],
+input[type="search"],
 input[type="password"],
 input[type="file"],
 select,
@@ -1100,6 +1101,157 @@ td a {
 .servers .error {
   margin-top: var(--space-1);
   max-width: 14rem;
+}
+
+/* --- VMs ---------------------------------------------------------------------------------------------------- */
+
+.filters .fields {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.vms td,
+.vms tbody th {
+  vertical-align: top;
+}
+
+.vms tbody th {
+  font: 600 var(--text-base) / var(--leading-tight) var(--font-sans);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+  white-space: normal;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.vms tbody tr:last-child th {
+  border-bottom: 0;
+}
+
+.vms tbody th {
+  min-width: 10rem;
+}
+
+.vms .reason {
+  min-width: 16rem;
+}
+
+.vm-name {
+  overflow-wrap: break-word;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.sub {
+  display: block;
+  margin-top: var(--space-1);
+  font: 400 var(--text-sm) / var(--leading-tight) var(--font-sans);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* The column headings are buttons that sort the table. */
+th .sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin: calc(-1 * var(--space-1));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+th .sort:hover,
+th[aria-sort] .sort {
+  color: var(--text);
+}
+
+th .sort:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+th .sort .icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.vm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.vm-status .icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.vm-status-running {
+  color: var(--success);
+}
+
+.vm-status-stopped {
+  color: var(--muted);
+}
+
+.vm-status-paused,
+.vm-status-other {
+  color: var(--warning);
+}
+
+.usage {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 7rem;
+}
+
+.usage-text {
+  font: 400 var(--text-sm) var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Usage bars: the accent on the raised surface; the text beside each says the same in numbers. */
+meter {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 0.5rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+
+meter::-webkit-meter-bar {
+  height: 0.5rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+
+meter::-webkit-meter-optimum-value {
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+meter::-moz-meter-bar {
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
 
 /* --- Overview ---------------------------------------------------------------------------------------------- */
@@ -1564,8 +1716,25 @@ pre.log .line::before {
   table.stacked,
   table.stacked tbody,
   table.stacked tr,
-  table.stacked td {
+  table.stacked td,
+  table.stacked tbody th {
     display: block;
+  }
+
+  table.stacked tbody th,
+  table.stacked .reason {
+    min-width: 0;
+  }
+
+  /* A cell with several parts keeps them together, beside its label. */
+  table.stacked .cell {
+    min-width: 0;
+    text-align: right;
+  }
+
+  table.stacked tbody th {
+    border: 0;
+    padding: var(--space-1) 0;
   }
 
   table.stacked tr {

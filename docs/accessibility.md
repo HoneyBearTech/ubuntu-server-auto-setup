@@ -55,9 +55,16 @@ On **every pull request** (the required "Web UI tests" check):
     the servers table moves focus to a field of the table. While a run streams its output, focus stays
     where it is, the output isn't a live region, and the run's status changes inside a polite live region
     that was on the page from the start, so "Succeeded" is announced once.
+  - **The VMs page**: the column headings are buttons that sort with Enter or Space, keep focus, and set
+    `aria-sort` on the sorted column (the caption says how it is sorted too); the filters are labelled
+    fields, and the count is a polite live region that changes only when the count does; a refresh every
+    30 seconds neither reorders the rows nor moves focus; each status is an icon and a word, and CPU and
+    memory are `<meter>` elements with the numbers beside them; at 375 pixels each row becomes a block
+    with its cells labelled, without sideways scrolling.
   - **axe-core 4.14** (the WCAG 2.0 and 2.1 A and AA rules) with real layout, so **with contrast**, on
-    every page (overview, Proxmox, SSH key, defaults, servers, hardening, run, history, a finished run,
-    account, sign-in), on the Proxmox page with an error, and at 375 pixels with the menu open: in the
+    every page (overview, Proxmox, SSH key, defaults, servers, hardening, VMs, run, history, a finished run,
+    account, sign-in), on the Proxmox page with an error, at 375 pixels with the menu open, and the VMs
+    page at 375 pixels, filtered and not, in the dark and light themes: in the
     dark (default) and light themes and in "System" with the browser preferring each, with every accent
     palette the UI offers (one, Ember). Any violation fails.
 

@@ -10,6 +10,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- A **VMs** page in the web UI (first under Playbooks): a read-only list of every VM and container on the
+  cluster with its node, status, CPU and memory use, the address the playbooks would use and where it came
+  from (the QEMU guest agent, the Servers page or cloud-init), and whether the playbooks support it
+  (Ubuntu 26.04 and 24.04; other Ubuntu releases, an unknown OS, other systems, templates and containers
+  are labelled with the reason). It refreshes every 30 seconds while visible. The browser tests check it by
+  keyboard and with axe-core at phone width in both themes. Selecting VMs and running
+  the baseline against them comes in a later release. **New attack surface**: what guest agents report
+  reaches the UI; it is treated as untrusted (see docs/security.md and the assurance case's boundary B12).
+  The guest agents need the read-only `VM.GuestAgent.Audit` privilege on Proxmox VE 9; on an existing role,
+  add it with `pveum role modify UbuntuAutoSetup --privs VM.GuestAgent.Audit --append 1`. On Proxmox VE 8
+  the page works without the agents ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)).
+
 - A pre-release checklist on real Proxmox VE (`docs/release-checklist.md`): what the maintainer checks on
   a real cluster before tagging a release, beyond what CI covers (the ISO in shared storage, a real install
   and power-off, idempotent reruns, key-only SSH, the firewall, Fail2Ban, sudo, the web UI and the

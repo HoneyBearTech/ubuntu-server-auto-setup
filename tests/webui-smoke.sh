@@ -2,7 +2,8 @@
 # Smoke test of the container image: starts the image and the mock Proxmox API (tests/mock_pve.py) on a
 # private Docker network, then drives the web UI like a browser (tests/webui_smoke.py): first-run setup,
 # sign-in, the Proxmox connection test with the mock's CA certificate, the GitHub keys preview, saving every
-# page, and a provisioning run that the mock answers. Needs Docker and Python 3 (standard library only).
+# page, a provisioning run that the mock answers, and the VMs page against the mock's fixture VMs and guest
+# agents. Needs Docker and Python 3 (standard library only).
 # Usage: tests/webui-smoke.sh [image]   (default: builds the image from this checkout as usas:smoke)
 # EXPECT_VERSION=<version> also checks the version the UI shows (the release passes its tag's).
 set -euo pipefail
@@ -49,7 +50,7 @@ docker network create "$NET" >/dev/null
 docker run -d --name "$MOCK" --network "$NET" --network-alias pve-mock -p "127.0.0.1:$MOCK_PORT:8006" \
   -v "$ROOT/tests/mock_pve.py:/mock/mock_pve.py:ro" -v "$TMP:/certs:ro" --entrypoint python "$IMAGE" \
   /mock/mock_pve.py --cert /certs/api.crt --key /certs/api.key --keys-file /certs/test.keys --bind 0.0.0.0 \
-  >/dev/null
+  --fixture-vms >/dev/null
 # The app as documented, plus the hardening from docker-compose.yml.
 docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$APP_PORT:8080" \
   --read-only --tmpfs /tmp --tmpfs /home/usas:uid=10001,gid=10001,mode=0700 --cap-drop ALL \

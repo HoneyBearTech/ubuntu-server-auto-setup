@@ -25,7 +25,7 @@ leaves the machine except the container image builds:
 | --- | --- |
 | A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`) |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
-| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
 
@@ -144,12 +144,14 @@ starts the same image with `start.ps1` under PowerShell 7.
 does, without Docker: a certificate for `tests/mock_pve.py` and a published key, the mock, and the web UI
 from the checkout on `127.0.0.1` with an empty data directory, whose first-run setup code goes to the
 tests; the VM the run provisions already exists in the mock, so the run is a real `ansible-playbook` run
-that needs no SSH. The tests run in two projects (`playwright.config.ts`):
+that needs no SSH. The mock runs with `--fixture-vms`, so the VMs page has guests to list. The tests run in
+two projects (`playwright.config.ts`):
 
 | File | What |
 | --- | --- |
 | `flow.spec.ts` | by keyboard only, the way someone without a mouse does it: the skip link; the first-run setup; the Proxmox form typed field by field, the connection test failing on the certificate, saving the CA, the test passing, picking the node from its dropdown (arrow keys, Escape, Tab) and saving; a provisioning run chosen with the arrow keys, started with Enter and followed to the end with focus left where it was and the status changing in a polite live region; then signing in again, with a wrong password first. Leaves a signed-in session for `pages.spec.ts` |
 | `pages.spec.ts` | every page: axe-core (WCAG 2.0 and 2.1, A and AA) with real layout in the dark and light themes and "System" with the browser preferring each, with each accent palette (one, Ember, for now), also with a form error and with the phone menu open; Tab order, focus outlines that are visible and not covered, no keyboard trap, Shift+Tab back; the phone menu (Enter, Escape, focus back on the button, closing when focus leaves); the servers table's add and remove; the theme switch with the arrow keys |
+| `vms.spec.ts` | the VMs page against the fixture guests: sorting with Enter and Space (`aria-sort`, the caption, focus kept), the filters by keyboard with the count in its live region, each address's source, a hostile guest's markup shown as text, a refresh (with the browser's clock run forward) that keeps the rows and the focus, and axe-core at 375 pixels in the dark and light themes without sideways scrolling. Runs in the `pages` project |
 | `helpers.ts` | walking a page with Tab (`tabCycle`, `checkKeyboard`), axe-core (`checkAxe`), and posting a form as the app does for the pages the flow doesn't fill in by keyboard |
 
 A failing test leaves a screenshot and a trace in `webui/frontend/test-results/` (CI uploads them as the

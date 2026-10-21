@@ -37,6 +37,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Playbooks",
     items: [
+      { href: "/vms", label: "VMs", icon: "vms" },
       { href: "/run", label: "Run", icon: "play" },
       { href: "/runs", label: "History", icon: "history" },
     ],
