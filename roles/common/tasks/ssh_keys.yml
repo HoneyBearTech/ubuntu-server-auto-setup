@@ -14,9 +14,8 @@
   ansible.builtin.set_fact:
     # One key per line: the GitHub file and the extra keys are split on every line break, so no entry can
     # carry a second line into authorized_keys or the installer configuration.
-    common_ssh_keys: >-
-      {{ ((common_github_keys.content | default('')) ~ '\n' ~ (admin_extra_ssh_keys | join('\n'))).splitlines()
-         | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}
+    common_ssh_keys: "{{ ((common_github_keys.content | default('')) ~ '\n' ~ (admin_extra_ssh_keys | join('\n'))).splitlines()
+      | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}"
   tags: [ssh_keys]
 
 # Guards against an empty GitHub response wiping authorized_keys and locking everyone out.
@@ -33,4 +32,6 @@
     key: "{{ common_ssh_keys | join('\n') }}"
     exclusive: "{{ ssh_keys_exclusive | bool }}"
     state: present
+  # In check mode a user this run would create has no home directory to look in yet.
+  when: not (ansible_check_mode and common_admin_user | default({}) is changed and common_admin_user.uid is not defined)
   tags: [ssh_keys]

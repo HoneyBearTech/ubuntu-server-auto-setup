@@ -38,10 +38,12 @@ run; your own `~/.ssh` is never touched. The steps:
    its host key trusted. A second run skips the existing VM.
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
-4. **baseline** twice on `srv-01`, then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW
-   rules and policies, the Fail2Ban jail, the sudoers file, the timezone, automatic updates, the removed
-   installer answers file, exactly the published key in `authorized_keys`, and password and root logins
-   refused.
+4. **baseline** in check mode (`--check --diff`) on the fresh `srv-01`, also with a new SSH port and with an
+   admin user that doesn't exist yet: nothing may fail and nothing may change. Then the baseline twice,
+   then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW rules and policies, the Fail2Ban jail,
+   the sudoers file, the timezone, automatic updates, the removed installer answers file, exactly the
+   published key and the extra key in `authorized_keys`, and password and root logins refused. A check run
+   on the finished server must report no changes.
 5. **Key sync**: a key that is no longer published is removed; an empty key list is refused rather than
    emptying `authorized_keys`.
 6. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,

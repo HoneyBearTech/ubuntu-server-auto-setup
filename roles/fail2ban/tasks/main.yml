@@ -19,6 +19,7 @@
   ansible.builtin.apt:
     name: [fail2ban, python3-systemd]
     state: present
+  register: fail2ban_install
 
 - name: Configure Fail2Ban
   ansible.builtin.template:
@@ -27,11 +28,13 @@
     mode: "0644"
   notify: Restart fail2ban
 
+# In check mode Fail2Ban can't be started or asked about its jail before this run has installed it.
 - name: Enable Fail2Ban
   ansible.builtin.systemd_service:
     name: fail2ban
     enabled: true
     state: started
+  when: not (ansible_check_mode and fail2ban_install is changed)
 
 - name: Apply Fail2Ban changes now
   ansible.builtin.meta: flush_handlers
@@ -43,3 +46,4 @@
   retries: 5
   delay: 3
   until: fail2ban_sshd_status.rc == 0
+  when: not (ansible_check_mode and fail2ban_install is changed)

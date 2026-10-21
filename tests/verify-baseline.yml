@@ -87,11 +87,12 @@
         src: /home/sysadmin/.ssh/authorized_keys
       register: verify_keys
 
-    - name: Check only the published key is authorized
+    - name: Check only the published key and the extra key are authorized
       ansible.builtin.assert:
         that:
-          - (verify_keys.content | b64decode).splitlines() | length == 1
+          - (verify_keys.content | b64decode).splitlines() | length == 2
           - (verify_keys.content | b64decode) is search('test@ubuntu-server-auto-setup')
+          - (verify_keys.content | b64decode) is search('extra@ubuntu-server-auto-setup')
 
 - name: Verify logins the baseline must refuse
   hosts: localhost
