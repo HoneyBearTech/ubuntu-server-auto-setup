@@ -178,11 +178,18 @@ play tests/verify-baseline.yml -e expect_port=2222
 cool_down
 play --idempotent playbooks/baseline.yml --limit srv-01 -e ssh_port=2222 -e ansible_port=2222
 
-step "baseline: require a password for sudo"
+step "baseline: keep passwordless sudo when asked to"
 cool_down
-play playbooks/baseline.yml --limit srv-01 -e ssh_port=2222 -e ansible_port=2222 -e admin_sudo_nopasswd=false
+play playbooks/baseline.yml --limit srv-01 -e ssh_port=2222 -e ansible_port=2222 -e admin_sudo_nopasswd=true
 cool_down
-play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=false
+play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
+
+step "baseline: passwordless sudo isn't removed when no password could replace it"
+cool_down
+play_fails "couldn't use sudo afterwards" playbooks/baseline.yml --limit srv-01 -e ssh_port=2222 -e ansible_port=2222 \
+  -e admin_sudo_nopasswd=false -e admin_password= -e ansible_become_password=
+cool_down
+play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 
 step "Task coverage"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE"

@@ -1,6 +1,6 @@
 ---
 # Checks the server state the baseline promises. Variables: expect_port (default 22) and
-# expect_nopasswd (default true).
+# expect_nopasswd (default false: the baseline removes passwordless sudo).
 - name: Verify the server baseline
   hosts: srv-01
   become: true
@@ -68,7 +68,7 @@
     - name: Check files
       ansible.builtin.assert:
         that:
-          - verify_files.results[0].stat.exists == (expect_nopasswd | default(true) | bool)
+          - verify_files.results[0].stat.exists == (expect_nopasswd | default(false) | bool)
           - verify_files.results[1].stat.exists
           - verify_files.results[2].stat.exists
           - not verify_files.results[3].stat.exists

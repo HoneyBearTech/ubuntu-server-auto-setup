@@ -202,7 +202,7 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `ssh_keys_exclusive` | `true` | Remove keys from `authorized_keys` that are no longer on GitHub or in `admin_extra_ssh_keys`. The run refuses to touch the file if it finds no keys at all. |
 | `admin_user` | `sysadmin` | The admin user created by the installer and managed by the baseline. |
 | `admin_password` | `""` | Set it to `"{{ vault_admin_password }}"`. Hashed (SHA-512) before it reaches the installer; the baseline only uses it when it has to create the user. |
-| `admin_sudo_nopasswd` | `true` | Passwordless `sudo` for the admin user. With `false`, also set `ansible_become_password`. |
+| `admin_sudo_nopasswd` | `false` | Passwordless `sudo` for the admin user. The default removes the installer's passwordless `sudo` on the first baseline run; later runs use `ansible_become_password` (set to the admin password in the example inventory). |
 | `timezone` | `Etc/UTC` | Any [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name. |
 | `pve_api_host`, `pve_api_port` | `""`, `8006` | The Proxmox API. |
 | `pve_api_user` | `ansible@pve` | The user that owns the API token. |
@@ -261,9 +261,10 @@ and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3 seconds) and
 - **Provision on a network you trust.** The control node learns a new VM's SSH host key by scanning it the
   first time the VM boots (trust on first use). Later port changes reuse the key read over the verified
   connection.
-- **Decide on passwordless sudo.** The admin user gets passwordless `sudo` by default so Ansible can run
-  unattended; set `admin_sudo_nopasswd: false` (and `ansible_become_password`) if you'd rather require
-  the password.
+- **Sudo needs the admin password.** The installer grants passwordless `sudo` only so the first baseline
+  run can work unattended; that run removes it, so a stolen SSH key alone isn't root. Keep
+  `ansible_become_password` set to the admin password (as in the example inventory); set
+  `admin_sudo_nopasswd: true` only if you accept that any authorized key is root.
 - **Put your own management network in `fail2ban_ignoreip`**, and double-check `ssh_port`,
   `ufw_ssh_sources` and `ufw_allow` before the first baseline run on a server that's already in use.
 - **Seed files are temporary.** The seed ISO holds the password hash. Provisioning deletes it once the

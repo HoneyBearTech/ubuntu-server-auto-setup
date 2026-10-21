@@ -100,7 +100,7 @@ example shows a typical value.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `admin_shell` | `/bin/bash` | The admin account's shell. |
-| `admin_sudo_nopasswd` | `true` | Passwordless sudo for the admin account. |
+| `admin_sudo_nopasswd` | `false` | Passwordless sudo for the admin account. False removes the installer's passwordless sudo on the first baseline run; later runs need `ansible_become_password` (the example inventory and the web UI set it to the admin password). |
 | `ssh_keys_exclusive` | `true` | Remove authorized keys that aren't on GitHub or in `admin_extra_ssh_keys`. |
 | `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |

@@ -28,7 +28,7 @@ all:
     ubuntu_servers:
       vars:
         ansible_user: "{{ admin_user }}"
-        # Only used if you set admin_sudo_nopasswd: false; harmless otherwise.
+        # Sudo needs the admin password once the first baseline run has removed passwordless sudo.
         ansible_become_password: "{{ vault_admin_password }}"
         pve_node: pve-1
         pve_storage: local-lvm

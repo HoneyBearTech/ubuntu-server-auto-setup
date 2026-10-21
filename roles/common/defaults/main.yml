@@ -3,7 +3,9 @@ admin_user: sysadmin
 admin_shell: /bin/bash
 # Only used when the user doesn't exist yet (servers this repo didn't install).
 admin_password: ""
-admin_sudo_nopasswd: true
+# The installer grants passwordless sudo so the first baseline run can work unattended; with false (the
+# default) that run removes it again, and later runs use ansible_become_password (the admin password).
+admin_sudo_nopasswd: false
 
 # Keys from https://github.com/<github_user>.keys plus any extras.
 github_user: ""
