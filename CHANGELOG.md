@@ -10,9 +10,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [0.3.1] - 2026-10-21
 
-Extra SSH keys, the web UI's own included, are installed again; `--check --diff` works on a server the
-baseline hasn't run on yet; a pre-release checklist on real Proxmox VE, the tested ansible-core and
-collection versions in the release notes, and how to pin the Proxmox host key and certificate.
+Ubuntu's GPG signature on `SHA256SUMS` is verified before the ISO checksum is trusted; extra SSH keys, the
+web UI's own included, are installed again; `--check --diff` works on a server the baseline hasn't run on
+yet; a pre-release checklist on real Proxmox VE, the tested ansible-core and collection versions in the
+release notes, and how to pin the Proxmox host key and certificate.
+
+### Upgrading
+
+- **A mirror in `ubuntu_iso_base_url` must publish `SHA256SUMS.gpg`** next to `SHA256SUMS`, signed by
+  Ubuntu's CD image key: `make build-installer` now stops before the download if the signature is missing
+  or wrong. releases.ubuntu.com and old-releases.ubuntu.com publish it. The Proxmox node gets `gpgv` if it
+  doesn't have it.
 
 ### Added
 
