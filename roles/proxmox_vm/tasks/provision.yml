@@ -1,4 +1,11 @@
 ---
+- name: Find the ISO storage's folder on {{ pve_node }}
+  ansible.builtin.include_role:
+    name: ubuntu_release
+    tasks_from: iso_dir
+  vars:
+    ubuntu_release_node: "{{ pve_ssh_host }}"
+
 - name: Check that the autoinstall ISO has been built on {{ pve_node }}
   ansible.builtin.stat:
     path: "{{ pve_iso_dir }}/{{ installer_iso_name }}"

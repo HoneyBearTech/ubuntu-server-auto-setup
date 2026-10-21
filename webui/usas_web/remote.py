@@ -22,6 +22,7 @@ class PveResult:
     nodes: list[str]  # node names, sorted
     status: dict[str, str] = field(default_factory=dict)  # node name -> "online", "offline", ...
     cluster: str = ""  # the cluster's name; empty for a single node, or if the token can't read it
+    iso_storages: dict[str, str] = field(default_factory=dict)  # storage ID -> type ("nfs, shared"), ISO content
 
 
 def api_url(host: str, port: int) -> str:
@@ -61,7 +62,22 @@ def test_proxmox(host: str, port: int, user: str, token_id: str, secret: str, va
     except (ValueError, KeyError, TypeError):
         raise RemoteProblem("That doesn't look like a Proxmox VE API.") from None
     return PveResult(version=str(data.get("version", "?")), nodes=sorted(status), status=status,
-                     cluster=cluster_name(base, headers, verify))
+                     cluster=cluster_name(base, headers, verify), iso_storages=iso_storages(base, headers, verify))
+
+
+def iso_storages(base: str, headers: dict[str, str], verify: bool | str) -> dict[str, str]:
+    """The storages whose content includes ISO images, from /storage; {} if the token can't list them."""
+    try:
+        response = requests.get(f"{base}/storage", headers=headers, verify=verify, timeout=TIMEOUT)
+        response.raise_for_status()
+        found = {}
+        for entry in response.json()["data"]:
+            if "iso" in str(entry.get("content", "")).split(","):
+                kind = str(entry.get("type", "?")) + (", shared" if entry.get("shared") else "")
+                found[str(entry["storage"])] = kind
+        return dict(sorted(found.items()))
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        return {}
 
 
 def cluster_name(base: str, headers: dict[str, str], verify: bool | str) -> str:

@@ -54,7 +54,8 @@ example shows a typical value.
 | `ubuntu_release` | `"26.04"` | The release directory on the mirror. |
 | `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
 | `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO and `SHA256SUMS` come from. |
-| `pve_iso_storage`, `pve_iso_dir` | `local`, `/var/lib/vz/template/iso` | The Proxmox storage ID for ISOs and its directory. |
+| `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image); a storage shared by the cluster, such as NFS, works for every node. |
+| `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
 | `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). |
 | `installer_grub_timeout` | `3` | Seconds the installer's GRUB menu waits. |
 | `installer_iso_rebuild` | `false` | Rebuild the remastered ISO even if it exists. |

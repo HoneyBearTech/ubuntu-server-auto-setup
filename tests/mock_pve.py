@@ -77,6 +77,12 @@ class PveHandler(BaseHTTPRequestHandler):
             return self._reply(200, {"version": "9.1.1", "release": "9.1", "repoid": "mock"})
         if method == "GET" and path == "/nodes":
             return self._reply(200, [{"node": NODE, "status": "online", "type": "node"}])
+        if method == "GET" and path == "/storage":
+            return self._reply(200, [
+                {"storage": "local", "type": "dir", "content": "iso,vztmpl,backup"},
+                {"storage": "local-lvm", "type": "lvmthin", "content": "images,rootdir"},
+                {"storage": "synology-nfs", "type": "nfs", "content": "images,iso", "shared": 1},
+            ])
         if method == "GET" and path == "/cluster/status":
             return self._reply(200, [{"type": "cluster", "name": "mock-cluster", "nodes": 1, "quorate": 1},
                                      {"type": "node", "name": NODE, "online": 1, "local": 1}])

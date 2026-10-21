@@ -161,7 +161,9 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("pve_efidisk_format", "EFI disk format", "choice", "proxmox_vm", ui_choices=("raw", "qcow2")),
         S("pve_bridge", "Network bridge", "text", "proxmox_vm", ui_pattern=BRIDGE),
         S("pve_vlan", "VLAN tag", "int", "proxmox_vm", minimum=1, maximum=4094),
-        S("pve_iso_storage", "ISO storage", "text", "ubuntu_release", ui_pattern=STORAGE_ID, advanced=True),
+        S("pve_iso_storage", "ISO storage", "text", "ubuntu_release", pattern_var="pve_storage_id_pattern",
+          advanced=True, help="A Proxmox storage that allows ISO images (Content: ISO image), such as local or an NFS "
+          "share for the whole cluster. Its folder on the node is found automatically."),
         S("pve_api_timeout", "API request timeout (seconds)", "int", "proxmox_vm", minimum=5, maximum=600,
           advanced=True, help="How long one Proxmox API request may take. Allocating disks can keep the API busy."),
         # The ISO file name is built from it, and installer_iso checks that name against this pattern.

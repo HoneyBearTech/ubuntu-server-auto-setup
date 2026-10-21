@@ -7,6 +7,11 @@
     fail_msg: ubuntu_iso_name may contain only letters, digits, dots, underscores, plus signs and hyphens.
     quiet: true
 
+- name: Find the ISO storage's folder
+  ansible.builtin.include_role:
+    name: ubuntu_release
+    tasks_from: iso_dir
+
 - name: Install ISO tooling
   ansible.builtin.apt:
     name: xorriso

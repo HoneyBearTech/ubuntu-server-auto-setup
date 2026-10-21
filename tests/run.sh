@@ -137,6 +137,15 @@ step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml
 
+step "ISO storage other than local: its folder is asked from Proxmox, and the VM's CD-ROMs use it"
+play playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
+play --idempotent playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
+play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs
+play tests/verify-iso-storage.yml
+play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doesn't allow ISO images" \
+  playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
+play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
+
 step "baseline: first run, second run, checks"
 play playbooks/baseline.yml --limit srv-01
 play --idempotent playbooks/baseline.yml --limit srv-01

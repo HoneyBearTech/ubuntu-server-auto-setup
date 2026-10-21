@@ -504,7 +504,8 @@ def test_the_node_is_picked_from_the_cluster(ui, monkeypatch):
     r = post(ui, "/proxmox", {"action": "test", **PROXMOX, "pve_node": ""})
     assert "cluster homelab" in t(r) and "now a list" in t(r)
     assert ui.app_state.store.load().values == {}  # the test still saves no form values
-    assert ui.app_state.store.cluster() == {"name": "homelab", "nodes": {"hephaestus": "online", "zeus": "offline"}}
+    assert ui.app_state.store.cluster() == {"name": "homelab", "nodes": {"hephaestus": "online", "zeus": "offline"},
+                                            "iso_storages": {}}
 
     # From now on the node is a dropdown of the cluster's nodes, with their status.
     page = t(ui.get("/proxmox"))
@@ -543,4 +544,24 @@ def test_the_api_timeout_is_an_advanced_proxmox_setting(ui):
     assert "Saved the Proxmox settings" in t(r)
     assert ui.app_state.store.load().values["pve_api_timeout"] == 120
     r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_api_timeout": "1"})
+    assert r.status_code == 422
+
+
+def test_the_iso_storage_is_picked_from_the_storages_that_allow_isos(ui, monkeypatch):
+    monkeypatch.setattr(m, "test_proxmox", lambda *a: PveResult(
+        version="9.1.1", nodes=["pve-1"], status={"pve-1": "online"},
+        iso_storages={"local": "dir", "synology-nfs": "nfs, shared"}))
+    r = post(ui, "/proxmox", {"action": "test", **PROXMOX})
+    assert "the ISO storage a list of the storages that allow ISO images (local, synology-nfs)" in t(r)
+    page = t(ui.get("/proxmox"))
+    assert '<select id="f-pve_iso_storage" name="pve_iso_storage"' in page
+    assert ">synology-nfs (nfs, shared)</option>" in page and "found automatically" in page
+
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "backup-nfs"})
+    assert r.status_code == 422 and "backup-nfs isn&#39;t a storage that allows ISO images" in r.text
+    assert ">backup-nfs (doesn't allow ISO images)</option>" in r.text
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "synology-nfs"})
+    assert "Saved the Proxmox settings" in t(r)
+    assert ui.app_state.store.load().values["pve_iso_storage"] == "synology-nfs"
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "bad;id"})
     assert r.status_code == 422

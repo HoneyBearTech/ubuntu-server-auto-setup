@@ -22,6 +22,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - Creating a VM no longer fails with "Read timed out (read timeout=5)" while Proxmox allocates its disks:
   the Proxmox API calls now wait up to `pve_api_timeout` seconds (default 60; the Proxmox modules' own
   default is 5). This needs community.proxmox 1.6.0 or later (`requirements.yml`).
+- An ISO storage other than `local` (such as an NFS share for the cluster) works: the ISOs used to be
+  written to `local`'s folder while the VM's CD-ROMs pointed at the chosen storage. The storage's folder is
+  now asked from Proxmox (`pvesm path`), after checking that the storage exists, is active and allows ISO
+  images; `pve_iso_dir` defaults to empty for that and remains an override. The web UI's connection test
+  lists the storages that allow ISO images as a dropdown.
 
 ## [0.2.2] - 2026-10-21
 
