@@ -2,8 +2,9 @@
 name: Installer ISO
 
 # The integration tests use a small stand-in ISO. This job remasters the real Ubuntu 26.04 live-server ISO
-# (about 3 GB) in the test "Proxmox node" container and checks the result: the checksum from Ubuntu's
-# SHA256SUMS, the autoinstall kernel argument, and BIOS and UEFI boot records identical to the original.
+# (about 3 GB) in the test "Proxmox node" container and checks the result: Ubuntu's signature on
+# SHA256SUMS (with the key that ships in the role), the checksum from it, the autoinstall kernel argument,
+# and BIOS and UEFI boot records identical to the original.
 # Weekly (Ubuntu can publish a new point release or change the ISO layout at any time) and on changes to
 # the installer roles.
 on:  # yamllint disable-line rule:truthy
@@ -15,6 +16,7 @@ on:  # yamllint disable-line rule:truthy
       - "roles/installer_iso/**"
       - "roles/ubuntu_release/**"
       - "tests/real-iso.sh"
+      - "tests/images/pve-node/**"
       - ".github/workflows/installer-iso.yml"
 
 permissions:

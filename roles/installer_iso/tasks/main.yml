@@ -7,29 +7,106 @@
     fail_msg: ubuntu_iso_name may contain only letters, digits, dots, underscores, plus signs and hyphens.
     quiet: true
 
+- name: Check the signing key's fingerprint
+  ansible.builtin.assert:
+    that: installer_signing_fpr is match('^[0-9A-F]{40}\\Z')
+    fail_msg: installer_signing_fingerprint must be the signing key's full 40-digit hexadecimal fingerprint.
+    quiet: true
+
 - name: Find the ISO storage's folder
   ansible.builtin.include_role:
     name: ubuntu_release
     tasks_from: iso_dir
 
-- name: Install ISO tooling
+- name: Install ISO and signature tooling
   ansible.builtin.apt:
-    name: xorriso
+    name: [xorriso, gpgv]
     state: present
     update_cache: true
     cache_valid_time: 3600
+  register: installer_tools
+
+# Check mode runs the next four tasks too: they only write to the role's own work directory, and the
+# signature and checksum checks after them need their files.
+- name: Create the work directory
+  ansible.builtin.file:
+    path: "{{ installer_work_dir }}"
+    state: directory
+    mode: "0700"
+  check_mode: false
+
+- name: Copy the keyring with Ubuntu's CD image signing key
+  ansible.builtin.copy:
+    src: "{{ installer_signing_keyring }}"
+    dest: "{{ installer_work_dir }}/signing-keyring.gpg"
+    mode: "0644"
+  check_mode: false
 
 - name: Fetch Ubuntu's SHA256SUMS
-  ansible.builtin.uri:
+  ansible.builtin.get_url:
     url: "{{ ubuntu_iso_base_url }}/SHA256SUMS"
-    return_content: true
-  register: installer_sums
+    dest: "{{ installer_work_dir }}/SHA256SUMS"
+    force: true
+    mode: "0644"
   check_mode: false
+
+- name: Fetch the signature on SHA256SUMS
+  block:
+    - name: Fetch SHA256SUMS.gpg
+      ansible.builtin.get_url:
+        url: "{{ ubuntu_iso_base_url }}/SHA256SUMS.gpg"
+        dest: "{{ installer_work_dir }}/SHA256SUMS.gpg"
+        force: true
+        mode: "0644"
+      check_mode: false
+  rescue:
+    - name: Fail if Ubuntu's SHA256SUMS isn't signed
+      ansible.builtin.fail:
+        msg: >-
+          Couldn't fetch {{ ubuntu_iso_base_url }}/SHA256SUMS.gpg ({{ ansible_failed_result.status_code | default('') }}
+          {{ ansible_failed_result.msg | default('') }}), so the checksums can't be trusted. A mirror must publish
+          the signature next to SHA256SUMS.
+
+- name: Verify the signature on SHA256SUMS
+  ansible.builtin.command:
+    argv:
+      - gpgv
+      - --status-fd
+      - "1"
+      - --keyring
+      - "{{ installer_work_dir }}/signing-keyring.gpg"
+      - "{{ installer_work_dir }}/SHA256SUMS.gpg"
+      - "{{ installer_work_dir }}/SHA256SUMS"
+  register: installer_gpgv
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  # A check run doesn't install gpgv, and doesn't download the ISO either.
+  when: not (ansible_check_mode and installer_tools is changed)
+
+# VALIDSIG's last field is the fingerprint of the signing key's primary key: only a good signature by the
+# pinned key passes, whatever else the keyring holds.
+- name: Fail unless Ubuntu's signing key signed SHA256SUMS
+  ansible.builtin.assert:
+    that:
+      - installer_gpgv.rc == 0
+      - installer_gpgv.stdout is search('(?m)^\\[GNUPG:\\] VALIDSIG [0-9A-F]{40} .* ' ~ installer_signing_fpr ~ '$')
+    fail_msg: >-
+      The signature on {{ ubuntu_iso_base_url }}/SHA256SUMS is bad or isn't by the key {{ installer_signing_fpr }},
+      so the ISO's checksum can't be trusted: {{ installer_gpgv.stderr | default('') }}
+    quiet: true
+  when: installer_gpgv is not skipped
+
+# The checksum is read from the file whose signature was just checked, not fetched again.
+- name: Read the verified SHA256SUMS
+  ansible.builtin.slurp:
+    src: "{{ installer_work_dir }}/SHA256SUMS"
+  register: installer_sums
 
 - name: Pick the checksum for {{ ubuntu_iso_name }}
   ansible.builtin.set_fact:
     installer_iso_sha256: >-
-      {{ installer_sums.content
+      {{ installer_sums.content | b64decode
          | regex_findall('^([0-9a-f]{64}) \*?' ~ (ubuntu_iso_name | regex_escape) ~ '$', multiline=True)
          | default([''], true) | first }}
 
@@ -41,7 +118,7 @@
       has probably replaced it: set ubuntu_point_release, or point ubuntu_iso_base_url at old-releases.ubuntu.com.
     quiet: true
 
-- name: Download the Ubuntu Server ISO (checksum verified)
+- name: Download the Ubuntu Server ISO (checksum from the signed SHA256SUMS)
   ansible.builtin.get_url:
     url: "{{ ubuntu_iso_base_url }}/{{ ubuntu_iso_name }}"
     dest: "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
@@ -58,12 +135,6 @@
 - name: Remaster the ISO for hands-off install
   when: not installer_iso_stat.stat.exists or installer_iso_rebuild | bool
   block:
-    - name: Create the work directory
-      ansible.builtin.file:
-        path: "{{ installer_work_dir }}"
-        state: directory
-        mode: "0700"
-
     - name: Remove stale grub.cfg
       ansible.builtin.file:
         path: "{{ installer_work_dir }}/grub.cfg"

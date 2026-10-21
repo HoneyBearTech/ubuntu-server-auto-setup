@@ -12,7 +12,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
-| Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
+| Real installer ISO | Ubuntu's real signature on `SHA256SUMS`, checked with the shipped key, and the remastering of the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
 | Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy), and before every release with the [pre-release checklist](release-checklist.md) |
 
 ## The integration tests
@@ -23,7 +23,7 @@ leaves the machine except the container image builds:
 | Real system | Stand-in |
 | --- | --- |
 | A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`) |
-| releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, served inside that container |
+| releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
 | The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
@@ -32,7 +32,9 @@ The test keys, the mock's TLS certificate and `known_hosts` are created in a tem
 run; your own `~/.ssh` is never touched. The steps:
 
 1. **build-installer** twice: the remastered ISO has the `autoinstall` kernel argument and a 3-second GRUB
-   timeout, and the second run changes nothing.
+   timeout, and the second run changes nothing. Then it must refuse a `SHA256SUMS` whose checksum was
+   swapped (bad signature), one with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one,
+   and a malformed fingerprint.
 2. **provision-vms** for `srv-01`: the VM is created with the expected hardware, both ISOs attached, the
    install awaited, the ISOs detached, the boot order set to disk only, the seed deleted, the VM started and
    its host key trusted. A second run skips the existing VM.

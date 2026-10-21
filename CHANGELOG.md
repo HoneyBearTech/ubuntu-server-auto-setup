@@ -39,6 +39,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   run with a new `ssh_port` no longer tries to reconnect on a port sshd isn't using yet, and one with an
   `admin_user` that doesn't exist yet no longer fails on its `authorized_keys`.
 
+### Security
+
+- The installer role verifies Ubuntu's GPG signature on `SHA256SUMS` before it trusts the ISO checksum in
+  it: `gpgv` (installed on the Proxmox node if missing) checks `SHA256SUMS.gpg` against the Ubuntu CD image
+  signing key that now ships with the role (`roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`), pinned
+  by its full fingerprint `843938DF228D22F7B3742BC0D94AA3F0EFE21092` (`installer_signing_fingerprint`) and
+  never fetched from a keyserver. The checksum is read from the verified file. A missing or bad signature,
+  or one by any other key, stops the run before the ISO is downloaded. A mirror set in
+  `ubuntu_iso_base_url` must now publish `SHA256SUMS.gpg`. The integration tests sign their stand-in
+  `SHA256SUMS` with a key made at image build time and check that tampered, unsigned and wrongly signed
+  files are refused; the weekly real-ISO job checks Ubuntu's real signature with the shipped key.
+
 ## [0.3.0] - 2026-10-21
 
 The web UI becomes USAS, a React app with a dark theme; passwordless sudo is removed after the first baseline

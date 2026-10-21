@@ -51,7 +51,7 @@ ansible-vault encrypt inventory/group_vars/all/vault.yml
 make build-installer ARGS=--ask-vault-pass
 ```
 
-This downloads the Ubuntu ISO to the node (about 3 GB, checked against Ubuntu's checksums) and builds the
+This downloads the Ubuntu ISO to the node (about 3 GB, checked against Ubuntu's signed checksums) and builds the
 hands-off copy next to it. It only does that once; later runs find both ISOs and finish quickly.
 
 ## 4. Create the VM

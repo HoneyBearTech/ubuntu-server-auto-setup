@@ -15,7 +15,9 @@ export ANSIBLE_CALLBACK_PLUGINS="$ROOT/tests/callback_plugins"
 export ANSIBLE_CALLBACKS_ENABLED=task_coverage
 export TASK_COVERAGE_FILE="$TEST_TMP/coverage.txt"
 export ANSIBLE_FORCE_COLOR=0
-INV=(-i tests/inventory/hosts.yml)
+# The node's stand-in SHA256SUMS is signed with a test key made when its image is built; signing.yml (written
+# below) points the installer role at that key instead of Ubuntu's.
+INV=(-i tests/inventory/hosts.yml -e "@$TEST_TMP/signing.yml")
 PVE=usas-test-pve
 SRV=usas-test-srv
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
@@ -112,12 +114,25 @@ wait_ssh 2211
 wait_ssh 2201
 # Only the node is trusted up front; the server's key is added by the provisioning role under test.
 ssh-keyscan -p 2211 127.0.0.1 2>/dev/null >"$TEST_TMP/known_hosts"
+docker cp "$PVE":/srv/test-signing/keyring.gpg "$TEST_TMP/signing-keyring.gpg"
+printf 'installer_signing_keyring: %s\ninstaller_signing_fingerprint: %s\n' "$TEST_TMP/signing-keyring.gpg" \
+  "$(docker exec "$PVE" cat /srv/test-signing/fingerprint)" >"$TEST_TMP/signing.yml"
 
 step "build-installer: remaster the ISO, then check a second run changes nothing"
 play playbooks/build-installer.yml
 play --idempotent playbooks/build-installer.yml
 play tests/verify-installer.yml
 play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
+
+step "build-installer: a checksum file that isn't signed by the pinned key is refused"
+play_fails 'The signature on http://127.0.0.1:8080/tampered/SHA256SUMS is bad' playbooks/build-installer.yml \
+  -e ubuntu_iso_base_url=http://127.0.0.1:8080/tampered
+play_fails "Couldn't fetch http://127.0.0.1:8080/unsigned/SHA256SUMS.gpg" playbooks/build-installer.yml \
+  -e ubuntu_iso_base_url=http://127.0.0.1:8080/unsigned
+# A good signature, but by a key other than the pinned one (the test key is in the keyring, Ubuntu's isn't).
+play_fails "isn't by the key 843938DF228D22F7B3742BC0D94AA3F0EFE21092" playbooks/build-installer.yml \
+  -e installer_signing_fingerprint=843938DF228D22F7B3742BC0D94AA3F0EFE21092
+play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_signing_fingerprint=EFE21092
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
