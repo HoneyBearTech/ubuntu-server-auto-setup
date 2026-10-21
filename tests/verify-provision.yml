@@ -24,6 +24,8 @@
           - "'ide2' not in vm.config and 'ide3' not in vm.config"
           - vm.config.boot == 'order=scsi0'
           - vm.config_updates[0].delete == 'ide2,ide3'
+          # The installer ran: after its first start the VM was seen running, then powered itself off.
+          - vm.installed
           - vm.starts == 2
           - vm.status == 'running'
 

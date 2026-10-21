@@ -4,7 +4,8 @@
 It implements only the calls that the proxmox_vm role and community.proxmox.proxmox_kvm make, keeps VMs in
 memory, and pretends to run the installer: after a VM's first start it reports "running" for a few status
 polls, then "stopped" (the installer powering the VM off). VMs whose ID is in HANG_VMIDS never stop, to test
-the role's failure path.
+the role's failure path. Like Proxmox, a start request only starts a task: the VM's status stays "stopped"
+until that task has been seen running and then finished.
 
 It also serves a public-keys file over plain HTTP, standing in for https://github.com/<user>.keys.
 
@@ -210,7 +211,17 @@ class PveHandler(BaseHTTPRequestHandler):
         if m and method == "GET":
             if m.group(3) == "log":
                 return self._reply(200, [{"n": 1, "t": "TASK OK"}])
-            return self._reply(200, {"status": "stopped", "exitstatus": "OK", "upid": m.group(2)})
+            task = urllib.parse.unquote(m.group(2))
+            _, _, _, _, _, action, vmid, *_ = task.split(":")
+            vm = vms.get(vmid)
+            if action == "qmstart" and vm and "starting" in vm:
+                # The first poll finds the start task still running; the next one finds the VM started.
+                if vm["starting"] > 0:
+                    vm["starting"] -= 1
+                    return self._reply(200, {"status": "running", "upid": task})
+                del vm["starting"]
+                vm["status"] = "running"
+            return self._reply(200, {"status": "stopped", "exitstatus": "OK", "upid": task})
         if method == "POST" and path == f"/nodes/{NODE}/qemu":
             vmid = str(form.get("vmid"))
             if vmid in vms:
@@ -219,7 +230,8 @@ class PveHandler(BaseHTTPRequestHandler):
             if "net0" in config:  # Proxmox adds a MAC address to the NIC
                 model, _, rest = config["net0"].partition(",")
                 config["net0"] = f"{model}=BC:24:11:00:{int(vmid) // 100 % 100:02d}:{int(vmid) % 100:02d},{rest}"
-            vms[vmid] = {"config": config, "status": "stopped", "starts": 0, "polls": 0, "config_updates": []}
+            vms[vmid] = {"config": config, "status": "stopped", "starts": 0, "polls": 0, "installed": False,
+                         "config_updates": []}
             return self._reply(200, upid("qmcreate", vmid))
         m = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|status/current|status/start)", path)
         if not m:
@@ -237,7 +249,7 @@ class PveHandler(BaseHTTPRequestHandler):
             vm["config"].update({k: v for k, v in form.items() if k != "delete"})
             return self._reply(200, None)
         if action == "status/start" and method == "POST":
-            vm["status"] = "running"
+            vm["starting"] = 1
             vm["starts"] += 1
             vm["polls"] = 0
             return self._reply(200, upid("qmstart", vmid))
@@ -247,6 +259,7 @@ class PveHandler(BaseHTTPRequestHandler):
                 vm["polls"] += 1
                 if vm["polls"] > POLLS_BEFORE_POWEROFF:
                     vm["status"] = "stopped"
+                    vm["installed"] = True
             return self._reply(200, {"status": vm["status"], "vmid": int(vmid), "qmpstatus": vm["status"]})
         return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
 
