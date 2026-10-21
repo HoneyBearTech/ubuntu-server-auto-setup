@@ -108,6 +108,11 @@ jobs:
           ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
           scan source -r /src
 
+      # osv-scanner checks the versions a range resolves to today; this checks the lower bounds themselves
+      # (what OpenSSF Scorecard reports, and what pip accepts if an older copy is already installed).
+      - name: No lower bound allows a vulnerable version
+        run: python3 tests/check_floors.py requirements.txt requirements-dev.txt requirements-webui.in requirements-fuzz.in
+
   webui:
     name: Web UI tests
     runs-on: ubuntu-latest
