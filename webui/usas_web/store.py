@@ -248,7 +248,7 @@ class Store:
         children["ubuntu_servers"] = {
             "vars": {
                 "ansible_user": "{{ admin_user }}",
-                # Only used with admin_sudo_nopasswd: false.
+                # Sudo needs it once the first baseline run removes passwordless sudo (the default).
                 "ansible_become_password": "{{ vault_admin_password }}",
             },
             "hosts": hosts,

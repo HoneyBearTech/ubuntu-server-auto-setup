@@ -80,6 +80,18 @@
     validate: visudo -cf %s
   when: admin_sudo_nopasswd | bool
 
+# Without a password the admin user couldn't use sudo at all once passwordless sudo is gone.
+- name: Check that sudo will still work with a password
+  ansible.builtin.assert:
+    that: admin_password | length > 0 or (ansible_become_password | default('')) | length > 0
+    fail_msg: >-
+      admin_sudo_nopasswd is false, so passwordless sudo is about to be removed, but neither admin_password
+      nor ansible_become_password is set: {{ admin_user }} couldn't use sudo afterwards. Set the admin password
+      in the Vault (and ansible_become_password to it), or set admin_sudo_nopasswd: true.
+    quiet: true
+  when: not admin_sudo_nopasswd | bool
+  no_log: true
+
 - name: Require a password for sudo
   ansible.builtin.file:
     path: /etc/sudoers.d/90-ansible-{{ admin_user }}

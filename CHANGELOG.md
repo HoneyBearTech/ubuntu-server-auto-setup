@@ -8,6 +8,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Passwordless sudo is now removed by default.** `admin_sudo_nopasswd` defaults to `false`: the next
+  baseline run removes the admin user's passwordless `sudo` (the installer grants it only so the first run
+  can work unattended), and later runs use `ansible_become_password`. Keep that set to the admin password,
+  as the example inventory and the web UI do, or set `admin_sudo_nopasswd: true` to keep the old behaviour.
+  The baseline refuses to remove passwordless `sudo` if no password is set, so nobody is locked out of it.
+
 ### Added
 
 - The web UI has an icon (a small shield with a server), at `/static/favicon.svg` and `/favicon.ico`.

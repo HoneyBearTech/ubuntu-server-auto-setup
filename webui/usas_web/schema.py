@@ -201,7 +201,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("ssh_permit_root_login", "Root login over SSH", "choice", "ssh_hardening",
           choices_var="ssh_permit_root_login_values"),
         S("admin_sudo_nopasswd", "Passwordless sudo for the admin user", "bool", "common",
-          help="Convenient for unattended runs, but anyone with an authorized key has root."),
+          help="Off by default: the first run removes the installer's passwordless sudo, and later runs use "
+               "the admin password. On is convenient, but anyone with an authorized key has root."),
         S("ufw_ssh_limit", "Rate-limit SSH in the firewall", "bool", "firewall"),
         S("ufw_ssh_sources", "SSH allowed from", "list", "firewall", ui_pattern=UFW_FROM,
           help='"any", or addresses and networks (CIDR), one per line.'),

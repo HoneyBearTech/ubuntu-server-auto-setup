@@ -125,9 +125,10 @@ and in [web-ui.md](web-ui.md#security).
 - **The installer's own log.** Ubuntu's installer keeps a root-only copy of its configuration, including
   the password hash, in `/var/log/installer/autoinstall-user-data`. The baseline's `common` role deletes it;
   until the baseline has run, it is on the server.
-- **Passwordless sudo.** By default the admin user can use `sudo` without a password, so Ansible can run
-  unattended; anyone with one of the authorized keys has root. Set `admin_sudo_nopasswd: false` to require
-  the password.
+- **Passwordless sudo during provisioning.** The installer gives the admin user passwordless `sudo` so the
+  first baseline run can work unattended; the baseline then removes it (`admin_sudo_nopasswd: false`, the
+  default), so an SSH key alone doesn't give root afterwards. Until that first baseline run finishes, anyone
+  with one of the authorized keys has root. Setting `admin_sudo_nopasswd: true` keeps passwordless `sudo`.
 - **Your inventory.** The project does what the inventory says. A wrong `pve_vmid`, `ssh_port`,
   `ufw_allow`, `ufw_ssh_sources` or `fail2ban_ignoreip` can create the wrong VM, open a port you didn't
   mean to, or lock you out.
