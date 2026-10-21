@@ -77,6 +77,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- Provisioning could leave a new VM booting from an empty disk (since 0.1.0). Proxmox answers a start
+  request before the VM is running, and when the start took a moment the first status check still read
+  "stopped": the run took the install as finished and detached the installer and seed ISOs before the VM
+  had even started. It now waits for Proxmox's start task to finish, and stops if the start failed, before
+  it waits for the installer to power the VM off.
 - Keys in `admin_extra_ssh_keys`, including the web UI's own key, were left out of `authorized_keys` and the
   installer's configuration whenever `github_user` was set (since 0.2.0), and the baseline's exclusive key
   sync removed them. They are installed again.

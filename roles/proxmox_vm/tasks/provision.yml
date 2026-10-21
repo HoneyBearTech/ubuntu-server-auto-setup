@@ -147,9 +147,13 @@
         headers: "{{ pve_api_headers }}"
         validate_certs: "{{ pve_validate_certs }}"
         timeout: "{{ pve_api_timeout | int }}"
+      register: pve_vm_start
       delegate_to: localhost
       become: false
       no_log: "{{ pve_hide_secrets }}"
+
+    - name: Wait until the installer is running
+      ansible.builtin.include_tasks: wait_for_start.yml
 
     - name: Wait for the installer to finish and power off the VM
       ansible.builtin.uri:
@@ -213,9 +217,13 @@
     headers: "{{ pve_api_headers }}"
     validate_certs: "{{ pve_validate_certs }}"
     timeout: "{{ pve_api_timeout | int }}"
+  register: pve_vm_start
   delegate_to: localhost
   become: false
   no_log: "{{ pve_hide_secrets }}"
+
+- name: Wait until the installed system is booting
+  ansible.builtin.include_tasks: wait_for_start.yml
 
 - name: Wait for SSH on {{ ansible_host }}
   ansible.builtin.wait_for:
