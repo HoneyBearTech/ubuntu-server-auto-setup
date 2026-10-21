@@ -303,6 +303,24 @@ def test_the_theme_is_remembered(client, theme, scheme):
     assert client.get("/api/session").json()["theme"] == theme
 
 
+def test_problems_send_only_their_message(ui, monkeypatch):
+    from usas_web.problems import Problem
+
+    class Wrapped(RemoteProblem):
+        pass
+
+    def failing(*args):
+        try:
+            raise OSError("/internal/path: permission denied")
+        except OSError as inner:
+            raise Wrapped("Couldn't connect to pve.example.lan:8006.") from inner
+
+    monkeypatch.setattr(m, "test_proxmox", failing)
+    r = post(ui, "/proxmox", {"action": "test", **PROXMOX})
+    assert r.json() == {"test_error": "Couldn't connect to pve.example.lan:8006."}
+    assert issubclass(KeyProblem, Problem) and issubclass(RemoteProblem, Problem)
+
+
 def test_the_theme_needs_a_known_value_and_the_token(client):
     r = post(client, "/theme", {"theme": "neon"})
     assert r.status_code == 422 and "set-cookie" not in r.headers or "usas_theme" not in r.headers.get("set-cookie", "")

@@ -334,8 +334,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/theme")
     async def set_theme(request: Request):
         form = await checked_form(request)
-        value = str(form.get("theme", ""))
-        if value not in THEMES:
+        # The cookie holds one of the fixed names, never the text that was sent.
+        value = {name: name for name in THEMES}.get(str(form.get("theme", "")))
+        if value is None:
             return reply(422, error="Choose dark, light or system.")
         response = reply(theme=value)
         response.set_cookie(THEME_COOKIE, value, max_age=400 * 24 * 3600, path="/", secure=is_https(request),
@@ -442,7 +443,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 value = parse_value(f, form.get(f.name))
             except Invalid as exc:
-                errors[f.name] = str(exc)
+                errors[f.name] = exc.message
                 continue
             if f.name == "timezone" and timezones and value not in timezones:
                 errors[f.name] = "Pick a time zone from the tz database, such as Europe/Berlin or Etc/UTC."
@@ -496,7 +497,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 certs = save_ca(settings, pem)
                 return reply(message="Saved the CA certificate " + ", ".join(c["subject"] for c in certs) + ".")
             except KeyProblem as exc:
-                return reply(422, ca_error=str(exc))
+                return reply(422, ca_error=exc.message)
         only = API_FIELDS if action == "test" else ()
         problems = apply_section("proxmox", form, config, only)
         if problems:
@@ -511,7 +512,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     bool(v.get("pve_validate_certs")), settings.ca_bundle,
                 )
             except RemoteProblem as exc:
-                return reply(test_error=str(exc))
+                return reply(test_error=exc.message)
             # The node list (names and status only) is kept for the node dropdown; the form isn't saved.
             store.save_cluster(result.cluster, result.status, result.iso_storages)
             message = f"Connected to Proxmox VE {result.version}"
@@ -570,7 +571,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if not found:
                         preview_error = f"{user} has no public keys on GitHub; the playbooks would refuse to run."
                 except RemoteProblem as exc:
-                    preview_error = str(exc)
+                    preview_error = exc.message
             extra = [d for d in (describe_public_key(k) for k in config.values.get("admin_extra_ssh_keys") or []) if d]
             return reply(github_user=user, preview=found, extra_keys=extra if found else [],
                          preview_error=preview_error)
@@ -616,7 +617,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 try:
                     value = parse_value(c, raw[c.name])
                 except Invalid as exc:
-                    errors[f"servers-{i}-{c.name}"] = str(exc)
+                    errors[f"servers-{i}-{c.name}"] = exc.message
                     continue
                 row[c.name] = value
             row["_index"] = i
@@ -727,7 +728,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return reply(message=keys.test_login(config.node_address))
         except KeyProblem as exc:
             area = {"generate": "key", "upload": "key", "address": "address"}.get(action, "hostkey")
-            return reply(422, area=area, error=str(exc))
+            return reply(422, area=area, error=exc.message)
         raise Forbidden()
 
     @app.get("/ssh/id_ed25519.pub")
@@ -763,7 +764,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             started = runner.start(action, form.get("check") is not None, form.get("diff") is not None,
                                    str(form.get("limit", "")), store.host_names(), secret_values())
         except RunError as exc:
-            return reply(422, error=str(exc))
+            return reply(422, error=exc.message)
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     @app.get("/api/runs")

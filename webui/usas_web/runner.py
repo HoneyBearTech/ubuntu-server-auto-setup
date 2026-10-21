@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import Settings
+from .problems import Problem
 from .store import write_private
 
 PLAYBOOKS = {
@@ -35,7 +36,7 @@ LIMIT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\Z")
 REDACTED = "********"
 
 
-class RunError(RuntimeError):
+class RunError(Problem, RuntimeError):
     pass
 
 

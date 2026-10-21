@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 
 from .config import Settings
+from .problems import Problem
 from .schema import API_HOST
 from .store import write_private
 
@@ -28,7 +29,14 @@ PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
 
 
-class KeyProblem(ValueError):
+def _why(exc: Exception) -> str:
+    """Why a command couldn't run, in a few words (not the exception's own text)."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"no answer within {TIMEOUT} seconds"
+    return getattr(exc, "strerror", None) or exc.__class__.__name__
+
+
+class KeyProblem(Problem, ValueError):
     """A key, certificate or host the UI can't use; the message is shown to the user."""
 
 
@@ -134,7 +142,7 @@ class Keys:
                 capture_output=True, text=True, timeout=TIMEOUT, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise KeyProblem(f"Couldn't scan {host}: {exc}") from None
+            raise KeyProblem(f"Couldn't scan {host}: {_why(exc)}.") from None
         keys = []
         for line in result.stdout.splitlines():
             parts = line.split()
@@ -181,7 +189,7 @@ class Keys:
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, check=False)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise KeyProblem(f"SSH to {host} failed: {exc}") from None
+            raise KeyProblem(f"SSH to {host} failed: {_why(exc)}.") from None
 
     def test_login(self, host: str) -> str:
         result = self._ssh(host, "true")
