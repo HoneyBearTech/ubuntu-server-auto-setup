@@ -534,3 +534,13 @@ def test_a_damaged_settings_file_is_ignored(ui, settings):
     assert ui.app_state.store.cluster() == {}
     r = post(ui, "/proxmox", {"action": "save", **PROXMOX})  # no node list: any valid name is accepted
     assert "Saved the Proxmox settings" in t(r)
+
+
+def test_the_api_timeout_is_an_advanced_proxmox_setting(ui):
+    page = t(ui.get("/proxmox"))
+    assert 'name="pve_api_timeout"' in page and "default <code>60</code>" in page
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_api_timeout": "120"})
+    assert "Saved the Proxmox settings" in t(r)
+    assert ui.app_state.store.load().values["pve_api_timeout"] == 120
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_api_timeout": "1"})
+    assert r.status_code == 422

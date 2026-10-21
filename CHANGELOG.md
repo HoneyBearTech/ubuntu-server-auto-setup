@@ -17,6 +17,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   nodes when it doesn't match (node names are case-sensitive), instead of failing later inside the API call
   that creates the VM.
 
+### Fixed
+
+- Creating a VM no longer fails with "Read timed out (read timeout=5)" while Proxmox allocates its disks:
+  the Proxmox API calls now wait up to `pve_api_timeout` seconds (default 60; the Proxmox modules' own
+  default is 5). This needs community.proxmox 1.6.0 or later (`requirements.yml`).
+
 ## [0.2.2] - 2026-10-21
 
 Publishes the changes listed under 0.2.1, with the image fix below.

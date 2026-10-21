@@ -41,6 +41,7 @@
     url: "{{ pve_api_url }}/cluster/resources?type=vm"
     headers: "{{ pve_api_headers }}"
     validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
   register: pve_vms
   delegate_to: localhost
   become: false
@@ -52,6 +53,7 @@
     url: "{{ pve_api_url }}/nodes"
     headers: "{{ pve_api_headers }}"
     validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
   register: pve_nodes
   delegate_to: localhost
   become: false

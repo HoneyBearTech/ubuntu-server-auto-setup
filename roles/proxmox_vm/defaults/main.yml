@@ -6,6 +6,9 @@ pve_api_user: ansible@pve
 pve_api_token_id: ""          # token name only, e.g. "automation"
 pve_api_token_secret: ""
 pve_validate_certs: true
+# Seconds Proxmox may take to answer one API request. Allocating disks (LVM-thin, ZFS, Ceph) can keep the
+# API busy for longer than the Proxmox modules' own 5-second default.
+pve_api_timeout: 60
 pve_api_url: "https://{{ pve_api_host }}:{{ pve_api_port }}/api2/json"
 # Hide API tokens and the password hash from task output. Set false only while debugging.
 pve_hide_secrets: true
