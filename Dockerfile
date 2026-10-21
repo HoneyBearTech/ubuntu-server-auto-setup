@@ -7,7 +7,7 @@
 # Node, npm or node_modules. npm ci installs exactly the lock file's versions and checks each package's
 # integrity hash; no dependency runs an install script (.npmrc). The files don't depend on the platform, so this
 # stage runs on the build machine's own platform, also for a multi-arch build.
-FROM --platform=$BUILDPLATFORM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS frontend
+FROM --platform=$BUILDPLATFORM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS frontend
 WORKDIR /build/webui/frontend
 COPY webui/frontend/package.json webui/frontend/package-lock.json webui/frontend/.npmrc ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
