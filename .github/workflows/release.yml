@@ -15,7 +15,8 @@ name: Release
 # image is mirrored to ghcr.io/honeybeartech/ubuntu-server-auto-setup) for
 # linux/amd64 and linux/arm64: scanned with Trivy and smoke-tested first, pushed with an SBOM and SLSA
 # provenance (BuildKit attestations), signed keylessly with cosign, and attested to GitHub.
-# The release notes are the CHANGELOG.md section for the version. How to verify: docs/verifying-releases.md.
+# The release notes are the CHANGELOG.md section for the version, then the exact ansible-core and collection
+# versions the checks ran with (scripts/tested-versions.sh). How to verify: docs/verifying-releases.md.
 on:  # yamllint disable-line rule:truthy
   push:
     tags: ["v*.*.*"]
@@ -53,6 +54,18 @@ jobs:
       - name: Web UI unit tests
         working-directory: webui
         run: python -m pytest
+
+      # The exact ansible-core and collection versions this job installed and checked, for the release notes.
+      - name: Versions tested
+        run: |
+          scripts/tested-versions.sh > tested-versions.md
+          cat tested-versions.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-versions
+          path: tested-versions.md
+          retention-days: 1
 
   image:
     name: Container image
@@ -230,6 +243,10 @@ jobs:
         with:
           name: images
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tested-versions
+
       # Describes the tagged source tree: the Python packages declared in requirements*.txt and the
       # GitHub Actions the workflows use.
       - name: SBOM (SPDX)
@@ -289,6 +306,10 @@ jobs:
           fi
           # Repo-relative links would resolve against the release page; point them at the tag.
           perl -pi -e 's{\]\((?!https?://|#)([^)]+)\)}{](https://github.com/$ENV{REPO}/blob/$ENV{TAG}/$1)}g' notes.md
+          # The ansible-core and collection versions the checks job installed (scripts/tested-versions.sh).
+          test -s tested-versions.md
+          printf '\n' >> notes.md
+          cat tested-versions.md >> notes.md
           verify="https://github.com/${REPO}/blob/${TAG}/docs/verifying-releases.md"
           printf '\n---\nVerify this release: [docs/verifying-releases.md](%s)\n' "$verify" >> notes.md
 

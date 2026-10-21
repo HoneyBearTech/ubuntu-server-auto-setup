@@ -8,6 +8,21 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- The release notes list the exact ansible-core and collection versions (`community.proxmox`,
+  `community.general`, `ansible.posix`) the release's checks ran with, made by `scripts/tested-versions.sh`
+  in the release workflow's checks job.
+- [docs/host-keys.md](docs/host-keys.md): how to pin the Proxmox node's SSH host key and the API's TLS
+  certificate instead of trusting them on first use: comparing fingerprints with the node's console,
+  `StrictHostKeyChecking=yes`, clustered nodes, the cluster CA with `pve_validate_certs: true`, and giving
+  the web UI's container a `known_hosts` entry.
+
+### Fixed
+
+- [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
+  virtual environment the Proxmox modules don't read the system's trust store.
+
 ## [0.3.0] - 2026-10-21
 
 The web UI becomes USAS, a React app with a dark theme; passwordless sudo is removed after the first baseline

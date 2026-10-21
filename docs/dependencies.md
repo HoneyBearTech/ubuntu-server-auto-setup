@@ -50,7 +50,9 @@ project is a set of playbooks you run, and you should get Ansible's and the coll
 fixes without waiting for a release. The ranges stop at the next major version, which may break the
 playbooks. CI and the container image, which the project builds itself, install exact, hash-pinned sets
 (`requirements-ci.txt`, `requirements-webui.txt`). The collections in the image are the newest in range at
-build time; the image lists them in `/app/collections/VERSIONS.txt`.
+build time; the image lists them in `/app/collections/VERSIONS.txt`. Each release's notes list the exact
+ansible-core and collection versions the release's checks ran with (`scripts/tested-versions.sh`, run by
+the release workflow).
 
 The web UI's app is built from npm packages. `npm ci` installs exactly what `package-lock.json` lists and
 refuses a package whose contents don't match its recorded hash; no package runs an install script
