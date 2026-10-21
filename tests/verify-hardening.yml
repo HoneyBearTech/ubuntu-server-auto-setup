@@ -7,6 +7,8 @@
   gather_facts: true
   vars_files:
     - hardening-vars.yml
+  vars:
+    verify_sysctl_present: "{{ verify_sysctl.keys() | select('in', verify_sysctl_names.stdout_lines) | list }}"
   tasks:
     - name: Read the role's default sysctl set
       ansible.builtin.include_vars:
@@ -34,16 +36,24 @@
       vars:
         verify_lines: "{{ (verify_sysctl_file.content | b64decode).splitlines() | reject('match', '^(#|$)') | list }}"
 
+    # A container can't see some kernel-wide keys (net.core.bpf_jit_harden); the role reports and skips those.
+    - name: List the settings this kernel has
+      ansible.builtin.command: sysctl --all --names
+      register: verify_sysctl_names
+      changed_when: false
+
     - name: Read the live sysctl values
       ansible.builtin.command:
-        argv: "{{ ['sysctl', '-n'] + (verify_sysctl.keys() | list) }}"
+        argv: "{{ ['sysctl', '-n'] + verify_sysctl_present }}"
       register: verify_sysctl_live
       changed_when: false
 
     - name: Check the live values
       ansible.builtin.assert:
-        that: verify_sysctl_live.stdout_lines == verify_sysctl.values() | map('string') | list
-        fail_msg: "{{ verify_sysctl.keys() | zip(verify_sysctl_live.stdout_lines) | list | string }}"
+        that:
+          - verify_sysctl_present | select('match', 'net\.ipv4\.') | list | length >= 10
+          - verify_sysctl_live.stdout_lines == verify_sysctl_present | map('extract', verify_sysctl) | map('string') | list
+        fail_msg: "{{ verify_sysctl_present | zip(verify_sysctl_live.stdout_lines) | list | string }}"
 
     - name: Read the audit rules
       ansible.builtin.slurp:

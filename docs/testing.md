@@ -64,7 +64,8 @@ run; your own `~/.ssh` is never touched. The steps:
    auditd can't run and AppArmor's policy is the host's, so those two live checks are skipped with the
    reason in the log (the [pre-release checklist](release-checklist.md) covers them on a real VM).
    Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
-   leaves them out and checks only the per-network-namespace ones.
+   leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
+   (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
 9. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks

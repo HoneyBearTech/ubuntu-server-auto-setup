@@ -127,7 +127,8 @@ removes its files; settings already loaded in the kernel stay until the next reb
   hardens its JIT, limits `ptrace` to a process's descendants, protects hard links, symbolic links, FIFOs
   and regular files in shared directories, turns off core dumps of setuid programs, uses strict reverse-path
   filtering, refuses ICMP redirects and source-routed packets (and sends no redirects), and keeps TCP SYN
-  cookies on. Live values are checked and corrected on every run. IP forwarding and IPv6 router
+  cookies on. Live values are checked and corrected on every run; a key the kernel doesn't have (IPv6
+  turned off at boot, or a container) stays in the file but is reported instead of applied. IP forwarding and IPv6 router
   advertisements are left alone, so Docker and a Proxmox guest's networking keep working. Off by default
   because strict reverse-path filtering drops traffic on hosts with asymmetric routing (several interfaces,
   VPN gateways such as a Tailscale subnet router), and because debugging and profiling tools (`perf`, `strace`

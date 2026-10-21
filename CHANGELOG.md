@@ -46,7 +46,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
   `hardening_sysctl_enabled` (kernel and network settings in `/etc/sysctl.d/90-usas-hardening.conf`,
-  applied and checked live on every run, overridable with `hardening_sysctl` and `hardening_sysctl_extra`;
+  applied and checked live on every run (keys the kernel lacks are reported, not applied), overridable with `hardening_sysctl` and `hardening_sysctl_extra`;
   IP forwarding and router advertisements left alone for Docker and Proxmox guests),
   `hardening_auditd_enabled` (auditd with rules for identity files, sudoers, the sshd configuration, time
   changes, kernel modules and the audit configuration and logs; `hardening_auditd_immutable` locks them
