@@ -4,6 +4,7 @@
 # sign-in, the Proxmox connection test with the mock's CA certificate, the GitHub keys preview, saving every
 # page, and a provisioning run that the mock answers. Needs Docker and Python 3 (standard library only).
 # Usage: tests/webui-smoke.sh [image]   (default: builds the image from this checkout as usas:smoke)
+# EXPECT_VERSION=<version> also checks the version the UI shows (the release passes its tag's).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,7 +64,8 @@ code="$(docker logs "$APP" 2>&1 | sed -n 's/^ *Setup code: //p' | tail -n 1)"
 test -n "$code"
 
 python3 tests/webui_smoke.py --url "http://localhost:$APP_PORT" --setup-code "$code" \
-  --mock "https://127.0.0.1:$MOCK_PORT" --ca "$TMP/api.crt" --keys "$TMP/test.keys"
+  --mock "https://127.0.0.1:$MOCK_PORT" --ca "$TMP/api.crt" --keys "$TMP/test.keys" \
+  --version "${EXPECT_VERSION:-}"
 
 # What the UI left in the volume: an encrypted Vault, private files, and a process that isn't root.
 test "$(docker exec "$APP" id -u)" != 0

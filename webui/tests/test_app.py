@@ -1,6 +1,8 @@
 """The web UI over HTTP: sign-in, the guards, every page and form, and runs."""
 
 import html
+import importlib
+import re
 import time
 from dataclasses import replace
 
@@ -158,6 +160,46 @@ def test_security_headers(client):
     assert "HttpOnly" in cookie and "Secure" not in cookie  # plain HTTP on localhost (Safari drops Secure there)
     assert client.get("/static/app.css").headers["cache-control"].startswith("private")
     assert "set-cookie" not in client.get("/healthz").headers
+
+
+def test_favicon_needs_no_sign_in(client):
+    for path in ("/static/favicon.svg", "/favicon.ico"):
+        r = client.get(path)
+        assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
+        assert r.text.startswith("<svg") and "set-cookie" not in r.headers
+        assert r.headers["cache-control"].startswith("private") and "default-src 'none'" in r.headers[
+            "content-security-policy"]
+    page = client.get("/setup").text
+    assert f'<link rel="icon" href="{m.asset_urls(m.HERE / "static")["favicon.svg"]}" type="image/svg+xml">' in page
+
+
+def test_asset_urls_carry_a_hash_of_the_contents(client, tmp_path):
+    urls = m.asset_urls(m.HERE / "static")
+    page = client.get("/setup").text
+    for name in ("app.css", "app.js"):
+        assert re.fullmatch(rf"/static/{re.escape(name)}\?v=[0-9a-f]{{12}}", urls[name])
+        assert f'"{urls[name]}"' in page
+        assert client.get(urls[name]).status_code == 200
+    for name in m.ASSETS:
+        (tmp_path / name).write_text("old")
+    before = m.asset_urls(tmp_path)
+    (tmp_path / "app.css").write_text("new")
+    after = m.asset_urls(tmp_path)
+    assert after["app.css"] != before["app.css"] and after["app.js"] == before["app.js"]
+
+
+def test_version_comes_from_the_environment(client, monkeypatch):
+    import usas_web
+
+    assert f"web UI {html.escape(usas_web.__version__)} " in client.get("/setup").text
+    try:
+        monkeypatch.setenv("USAS_VERSION", " 1.2.3 ")
+        assert importlib.reload(usas_web).__version__ == "1.2.3"
+        monkeypatch.setenv("USAS_VERSION", "")
+        assert importlib.reload(usas_web).__version__ == "dev"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(usas_web)
 
 
 def test_forced_secure_cookies(settings):

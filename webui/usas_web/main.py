@@ -4,6 +4,7 @@ Every page works without JavaScript; static/app.js only adds the live run log an
 """
 
 import asyncio
+import hashlib
 import os
 import zoneinfo
 from dataclasses import dataclass
@@ -52,6 +53,15 @@ CSP = (
 MAX_PART = 256 * 1024
 API_FIELDS = ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id", "pve_api_token_secret",
               "pve_validate_certs")
+ASSETS = ("app.css", "app.js", "favicon.svg")
+PUBLIC_PATHS = ("/healthz", "/favicon.ico")
+
+
+def asset_urls(static_dir: Path) -> dict[str, str]:
+    """The static files' URLs, each with a hash of its contents: a changed file gets a new URL, so a browser
+    never keeps an old stylesheet or script after an upgrade."""
+    return {name: f"/static/{name}?v={hashlib.sha256((static_dir / name).read_bytes()).hexdigest()[:12]}"
+            for name in ASSETS}
 
 
 class Redirect(Exception):
@@ -94,7 +104,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.schema, app.state.keys = schema, keys
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
-    templates.env.globals.update(nav=NAV, version=__version__, display_value=display_value)
+    templates.env.globals.update(nav=NAV, version=__version__, assets=asset_urls(HERE / "static"),
+                                 display_value=display_value)
 
     def is_https(request: Request) -> bool:
         return request.url.scheme == "https" or settings.secure_cookies == "true"
@@ -116,9 +127,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return PlainTextResponse("Beyond localhost the UI only works over HTTPS (see docs/web-ui.md).",
                                      status_code=400)
         path = request.url.path
-        if path == "/healthz" or path.startswith("/static/"):
+        if path in PUBLIC_PATHS or path.startswith("/static/"):
             response = await call_next(request)
-            return _headers(response, cache=path.startswith("/static/"))
+            return _headers(response, cache=path != "/healthz")
         session = auth.get_session(request.cookies.get(cookie_name(request)))
         fresh = session is None
         if session is None:
@@ -201,6 +212,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/healthz", include_in_schema=False)
     async def healthz():
         return PlainTextResponse("ok")
+
+    # Browsers and bookmark tools ask for /favicon.ico whatever the page links; answer with the SVG icon.
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return FileResponse(HERE / "static" / "favicon.svg", media_type="image/svg+xml")
 
     @app.get("/setup", response_class=HTMLResponse)
     async def setup_page(request: Request):

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- A shield with two server racks. The orange sits between the UI's light and dark accents, so it keeps
+       3:1 contrast on light and dark browser tabs, and the white racks 4.6:1 on it. -->
+  <path fill="#c2520a" d="M8 .8 14.5 3v5c0 3.6-2.7 6.1-6.5 7.3C4.2 14.1 1.5 11.6 1.5 8V3z"/>
+  <rect fill="#ffffff" x="4.5" y="4.5" width="7" height="2.5" rx=".6"/>
+  <rect fill="#ffffff" x="4.5" y="8.5" width="7" height="2.5" rx=".6"/>
+  <circle fill="#c2520a" cx="10" cy="5.75" r=".6"/>
+  <circle fill="#c2520a" cx="10" cy="9.75" r=".6"/>
+</svg>

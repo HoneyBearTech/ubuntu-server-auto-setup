@@ -175,6 +175,7 @@ The container reads these environment variables; the defaults suit the documente
 | `USAS_TRUSTED_PROXIES` | (none) | Addresses of a reverse proxy whose `X-Forwarded-Proto` and `X-Forwarded-For` headers are trusted. |
 | `USAS_SESSION_HOURS` | `12` | The longest a session lasts. |
 | `USAS_PORT` | `8080` | The port inside the container. |
+| `USAS_VERSION` | the image's version | The version in the page footer. Release images set it from their tag; images you build yourself say `dev`. |
 
 ## Security
 
@@ -248,7 +249,8 @@ and `ansible-playbook` for that), so there is no OpenAPI document. For reference
 | `/runs/<id>/log` | GET | The run's log as text. |
 | `/runs/<id>/stream` | GET | The run's output as server-sent events, resuming from `Last-Event-ID`. |
 | `/runs/<id>/stop` | POST | Interrupt the run. |
-| `/static/*` | GET | The stylesheet and script. |
+| `/static/*` | GET | The stylesheet, script and icon. Pages link them with a hash of each file's contents (`?v=`), so a browser fetches them again after an upgrade. No sign-in. |
+| `/favicon.ico` | GET | The icon (SVG). No sign-in. |
 
 Every POST needs the form's `csrf_token`.
 

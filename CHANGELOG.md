@@ -8,6 +8,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- The web UI has an icon (a small shield with a server), at `/static/favicon.svg` and `/favicon.ico`.
+
+### Fixed
+
+- The web UI's stylesheet and script are versioned with a hash of their contents, so browsers no longer keep
+  stale files after an upgrade (the URLs said `?v=0.2.0.dev0` in every release). The page footer shows the
+  image's release version, which the release workflow sets from the tag.
+
 ## [0.2.3] - 2026-10-21
 
 Fixes from the first run on a real Proxmox VE cluster: node names, API timeouts and shared ISO storage.

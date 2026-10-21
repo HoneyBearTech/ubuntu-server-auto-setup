@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>{% block title %}{{ title }}{% endblock %} · ubuntu-server-auto-setup</title>
-<link rel="stylesheet" href="/static/app.css?v={{ version }}">
-<script src="/static/app.js?v={{ version }}" defer></script>
+<link rel="icon" href="{{ assets['favicon.svg'] }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ assets['app.css'] }}">
+<script src="{{ assets['app.js'] }}" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to the content</a>
