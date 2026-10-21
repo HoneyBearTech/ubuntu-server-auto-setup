@@ -8,6 +8,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- A pre-release checklist on real Proxmox VE (`docs/release-checklist.md`): what the maintainer checks on
+  a real cluster before tagging a release, beyond what CI covers (the ISO in shared storage, a real install
+  and power-off, idempotent reruns, key-only SSH, the firewall, Fail2Ban, sudo, the web UI and the
+  published image's signatures), and what to record in the release pull request. The test policy and
+  docs/testing.md link to it.
+
 ## [0.3.0] - 2026-10-21
 
 The web UI becomes USAS, a React app with a dark theme; passwordless sudo is removed after the first baseline
