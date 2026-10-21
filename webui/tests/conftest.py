@@ -1,4 +1,3 @@
-import re
 import sys
 import textwrap
 from dataclasses import replace
@@ -14,10 +13,9 @@ PASSWORD = "correct horse battery staple"
 TOKEN_SECRET = "00000000-0000-4000-8000-000000000000"
 
 
-def csrf(response) -> str:
-    match = re.search(r'name="csrf_token" value="([^"]+)"', response.text)
-    assert match, response.text[:500]
-    return match.group(1)
+def csrf(c) -> str:
+    """The session's CSRF token, as the app gets it (the page shell has it too)."""
+    return c.get("/api/session").json()["csrf"]
 
 
 @pytest.fixture
@@ -56,11 +54,16 @@ def client(settings, fake_ansible):
     return c
 
 
+def post(c, path, data=None, files=None):
+    """Posts a form to the API for a page (/proxmox posts to /api/proxmox) as the app does: the same field
+    names, the session's CSRF token in X-CSRF-Token, and the page it was sent from in X-USAS-Page."""
+    return c.post("/api" + path, data=data or {}, files=files,
+                  headers={"X-CSRF-Token": csrf(c), "X-USAS-Page": path})
+
+
 def sign_up(c) -> None:
-    r = c.get("/setup")
-    r = c.post("/setup", data={"csrf_token": csrf(r), "setup_code": c.app_state.auth.setup_code,
-                               "password": PASSWORD, "confirm": PASSWORD})
-    assert r.status_code == 200 and r.url.path == "/proxmox", r.text[:500]
+    r = post(c, "/setup", {"setup_code": c.app_state.auth.setup_code, "password": PASSWORD, "confirm": PASSWORD})
+    assert r.status_code == 200 and r.json()["redirect"] == "/proxmox", r.text[:500]
 
 
 @pytest.fixture
@@ -91,19 +94,11 @@ HARDENING = {
 }
 
 
-def post(c, path, data):
-    """Posts a form with the session's CSRF token (from the page itself, or the overview for POST-only paths)."""
-    r = c.get(path)
-    if 'name="csrf_token"' not in r.text:
-        r = c.get("/")
-    return c.post(path, data={"csrf_token": csrf(r), **data})
-
-
 def configure(c, servers=1):
-    assert post(c, "/proxmox", {"action": "save", **PROXMOX}).url.path == "/proxmox"
-    assert post(c, "/defaults", {"action": "save", **DEFAULTS}).url.path == "/defaults"
+    assert post(c, "/proxmox", {"action": "save", **PROXMOX}).status_code == 200
+    assert post(c, "/defaults", {"action": "save", **DEFAULTS}).status_code == 200
     rows = {"server_count": str(servers), "action": "save"}
     for i in range(servers):
         rows.update({f"servers-{i}-name": f"web-{i:02d}", f"servers-{i}-ansible_host": f"10.0.0.{10 + i}",
                      f"servers-{i}-pve_vmid": str(4000 + i), f"servers-{i}-ufw_ports": "443/tcp"})
-    assert post(c, "/servers", rows).url.path == "/servers"
+    assert post(c, "/servers", rows).status_code == 200

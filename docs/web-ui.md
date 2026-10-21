@@ -1,8 +1,8 @@
 # The web UI and the container image
 
 The container image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub (mirrored to `ghcr.io/honeybeartech/ubuntu-server-auto-setup`) holds everything the playbooks need
-(ansible-core, the collections, the playbooks and roles) plus a small web UI that lays out the options as
-forms and runs the playbooks for you. It is the easiest way to use the project on Windows, and works the
+(ansible-core, the collections, the playbooks and roles) plus a web UI, **USAS**, that lays out the options
+as forms and runs the playbooks for you. It is the easiest way to use the project on Windows, and works the
 same on Linux and macOS: you need only Docker.
 
 The UI writes an ordinary Ansible inventory and an Ansible Vault file, the same ones the command line uses,
@@ -64,6 +64,25 @@ docker exec usas rm /data/auth.json && docker restart usas && docker logs usas
 Sessions end after 2 hours without activity, after 12 hours in any case, when you sign out, and when the
 container restarts.
 
+## The interface
+
+![The run page in the dark theme: a provisioning run that succeeded, with its options and the coloured Ansible log](images/webui-run-dark.png)
+
+The UI opens in a **dark theme**. The theme switch at the bottom of the sidebar (on a phone: under **Menu**)
+offers **Dark**, **Light** and **System**, which follows the light or dark setting of your browser or
+operating system. The choice is kept for that browser in a cookie (`usas_theme`) and applied before the
+page is drawn, so pages don't flash in the other theme.
+
+The sidebar lists the pages in the order you need them and marks the set-up pages done or still to do.
+Below 960 pixels wide it folds into a top bar with a **Menu** button; the UI works down to a 375-pixel
+phone screen. Movement is kept to a minimum (a pulsing dot on a running run), and none at all when the
+system asks for reduced motion.
+
+![The Proxmox page in the light theme: the API settings and the last connection test with the cluster's nodes](images/webui-proxmox-light.png)
+
+The UI is an app in the browser and needs JavaScript; without it, each page says so. Every value it sends
+is checked again on the server, which is the only place that decides what is saved.
+
 ## Walking through it
 
 The overview lists the steps and whether each is done.
@@ -101,7 +120,10 @@ The overview lists the steps and whether each is done.
    firewall's SSH sources and rules for every server, and the Fail2Ban settings.
 6. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
    only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers or groups,
-   separated by commas). The run's output streams live; **Stop the run** interrupts it like Ctrl-C. A
+   separated by commas). The run's output streams live, with Ansible's status lines coloured (`ok`,
+   `changed`, `skipping`, `fatal`, the play recap's counts) and numbered. **Follow the output** keeps the
+   newest line in view; scrolling up pauses it. **Wrap long lines** wraps instead of scrolling sideways.
+   **Stop the run** interrupts it like Ctrl-C. A
    provisioning run stopped between creating the seed ISO and deleting it can leave the seed ISO on the
    node ([installing.md](installing.md#troubleshooting)). **History** keeps the last 200 runs with their
    logs.
@@ -190,11 +212,14 @@ What it does to protect them:
   minutes). The first password needs the setup code from the log.
 - **Sessions** are random 256-bit IDs kept in memory, in an `HttpOnly`, `SameSite=Strict` cookie (also
   `Secure` over HTTPS). Signing in issues a new ID; changing the password signs out every other session.
-- **CSRF**: every form carries a per-session token, and requests whose `Origin` or `Sec-Fetch-Site` header
-  says they came from another site are refused.
-- **Strict headers**: a Content Security Policy that allows only the UI's own scripts and styles, no
-  framing (`frame-ancestors 'none'`, `X-Frame-Options`), `nosniff`, no caching of pages, no referrer to
-  other sites.
+- **CSRF**: every post carries the session's token in an `X-CSRF-Token` header (a page on another site
+  can't set that header without the server's permission, which it never gives), and requests whose
+  `Origin` or `Sec-Fetch-Site` header says they came from another site are refused. The API answers no
+  cross-origin requests.
+- **Strict headers**: a Content Security Policy that allows only the UI's own scripts, styles and fonts and
+  nothing inline, no framing (`frame-ancestors 'none'`, `X-Frame-Options`), `nosniff`, no caching of pages
+  or API answers, no referrer to other sites. The app's files are built into the image (no CDN), so the UI
+  works on a network without internet access.
 - **Host check**: only the names in `USAS_ALLOWED_HOSTS` are served, and names other than `localhost`
   only over HTTPS.
 - **Secrets aren't shown again** once saved (the page says only that a value is saved), aren't written to
@@ -235,24 +260,31 @@ to the inventory, so a new release's default applies to it.
 
 ## HTTP endpoints
 
-The UI is a set of server-rendered HTML pages and forms, not an API for other programs (use the inventory
-and `ansible-playbook` for that), so there is no OpenAPI document. For reference:
+The UI is a React app (`webui/frontend`) served by FastAPI (`webui/usas_web`). Every page URL answers with
+the same small HTML page, after the same sign-in checks; the app then asks `/api/<page>` for the page's data
+and posts its forms there, with the same field names the forms always had. The API is the UI's own, not one
+for other programs (use the inventory and `ansible-playbook` for that), so there is no OpenAPI document.
+For reference:
 
 | Path | Methods | What |
 | --- | --- | --- |
 | `/healthz` | GET | `ok`; the container's health check. No sign-in. |
-| `/setup`, `/login`, `/logout` | GET, POST | First-run password, sign-in, sign-out. |
-| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/account` | GET, POST | The pages; POST saves (or tests) with the form's `action`. |
+| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
+| `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version and the theme. |
+| `/api/setup`, `/api/login`, `/api/logout`, `/api/account` | POST | First-run password, sign-in, sign-out, password change. |
+| `/api/theme` | POST | Remember the theme (`dark`, `light` or `system`) for this browser. |
+| `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
+| `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
+| `/api/run` | POST | Start a run. |
+| `/api/runs/<id>/stop` | POST | Interrupt the run. |
 | `/ssh/id_ed25519.pub` | GET | The UI's public key, as a download. |
-| `/run` | GET, POST | Choose and start a run. |
-| `/runs`, `/runs/<id>` | GET | The history and one run. |
 | `/runs/<id>/log` | GET | The run's log as text. |
 | `/runs/<id>/stream` | GET | The run's output as server-sent events, resuming from `Last-Event-ID`. |
-| `/runs/<id>/stop` | POST | Interrupt the run. |
-| `/static/*` | GET | The stylesheet, script and icon. Pages link them with a hash of each file's contents (`?v=`), so a browser fetches them again after an upgrade. No sign-in. |
-| `/favicon.ico` | GET | The icon (SVG). No sign-in. |
+| `/static/app/*` | GET | The app's script, stylesheet and fonts; their names carry a hash of their contents. No sign-in. |
+| `/static/favicon.svg`, `/favicon.ico` | GET | The icon (SVG), linked with a hash of its contents (`?v=`). No sign-in. |
 
-Every POST needs the form's `csrf_token`.
+Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms are sent as
+`multipart/form-data`. An API call without a sign-in answers 401 with where to sign in.
 
 ## Limitations
 
@@ -261,6 +293,7 @@ Every POST needs the form's `csrf_token`.
 - One password, no accounts or second factor. Passkeys were considered and are on the
   [roadmap](roadmap.md); they need a stable host name, which a localhost tool doesn't have.
 - One run at a time, and sessions don't survive a restart of the container.
+- It needs JavaScript (any current browser).
 - English only.
 
 ## Troubleshooting
@@ -269,6 +302,9 @@ Every POST needs the form's `csrf_token`.
   `USAS_ALLOWED_HOSTS` (and serve it over HTTPS).
 - **"Cross-site request refused" or "The form expired"**: reload the page and send the form again. Browser
   extensions that strip the `Origin` header cause the first.
+- **The page says "The web UI's app isn't built"**: you are running the UI from a checkout without
+  building the app. Run `make app` (or `npm ci` and `npm run build` in `webui/frontend`); `make ui` does it
+  for you. The container image always has it.
 - **The connection test says the certificate couldn't be verified**: add the cluster CA on the Proxmox page.
   If the API host is an IP address, the node's certificate must list that address; otherwise use the
   node's name.

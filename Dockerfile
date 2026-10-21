@@ -3,6 +3,24 @@
 # README: docker run -d -p 127.0.0.1:8080:8080 -v usas-data:/data honeybeartech/ubuntu-server-auto-setup
 # Base images are pinned by digest; Dependabot keeps them current (.github/dependabot.yml).
 
+# The web UI's app (webui/frontend), built into static files. Only those files reach the runtime image: no
+# Node, npm or node_modules. npm ci installs exactly the lock file's versions and checks each package's
+# integrity hash; no dependency runs an install script (.npmrc). The files don't depend on the platform, so this
+# stage runs on the build machine's own platform, also for a multi-arch build.
+FROM --platform=$BUILDPLATFORM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS frontend
+WORKDIR /build/webui/frontend
+COPY webui/frontend/package.json webui/frontend/package-lock.json webui/frontend/.npmrc ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY webui/frontend/tsconfig.json webui/frontend/vite.config.ts ./
+COPY webui/frontend/src ./src
+RUN npm run build \
+ && mkdir -p /build/licenses \
+ && cp node_modules/react/LICENSE /build/licenses/react.txt \
+ && cp node_modules/react-dom/LICENSE /build/licenses/react-dom.txt \
+ && cp node_modules/scheduler/LICENSE /build/licenses/scheduler.txt \
+ && cp node_modules/@fontsource/atkinson-hyperlegible-next/LICENSE /build/licenses/atkinson-hyperlegible-next.txt \
+ && cp node_modules/@fontsource/atkinson-hyperlegible-mono/LICENSE /build/licenses/atkinson-hyperlegible-mono.txt
+
 FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
@@ -41,7 +59,10 @@ COPY playbooks /app/playbooks
 COPY roles /app/roles
 COPY inventory/hosts.example.yml inventory/vault.example.yml /app/inventory/
 COPY webui/usas_web /app/webui/usas_web
+COPY --from=frontend /build/webui/usas_web/static/app /app/webui/usas_web/static/app
 COPY LICENSE /usr/share/licenses/ubuntu-server-auto-setup/LICENSE
+# The licences of what the app's files contain: React (MIT) and the Atkinson Hyperlegible fonts (OFL 1.1).
+COPY --from=frontend /build/licenses /usr/share/licenses/ubuntu-server-auto-setup/third-party
 # The version the web UI shows: the release workflow passes the tag without its v; local builds say "dev".
 ARG USAS_VERSION=dev
 ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \

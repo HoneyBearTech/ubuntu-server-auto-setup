@@ -138,29 +138,31 @@ this kind:
 | **Incorrect default permissions** (CWE-276) | Explicit file modes everywhere (`0600` seed files, `0440` sudoers validated with `visudo`, `0644` configuration); ansible-lint's `risky-file-permissions` rule. |
 | **Improper restriction of authentication attempts** (CWE-307) | SSH key-only, `MaxAuthTries 4`, UFW rate limit and Fail2Ban with incremental bans. |
 | **Improper privilege management** (CWE-269) | Least-privilege API token with privilege separation; no root SSH on servers. Passwordless sudo for the admin user is a documented default that can be turned off. |
-| **Use of components with known vulnerabilities** (CWE-1104) | Dependabot for the Python packages and Actions; dependency review on pull requests; the baseline upgrades packages and turns on unattended security upgrades on every server. |
+| **Use of components with known vulnerabilities** (CWE-1104) | Dependabot for the Python and npm packages and Actions; dependency review and osv-scanner on pull requests; the baseline upgrades packages and turns on unattended security upgrades on every server. |
 | **Weak password hashing** (CWE-916) | SHA-512 crypt with a random salt (key-stretched) for the admin password; SSH doesn't accept passwords at all. |
 | **Destructive operations without confirmation** (lockouts, wiped disks) | Existing VMs are skipped; the firewall opens SSH before enabling; a new SSH port is verified before the old one closes; the warning in the README and docs; `LIMIT=` and `--check --diff` for trying changes on one host. |
 | **CI/CD weaknesses** (untrusted input in workflows, excessive token permissions) | `pull_request` only (no `pull_request_target`), read-only top-level permissions, actions pinned by commit SHA, untrusted event data only through `env:`; CodeQL analyses the workflows and actionlint lints them. |
-| **Cross-site request forgery** (CWE-352) and **DNS rebinding** (CWE-350) | A per-session CSRF token on every form; requests whose `Origin` or `Sec-Fetch-Site` names another site are refused; `SameSite=Strict` cookies; only the configured host names are served (`webui/usas_web/main.py`). |
-| **Cross-site scripting** (CWE-79) and **clickjacking** (CWE-1021) | Jinja auto-escaping in every template; a Content Security Policy with `script-src 'self'` and no inline script; `frame-ancestors 'none'` and `X-Frame-Options: DENY`. |
+| **Cross-site request forgery** (CWE-352) and **DNS rebinding** (CWE-350) | A per-session CSRF token in the `X-CSRF-Token` header of every post (a header another site's page can't set without a CORS permission the server never gives); requests whose `Origin` or `Sec-Fetch-Site` names another site are refused; `SameSite=Strict` cookies; only the configured host names are served (`webui/usas_web/main.py`). |
+| **Cross-site scripting** (CWE-79) and **clickjacking** (CWE-1021) | React escapes every value it shows (the app sets no raw HTML) and the page shell is a Jinja template with auto-escaping; a Content Security Policy with `script-src 'self'`, `style-src 'self'` and `font-src 'self'`, no inline script or style (tests check the shell and the built files); `frame-ancestors 'none'` and `X-Frame-Options: DENY`. |
 | **Template injection into Ansible** (CWE-1336) | Every value the UI writes into the inventory or the Vault is tagged `!unsafe`, so Ansible never evaluates it (`webui/usas_web/store.py`; a unit test runs Ansible on such values). |
 | **Argument injection** (CWE-88) and **path traversal** (CWE-22) | `--limit=` takes only inventory host and group names; host names for `ssh` and `ssh-keyscan` are checked and passed after `--`; run IDs must match a fixed format before any file is opened. |
 | **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. |
 | **Open redirect** (CWE-601) | The sign-in page returns only to the UI's own pages. |
-| **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never rendered back; run logs mask the Vault's values; pages are `Cache-Control: no-store`. |
-| **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), and the web UI is Python, both memory-safe runtimes. |
+| **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never sent back (the API says only whether one is saved); run logs mask the Vault's values; pages and API answers are `Cache-Control: no-store`. |
+| **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), the web UI's server is Python and its app TypeScript run by the browser, all memory-safe runtimes. |
+| **Supply chain of the app's npm packages** (CWE-1357, CWE-506) | Exact versions with integrity hashes in `package-lock.json`, `npm ci` with install scripts off, versions at least two weeks old when added; only the built files reach the image; OSV, dependency review and Dependabot watch the lock file ([dependencies.md](dependencies.md)). |
 
 ## 5. Verification evidence
 
 - **Static analysis on every pull request**: yamllint, ansible-lint with the `production` profile (which
   includes its security-relevant rules), a syntax check of every playbook, actionlint, ruff (with its
-  bandit security rules) for the web UI, hadolint for the Dockerfile, and CodeQL for the workflows and the
-  Python code. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
+  bandit security rules) for the web UI's server, TypeScript's strict check for its app, hadolint for the
+  Dockerfile, and CodeQL for the workflows, the Python code and the app's TypeScript. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
 - **Web UI tests on every pull request**: unit tests (at least 80% statement coverage) of sign-in,
-  sessions, CSRF and Origin checks, the host check, every form and its validation against the roles'
-  patterns, the inventory and Vault files Ansible reads back, runs and their logs, and the pages'
-  accessibility structure; and a smoke test that builds the image and drives the UI against the mock
+  sessions, the CSRF header and Origin checks, the host check, every form's API and its validation against
+  the roles' patterns, the inventory and Vault files Ansible reads back, runs and their logs; the app's
+  tests of every page against a stand-in API, with axe-core, structural accessibility checks and the
+  contrast of every colour pair; and a smoke test that builds the image and drives the UI against the mock
   Proxmox API through a real `ansible-playbook` run ([testing.md](testing.md#the-web-ui)). Release images
   are also scanned with Trivy and fail on fixable high or critical vulnerabilities.
 - **Secret scanning**: gitleaks over the whole history on every change, plus GitHub secret scanning with

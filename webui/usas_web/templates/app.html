@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="{{ {'dark': 'dark', 'light': 'light'}.get(theme, 'dark light') }}">
+<title>{{ title }} · USAS</title>
+<link rel="icon" href="{{ assets['favicon.svg'] }}" type="image/svg+xml">
+{% if frontend %}{% for href in frontend.css %}<link rel="stylesheet" href="{{ href }}">
+{% endfor %}<script type="module" src="{{ frontend.js }}"></script>
+{% endif %}</head>
+<body>
+{# The app (webui/frontend) replaces what is inside #root; until then, and without JavaScript, this shows. #}
+<div id="root" data-csrf="{{ csrf }}" data-version="{{ version }}" data-signed-in="{{ 'true' if signed_in else 'false' }}">
+<a class="skip" href="#main">Skip to the content</a>
+<header class="boot"><p class="boot-brand">USAS</p></header>
+<main id="main" tabindex="-1" class="boot">
+<h1>{{ title }}</h1>
+<noscript><p>This web UI needs JavaScript. Allow scripts for this page and reload it.</p></noscript>
+{% if not frontend %}<p>The web UI's app isn't built. Run <code>npm ci</code> and <code>npm run build</code> in
+webui/frontend, then restart the server (see docs/web-ui.md).</p>{% endif %}
+</main>
+<footer class="boot"><p>USAS web UI {{ version }}</p></footer>
+</div>
+</body>
+</html>

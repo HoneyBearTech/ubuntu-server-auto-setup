@@ -11,50 +11,105 @@ terminal's accessibility.
 
 ## What is checked
 
-- **Every pull request** checks the structure of every page, signed out and signed in, empty and filled,
-  and with validation errors (`webui/tests/test_accessibility.py`): the page language is set, there is one
-  `<h1>`, the header, main and footer landmarks and the skip link are there, every form control has a
-  label (`<label for>` or, in the servers table, an `aria-label` naming the column and row), IDs are
-  unique, and every `for`, `aria-describedby`, `aria-labelledby` and in-page link points at an element
-  that exists. The pages with errors must have the error summary, focusable, with links to the fields.
-- **[axe-core](https://github.com/dequelabs/axe-core)** (4.10, WCAG 2.0, 2.1 and 2.2 A and AA rules plus
-  best practices) was run by hand in Google Chrome on every page in both the light and the dark theme when
-  the UI was built, with no violations. It runs again by hand when the UI changes, because it needs a real
-  browser and the project has no browser in CI.
-- **Colour contrast**: the palette in `webui/usas_web/static/app.css` was chosen for at least 4.5:1 for
-  text and 3:1 for borders and focus rings in both themes, and checked with axe. Statuses, errors and the
-  steps on the overview are written out in words ("Failed", "Error:", "To do") next to their colour.
-- **Keyboard use** was checked in the same browser: controls are reached with Tab in reading order and
-  show a visible 3-pixel focus ring; the skip link moves focus to the content; "More settings" sections
-  open with Enter or Space; a form sent with errors puts focus on the error summary, whose links move focus
-  to each field; no control captures Tab.
-- **Small screens**: at 375 pixels wide no page scrolls sideways (this found and fixed one bug in the
-  servers table); the servers table and the run history scroll inside their own focusable, labelled
-  region. Buttons, text fields and selects are at least 40 pixels tall; checkboxes and radio buttons are
-  20 pixels with their labels clickable next to them, and on touch screens the navigation links grow to
-  40 pixels (WCAG 2.2, 2.5.8).
+On **every pull request** (the required "Web UI tests" check):
+
+- **Every page the app draws** (`webui/frontend/test/a11y.test.tsx`): the overview, Proxmox, SSH key,
+  defaults, servers, hardening, run, history, a running and a finished run, the account page, sign-in,
+  first-run setup and the page for an unknown address, and the Proxmox, servers and sign-in pages with
+  validation errors, and the phone menu open. Each is checked with
+  **[axe-core](https://github.com/dequelabs/axe-core)** 4.14 (the WCAG 2.0 and 2.1 A and AA rules and best
+  practices), and with the project's own structural checks: one `<h1>`, the header, main and footer
+  landmarks and the skip link, a label for every control (`<label for>` or, in the servers table, an
+  `aria-label` naming the column and row), unique IDs, every `for`, `aria-describedby`, `aria-labelledby`
+  and `aria-controls` and every in-page link pointing at an element that exists, and a name for every
+  button. A form sent with errors must put focus on the error summary.
+- **Colour contrast of every colour pair** the UI uses (`webui/frontend/test/contrast.test.ts`), computed
+  as WCAG defines it from the colour tokens in `webui/frontend/src/styles/tokens.css`, in the dark and the
+  light theme: text, muted text, links, button labels on the accent, the selected navigation item, the
+  status colours on every surface and on their own badge tints, and the log's coloured lines need 4.5:1;
+  form borders, the focus ring, icons and the error summary's border need 3:1 (WCAG 1.4.3 and 1.4.11). The
+  test also checks that both themes define the same tokens and that "System" uses the light values when the
+  browser prefers light. axe can't measure contrast in the test's simulated browser, which doesn't lay pages
+  out; this test covers it instead.
+- **The HTML the server sends** for every page (`webui/tests/test_accessibility.py`): the language, a
+  title, one `<h1>`, the landmarks, the skip link, unique IDs and a message for browsers without
+  JavaScript; and nothing inline that the Content Security Policy would block.
+
+**By hand**, on 2026-10-21, with the Ember palette, in Google Chrome 155:
+
+- **axe-core 4.14 in the browser**, with real layout and so with contrast (WCAG 2.0, 2.1 and 2.2 A and AA
+  rules and best practices), on every signed-in page in the dark, light and system themes (30 page
+  checks), on the sign-in page in both themes, and at 375 pixels wide with the menu closed and open:
+  **no violations**. axe could not decide the contrast of a few elements that sit inside scrolling areas
+  (the last column of the servers table and the log's lines), because other content overlaps them while
+  scrolled; those colour pairs are among the ones the contrast test checks.
+  The run found one real problem, fixed before release: the theme switch faded colours for 160 ms, and
+  axe measured the navigation's old dark-theme grey on the new white background. Theme changes are now
+  instant.
+- **Keyboard use**: Tab reaches the skip link first, with a visible 3-pixel focus ring; Enter on it moves
+  focus to the page; Tab then reaches the controls in reading order. "More settings" sections open with
+  Enter or Space; a form sent with errors puts focus on the error summary, whose links move focus to each
+  field; after a change of page, focus moves to the new page's heading and the browser tab's title changes,
+  so screen readers announce the new page. No control captures Tab.
+- **Small screens**: at 375 pixels wide no page scrolls sideways; the sidebar folds into a top bar with a
+  **Menu** button (`aria-expanded`, `aria-controls`); the servers table and the run history scroll inside
+  their own focusable, labelled region. Buttons, text fields and selects are at least 40 pixels tall;
+  checkboxes and radio buttons are 20 pixels with their labels clickable next to them, and the switches
+  for the log are 36 by 22 pixels with their label (WCAG 2.2, 2.5.8).
+
+## The colours
+
+Dark is the default theme; light and "System" (follows `prefers-color-scheme`) are a click away and
+remembered for the browser. The accent is "Ember", a Proxmox-like orange: `#ff9447` on the dark theme and
+`#b2470a` on the light one. Lowest contrast of each against the page, a card and a raised surface:
+
+| Colour | Dark theme | Light theme | Needs |
+| --- | --- | --- | --- |
+| Body text | 13.1:1 | 15.5:1 | 4.5:1 |
+| Muted text (help, labels) | 6.3:1 | 5.9:1 | 4.5:1 |
+| Accent as a link | 7.2:1 | 4.8:1 | 4.5:1 |
+| Button label on the accent | 8.8:1 | 5.5:1 | 4.5:1 |
+| Focus ring | 9.0:1 | 4.8:1 | 3:1 |
+| Form control border | 3.2:1 | 3.3:1 | 3:1 |
+| Success, warning, error, info text | 8.2, 8.8, 6.3, 7.4:1 | 4.7, 5.1, 5.0, 5.0:1 | 4.5:1 |
+
+The test computes every pair from the token file, so these numbers can't drift from what ships. Statuses,
+errors and the steps on the overview are written out in words ("Failed", "Error:", "To do", and in the
+navigation "(done)" or "(to do)" for screen readers) next to their colour; the log's coloured lines start
+with Ansible's own words (`ok:`, `changed:`, `fatal:`). The accent and the warning colour are both orange:
+nothing uses the accent to mean a warning.
 
 ## How the UI is built for it
 
-- Server-rendered HTML with native controls only (inputs, selects, checkboxes, radio buttons,
-  `<details>`): no custom widgets that would need ARIA patterns. Every page works without JavaScript; the
-  script only streams run output and shows times in your time zone.
+- Native controls only (inputs, selects, checkboxes, radio buttons, `<details>`), styled but not replaced:
+  no custom widgets that would need ARIA patterns. The theme choice is three radio buttons; the log's
+  switches are checkboxes.
 - Every field has a visible label tied to it, and its help text (and error, if any) is announced with it
   through `aria-describedby`. Invalid fields have `aria-invalid` and a thicker border, not just a colour.
-- A form with errors comes back with an error summary at the top that takes focus, says how many problems
-  there are and links to each field, and with what you typed still in the fields (except passwords).
+- A form with errors shows an error summary at the top that takes focus, says how many problems there are
+  and links to each field, and keeps what you typed in the fields; an error in a "More settings" field
+  opens that section.
 - Each page has one `<h1>`, sections with headings, and grouped fields in `<fieldset>`s with legends.
-- Run output is in a labelled, focusable region that scrolls with the keyboard. It isn't a live region,
-  so a screen reader doesn't read every line of Ansible's output; the run's status is, and is announced
-  when the run ends.
-- Light and dark themes follow the system setting (`prefers-color-scheme`).
+- Messages after an action (saved, connected, a failed test) are in live regions: errors as alerts, the
+  rest announced politely.
+- Run output is in a labelled, focusable region that scrolls with the keyboard. It isn't a live region, so
+  a screen reader doesn't read every line of Ansible's output; the run's status is, and is announced when
+  the run ends. Line numbers are drawn by CSS, so they aren't copied or read out with the text.
+- Motion is limited to a pulsing dot on a running run and a short fade of buttons on hover; with
+  `prefers-reduced-motion` there is none.
+- The fonts are Atkinson Hyperlegible Next and Atkinson Hyperlegible Mono (SIL Open Font License 1.1),
+  designed by the Braille Institute for low-vision readers: letters that are easy to confuse, such as I, l
+  and 1 or 0 and O, look different. Text is 16 pixels by default and follows the browser's zoom and font
+  size.
 
 ## Known gaps
 
-- **No automated contrast or keyboard check in CI.** Contrast and keyboard use were checked by hand in one
-  browser; a regression would show only at the next manual check.
+- **No keyboard or screen-reader check in CI.** Keyboard use was checked by hand in one browser; a
+  regression would show only at the next manual check. axe-core runs in CI only in a simulated browser,
+  without contrast (which the token test covers).
 - **No screen-reader walk-through yet.** Nobody has yet done the full setup with NVDA, JAWS or VoiceOver.
   Reports from people who do are very welcome.
+- **It needs JavaScript.** Without it, each page says so and nothing else works.
 - **Run output is Ansible's text**, with long lines and many symbols; it reads poorly with a screen reader.
   Downloading the log and reading it in an editor helps.
 - **English only.** The UI isn't translated, and its text isn't yet extracted for translation.

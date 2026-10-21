@@ -32,7 +32,8 @@ copied into the repository ("vendored").
 | Lint and test tools (ansible-lint, yamllint, ruff, pytest, pytest-cov, httpx2) | `requirements-dev.txt` | minimum versions | `pip install -r requirements-dev.txt` (`make deps`) |
 | Web UI packages (FastAPI, uvicorn, python-multipart, argon2-cffi) | `requirements-webui.in` | minimum versions | `make deps`; the image installs `requirements-webui.txt` |
 | Python packages in the container image (the control-node and web UI packages, resolved) | `requirements-webui.txt`, compiled from `requirements-webui.in` | exact versions with SHA-256 hashes, wheels only | `pip install --require-hashes` in the `Dockerfile` |
-| Container image base (`python:3.12-slim`) and its Debian packages (`openssh-client`, `tzdata`) | `Dockerfile` | image digest; Debian packages at the security archive's current version | `docker build`, release workflow |
+| The web UI app's packages: React and the Atkinson Hyperlegible fonts in the app; Vite, TypeScript, Vitest, Testing Library, jsdom and axe-core to build and test it | `webui/frontend/package.json` | exact versions, and every package (also indirect ones) with its version and SHA-512 integrity hash in `webui/frontend/package-lock.json` | `npm ci --ignore-scripts` (`make app`, CI, the image's build stage) |
+| Container image bases (`node:24-slim` for the app's build stage, `python:3.14-slim`) and the Debian packages (`openssh-client`, `tzdata`) | `Dockerfile` | image digests; Debian packages at the security archive's current version | `docker build`, release workflow |
 | Ansible collections (`community.proxmox`, `community.general`, `ansible.posix`) | `requirements.yml` | version ranges | `ansible-galaxy collection install -r requirements.yml` (`make deps`) |
 | CI actions | `.github/workflows/*.yml` | full commit SHAs | GitHub Actions |
 | Python packages in CI (all of the above, resolved) | `requirements-ci.txt`, compiled from `requirements-ci.in` | exact versions with SHA-256 hashes (`pip install --require-hashes`) | CI and `make test` |
@@ -51,13 +52,19 @@ playbooks. CI and the container image, which the project builds itself, install 
 (`requirements-ci.txt`, `requirements-webui.txt`). The collections in the image are the newest in range at
 build time; the image lists them in `/app/collections/VERSIONS.txt`.
 
-The web UI has no JavaScript dependencies: its pages are rendered on the server and its one small script is
-the project's own, so there is no front-end build and nothing bundled from npm.
+The web UI's app is built from npm packages. `npm ci` installs exactly what `package-lock.json` lists and
+refuses a package whose contents don't match its recorded hash; no package runs an install script
+(`webui/frontend/.npmrc` sets `ignore-scripts`, and nothing in the tree needs one). Versions were chosen
+at least two weeks after their release. Only the build output reaches the container image: one script
+with React in it, one stylesheet and the font files, with the licences of React, its scheduler and the
+fonts in `/usr/share/licenses/ubuntu-server-auto-setup/third-party/`. Node, npm and the development tools
+stay in the image's build stage.
 
 ## Tracking dependencies
 
-- **Dependabot** proposes updates weekly for `requirements*.txt`, the GitHub Actions and the Docker base
-  images (the `Dockerfile` and the test images),
+- **Dependabot** proposes updates weekly for `requirements*.txt`, the web UI app's npm packages (the
+  development tools' minor and patch updates grouped in one pull request), the GitHub Actions and the
+  Docker base images (the `Dockerfile`, including the Node build stage, and the test images),
   and security updates as soon as an advisory appears. Patch and minor updates are approved by
   `.github/workflows/dependabot-auto-merge.yml` and merge automatically once every required check passes,
   including the integration tests that run every playbook. Major updates, updates without a version
@@ -70,14 +77,18 @@ the project's own, so there is no front-end build and nothing bundled from npm.
   dependency with a known vulnerability of moderate or higher severity, or with a license outside the
   allowlist.
 - **GitHub's dependency graph** and Dependabot security alerts watch the default branch between changes.
-- **osv-scanner** checks every requirements file on every pull request and push, including the lower bounds
-  in `requirements.txt` and what they pull in (the `Vulnerability scan (OSV)` check), and
+- **osv-scanner** checks every requirements file and the app's `package-lock.json` on every pull request
+  and push, including the lower bounds in `requirements.txt` and what they pull in (the
+  `Vulnerability scan (OSV)` check), and
   `tests/check_floors.py` checks every lower bound itself against OSV in the same check. The lower bounds are
-  kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy.
+  kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy. The npm
+  packages have no ranges to check: every version is exact.
 - Every release carries an SBOM (SPDX) of the source tree, and the container image an SBOM of its own
   contents, see [verifying-releases.md](verifying-releases.md).
 - **Every release image** is scanned with [Trivy](https://trivy.dev/) before it is pushed; a fixable
   vulnerability of high or critical severity in its operating system or Python packages stops the release.
+  The image holds no npm packages, only the app's built files; the npm packages are checked by OSV and
+  dependency review instead.
   Each release build also installs the Debian security updates published since the base image.
 
 ## Policy for vulnerabilities in dependencies
@@ -108,11 +119,13 @@ patched release is published.
 
 ## Policy for licenses
 
-The project's own code is MIT. Python dependencies must use one of these licenses (SPDX identifiers):
+The project's own code is MIT. Python and npm dependencies must use one of these licenses (SPDX
+identifiers):
 
 - Permissive: `MIT`, `MIT-0`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `0BSD`, `Zlib`,
   `Unlicense`, `CC0-1.0`, `BlueOak-1.0.0`, `PSF-2.0`, `Python-2.0`;
 - weak copyleft: `MPL-2.0`, `LGPL-2.1-only`, `LGPL-2.1-or-later`, `LGPL-3.0-only`, `LGPL-3.0-or-later`;
+- `OFL-1.1` **for fonts only** (the web UI's Atkinson Hyperlegible Next and Mono);
 - `GPL-3.0-only` and `GPL-3.0-or-later` **for Ansible itself and the Ansible project's own tools
   (`ansible-lint`, `yamllint`) and collections only**: the project exists to be run by Ansible, which loads
   the playbooks as data; nothing from those packages is copied into this repository or its releases.
@@ -142,9 +155,9 @@ A release is only published when, at the time of the release:
 
 The project's own code is analysed on every pull request by ansible-lint (the `production` profile,
 including rules such as `no-log-password`, `risky-file-permissions`, `risky-shell-pipe` and
-`command-instead-of-shell`), yamllint, actionlint, ruff (with bandit's security rules) for the web UI,
-hadolint for the Dockerfile, and CodeQL for the workflows and the Python code, as part of the required
-checks.
+`command-instead-of-shell`), yamllint, actionlint, ruff (with bandit's security rules) for the web UI's
+server, TypeScript's strict type check for its app, hadolint for the Dockerfile, and CodeQL for the
+workflows, the Python code and the app's TypeScript, as part of the required checks.
 
 | Finding | Threshold |
 | --- | --- |

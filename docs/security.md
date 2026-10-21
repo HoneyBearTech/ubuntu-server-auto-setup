@@ -74,10 +74,12 @@ and in [web-ui.md](web-ui.md#security).
 - Sessions are random, kept in memory, carried in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` over
   HTTPS), renewed at sign-in and ended by sign-out, inactivity (2 hours), age (12 hours), a password
   change (for other sessions) and a restart.
-- Every form needs the session's CSRF token, and requests that say they come from another site (`Origin`,
-  `Sec-Fetch-Site`) are refused. Only the configured host names are served, against DNS rebinding, and
-  names other than `localhost` only over HTTPS. Pages can't be framed and load only the UI's own script
-  and stylesheet (Content Security Policy).
+- Every post needs the session's CSRF token in an `X-CSRF-Token` header, and requests that say they come
+  from another site (`Origin`, `Sec-Fetch-Site`) are refused; the API answers no cross-origin requests.
+  Only the configured host names are served, against DNS rebinding, and names other than `localhost` only
+  over HTTPS. Pages can't be framed and load only the UI's own script, stylesheet and fonts, nothing inline
+  (Content Security Policy). The app in the browser only shows what the server answers: every value is
+  checked on the server.
 - The API token and the admin password are stored only in the Ansible Vault file; once saved they are never
   sent back to the browser; run logs mask them. The SSH private key never leaves the data volume.
 - Every value the UI writes into the inventory is validated against the roles' own allowlist patterns (or

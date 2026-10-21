@@ -20,7 +20,7 @@
 
 Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
 load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).
-Run them from a checkout with `make`, or from a container image with a small web UI that lays out every
+Run them from a checkout with `make`, or from a container image with a web UI, **USAS**, that lays out every
 option and runs the playbooks for you, on Windows, Linux or macOS.
 
 > [!WARNING]
@@ -109,7 +109,14 @@ docker logs usas    # the setup code for the first sign-in
 ```
 
 Then open <http://localhost:8080>, set a password, and work through the pages: Proxmox, SSH key, defaults,
-servers, hardening, run. [`docker-compose.yml`](docker-compose.yml) does the same with extra hardening.
+servers, hardening, run. It opens in a dark theme; light, or your system's choice, is one click away.
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/webui-overview-light.png">
+  <img alt="The web UI's overview: the set-up steps as cards, marked done or to do, and the recent runs with their status" src="docs/images/webui-overview-dark.png">
+</picture>
+
+ [`docker-compose.yml`](docker-compose.yml) does the same with extra hardening.
 **The UI holds your Proxmox API token and a root SSH key: keep it on `127.0.0.1`** and read
 [exposing it](docs/web-ui.md#exposing-it-beyond-localhost) before you publish it anywhere else.
 [docs/web-ui.md](docs/web-ui.md) explains every step, where the data lives and how to back it up.
@@ -161,9 +168,10 @@ You need:
 | `make lint` | `yamllint .`, `ansible-lint` and `ruff check`. |
 | `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
 | `make test` | Run the integration tests against containers and a mock Proxmox API (needs Docker; see [docs/testing.md](docs/testing.md)). |
-| `make webui-test` | Run the web UI's unit tests with coverage. |
+| `make app` | Install the web UI app's npm packages and build it (needs Node 24). |
+| `make webui-test` | Run the web UI's unit tests with coverage: the server's (pytest) and the app's (TypeScript check, Vitest). |
 | `make image`, `make smoke` | Build the container image; build it and smoke-test it against the mock Proxmox API. |
-| `make ui` | Run the web UI from the checkout on <http://localhost:8080>, with its data in `.webui-data/`. |
+| `make ui` | Build the app, then run the web UI from the checkout on <http://localhost:8080>, with its data in `.webui-data/`. |
 | `make site` | Build the installer, provision missing VMs, apply the baseline. |
 | `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox node(s). |
 | `make provision` | Create and auto-install the VMs that don't exist yet. |

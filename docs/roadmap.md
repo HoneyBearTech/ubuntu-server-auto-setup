@@ -39,7 +39,9 @@ that run on each pull request.
   project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
 - Passkeys as an optional second way to sign in, for setups served under a fixed host name over HTTPS.
 - Several Proxmox nodes per inventory (choosing the node per server).
-- An automated contrast and keyboard check of the pages in CI, and a screen-reader walk-through
+- Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
+  Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
+- An automated keyboard check of the pages in CI (a real browser), and a screen-reader walk-through
   ([accessibility.md](accessibility.md)).
 
 **Supply chain**

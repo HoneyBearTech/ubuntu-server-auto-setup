@@ -1,0 +1,656 @@
+{
+ "proxmox": {
+  "title": "Proxmox API",
+  "fields": [
+   {
+    "name": "pve_api_host",
+    "label": "API host",
+    "kind": "text",
+    "help": "Host name or IP address of a Proxmox VE node (the API listens on it).",
+    "required": true,
+    "advanced": false,
+    "variable": "pve_api_host",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "pve_api_port",
+    "label": "API port",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_api_port",
+    "default": "8006",
+    "choices": null
+   },
+   {
+    "name": "pve_api_user",
+    "label": "API user",
+    "kind": "text",
+    "help": "The user that owns the token, user@realm.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_api_user",
+    "default": "ansible@pve",
+    "choices": null
+   },
+   {
+    "name": "pve_api_token_id",
+    "label": "Token name",
+    "kind": "text",
+    "help": "The token's name only (automation, not ansible@pve!automation).",
+    "required": true,
+    "advanced": false,
+    "variable": "vault_pve_api_token_id",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "pve_api_token_secret",
+    "label": "Token secret",
+    "kind": "secret",
+    "help": "The token's secret, a UUID.",
+    "required": true,
+    "advanced": false,
+    "variable": "vault_pve_api_token_secret",
+    "default": null,
+    "choices": null,
+    "saved": true
+   },
+   {
+    "name": "pve_validate_certs",
+    "label": "Verify the API's TLS certificate",
+    "kind": "bool",
+    "help": "Leave this on. For the node's self-signed certificate, add the cluster CA below instead.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_validate_certs",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "pve_node",
+    "label": "Node name",
+    "kind": "text",
+    "help": "The Proxmox node the VMs are created on, as Proxmox names it. Proxmox node name.",
+    "required": true,
+    "advanced": false,
+    "variable": "pve_node",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "pve_storage",
+    "label": "VM disk storage",
+    "kind": "text",
+    "help": "Storage for the VM disks.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_storage",
+    "default": "local-lvm",
+    "choices": null
+   },
+   {
+    "name": "pve_efidisk_format",
+    "label": "EFI disk format",
+    "kind": "choice",
+    "help": "Raw for LVM/ZFS/Ceph, qcow2 for directory storage.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_efidisk_format",
+    "default": "raw",
+    "choices": [
+     "raw",
+     "qcow2"
+    ]
+   },
+   {
+    "name": "pve_bridge",
+    "label": "Network bridge",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_bridge",
+    "default": "vmbr0",
+    "choices": null
+   },
+   {
+    "name": "pve_vlan",
+    "label": "VLAN tag",
+    "kind": "int",
+    "help": "VLAN tag, empty for none.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_vlan",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "pve_iso_storage",
+    "label": "ISO storage",
+    "kind": "text",
+    "help": "A Proxmox storage that allows ISO images (Content: ISO image), such as local or an NFS share for the whole cluster. Its folder on the node is found automatically. The Proxmox storage for the ISOs (it must allow ISO images; a storage shared by the cluster, such as NFS, works for every node). Its folder on the node is asked from Proxmox (`pvesm path`); set pve_iso_dir only to override that, for an unusual setup.",
+    "required": false,
+    "advanced": true,
+    "variable": "pve_iso_storage",
+    "default": "local",
+    "choices": null
+   },
+   {
+    "name": "pve_api_timeout",
+    "label": "API request timeout (seconds)",
+    "kind": "int",
+    "help": "How long one Proxmox API request may take. Allocating disks can keep the API busy. Seconds Proxmox may take to answer one API request. Allocating disks (LVM-thin, ZFS, Ceph) can keep the API busy for longer than the Proxmox modules' own 5-second default.",
+    "required": false,
+    "advanced": true,
+    "variable": "pve_api_timeout",
+    "default": "60",
+    "choices": null
+   },
+   {
+    "name": "ubuntu_point_release",
+    "label": "Ubuntu point release",
+    "kind": "text",
+    "help": "The installer ISO's version, such as 26.04.1. Change it when Ubuntu replaces the point release.",
+    "required": false,
+    "advanced": true,
+    "variable": "ubuntu_point_release",
+    "default": "26.04.1",
+    "choices": null
+   }
+  ],
+  "values": {
+   "pve_api_host": "pve.example.lan",
+   "pve_api_port": "8006",
+   "pve_api_user": "ansible@pve",
+   "pve_api_token_id": "automation",
+   "pve_api_token_secret": "",
+   "pve_validate_certs": true,
+   "pve_node": "hephaestus",
+   "pve_storage": "local-lvm",
+   "pve_efidisk_format": "raw",
+   "pve_bridge": "vmbr0",
+   "pve_vlan": "",
+   "pve_iso_storage": "local",
+   "pve_api_timeout": "60",
+   "ubuntu_point_release": "26.04.1"
+  },
+  "cluster": {
+   "name": "olympus",
+   "nodes": {
+    "ares": "online",
+    "hephaestus": "online",
+    "hermes": "offline"
+   },
+   "iso_storages": {
+    "local": "dir",
+    "synology-nfs": "nfs, shared"
+   }
+  },
+  "ca": []
+ },
+ "defaults": {
+  "title": "Defaults for every server",
+  "fields": [
+   {
+    "name": "github_user",
+    "label": "GitHub user",
+    "kind": "text",
+    "help": "Whose public keys (https://github.com/<user>.keys) are installed for the admin user. Keys from https://github.com/<github_user>.keys plus any extras.",
+    "required": false,
+    "advanced": false,
+    "variable": "github_user",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "github_keys_url",
+    "label": "Keys URL",
+    "kind": "text",
+    "help": "Where the keys come from. Leave the default unless you mirror them.",
+    "required": false,
+    "advanced": true,
+    "variable": "github_keys_url",
+    "default": "https://github.com/{{ github_user }}.keys",
+    "choices": null
+   },
+   {
+    "name": "admin_extra_ssh_keys",
+    "label": "Extra public keys",
+    "kind": "list",
+    "help": "One public key per line, installed besides the GitHub ones.",
+    "required": false,
+    "advanced": false,
+    "variable": "admin_extra_ssh_keys",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "admin_user",
+    "label": "Admin user",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "admin_user",
+    "default": "sysadmin",
+    "choices": null
+   },
+   {
+    "name": "admin_password",
+    "label": "Admin password",
+    "kind": "secret",
+    "help": "For the console and sudo; SSH stays key-only. Hashed (SHA-512) before it reaches the installer.",
+    "required": true,
+    "advanced": false,
+    "variable": "vault_admin_password",
+    "default": null,
+    "choices": null,
+    "saved": true
+   },
+   {
+    "name": "timezone",
+    "label": "Time zone",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "timezone",
+    "default": "Etc/UTC",
+    "choices": null
+   },
+   {
+    "name": "net_gateway",
+    "label": "Gateway",
+    "kind": "text",
+    "help": "",
+    "required": true,
+    "advanced": false,
+    "variable": "net_gateway",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "net_prefix",
+    "label": "Network prefix length",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "net_prefix",
+    "default": "24",
+    "choices": null
+   },
+   {
+    "name": "net_dns",
+    "label": "DNS servers",
+    "kind": "list",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "net_dns",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "net_search",
+    "label": "Search domains",
+    "kind": "list",
+    "help": "Each part of a domain (between dots) must be a valid host name.",
+    "required": false,
+    "advanced": false,
+    "variable": "net_search",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "autoinstall_storage_layout",
+    "label": "Disk layout",
+    "kind": "choice",
+    "help": "Lvm, direct or zfs.",
+    "required": false,
+    "advanced": false,
+    "variable": "autoinstall_storage_layout",
+    "default": "lvm",
+    "choices": [
+     "lvm",
+     "direct",
+     "zfs"
+    ]
+   },
+   {
+    "name": "vm_secure_boot",
+    "label": "Secure Boot keys",
+    "kind": "bool",
+    "help": "Pre-enroll Secure Boot keys in the EFI disk.",
+    "required": false,
+    "advanced": true,
+    "variable": "vm_secure_boot",
+    "default": "false",
+    "choices": null
+   }
+  ],
+  "values": {
+   "github_user": "octocat",
+   "github_keys_url": "https://github.com/{{ github_user }}.keys",
+   "admin_extra_ssh_keys": "",
+   "admin_user": "sysadmin",
+   "admin_password": "",
+   "timezone": "Europe/Berlin",
+   "net_gateway": "10.0.0.1",
+   "net_prefix": "24",
+   "net_dns": "10.0.0.1\n1.1.1.1",
+   "net_search": "example.lan",
+   "autoinstall_storage_layout": "lvm",
+   "vm_secure_boot": false
+  },
+  "ui_key": "",
+  "authorize_ui_key": true,
+  "timezones": [
+   "America/Chicago",
+   "Etc/UTC",
+   "Europe/Berlin"
+  ]
+ },
+ "hardening": {
+  "title": "Hardening",
+  "fields": [
+   {
+    "name": "ssh_port",
+    "label": "SSH port",
+    "kind": "int",
+    "help": "Anything other than 22 switches sshd from ssh.socket to ssh.service; the firewall rule moves too.",
+    "required": false,
+    "advanced": false,
+    "variable": "ssh_port",
+    "default": "22",
+    "choices": null
+   },
+   {
+    "name": "ssh_allow_users",
+    "label": "Allowed SSH users",
+    "kind": "list",
+    "help": "Empty allows every user. If set, it must include the admin user. Limit who may log in over SSH. Empty means no AllowUsers line. Keep admin_user in it.",
+    "required": false,
+    "advanced": false,
+    "variable": "ssh_allow_users",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "ssh_permit_root_login",
+    "label": "Root login over SSH",
+    "kind": "choice",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "ssh_permit_root_login",
+    "default": "no",
+    "choices": [
+     "no",
+     "prohibit-password",
+     "without-password",
+     "forced-commands-only",
+     "yes"
+    ]
+   },
+   {
+    "name": "admin_sudo_nopasswd",
+    "label": "Passwordless sudo for the admin user",
+    "kind": "bool",
+    "help": "Convenient for unattended runs, but anyone with an authorized key has root.",
+    "required": false,
+    "advanced": false,
+    "variable": "admin_sudo_nopasswd",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "ufw_ssh_limit",
+    "label": "Rate-limit SSH in the firewall",
+    "kind": "bool",
+    "help": "Rate-limit SSH (ufw \"limit\": 6 connections in 30 s per source) instead of a plain allow.",
+    "required": false,
+    "advanced": false,
+    "variable": "ufw_ssh_limit",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "ufw_ssh_sources",
+    "label": "SSH allowed from",
+    "kind": "list",
+    "help": "\"any\", or addresses and networks (CIDR), one per line. Where SSH is allowed from. \"any\", or a list of addresses/CIDRs.",
+    "required": false,
+    "advanced": false,
+    "variable": "ufw_ssh_sources",
+    "default": "any",
+    "choices": null
+   },
+   {
+    "name": "ufw_allow",
+    "label": "Extra firewall rules (all servers)",
+    "kind": "list",
+    "help": "One rule per line: port or range, optional /tcp or /udp, optional \"from\" a network. Example: 443/tcp or 5432/tcp from 10.0.0.0/24. Extra rules, e.g.",
+    "required": false,
+    "advanced": false,
+    "variable": "ufw_allow",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "fail2ban_ignoreip",
+    "label": "Never ban",
+    "kind": "list",
+    "help": "Your own management networks, so a typo can't lock you out. Never ban these (add your admin networks so a typo can't lock you out).",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_ignoreip",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "fail2ban_maxretry",
+    "label": "Failures before a ban",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_maxretry",
+    "default": "5",
+    "choices": null
+   },
+   {
+    "name": "fail2ban_findtime",
+    "label": "Counting window",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_findtime",
+    "default": "10m",
+    "choices": null
+   },
+   {
+    "name": "fail2ban_bantime",
+    "label": "First ban",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_bantime",
+    "default": "1h",
+    "choices": null
+   },
+   {
+    "name": "fail2ban_bantime_increment",
+    "label": "Longer bans for repeat offenders",
+    "kind": "bool",
+    "help": "Each repeat offence bans longer, up to fail2ban_bantime_maxtime.",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_bantime_increment",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "fail2ban_bantime_maxtime",
+    "label": "Longest ban",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_bantime_maxtime",
+    "default": "1w",
+    "choices": null
+   },
+   {
+    "name": "fail2ban_sshd_mode",
+    "label": "sshd filter mode",
+    "kind": "choice",
+    "help": "Normal, ddos, extra or aggressive.",
+    "required": false,
+    "advanced": false,
+    "variable": "fail2ban_sshd_mode",
+    "default": "normal",
+    "choices": [
+     "normal",
+     "ddos",
+     "extra",
+     "aggressive"
+    ]
+   },
+   {
+    "name": "fail2ban_banaction",
+    "label": "Ban action",
+    "kind": "text",
+    "help": "Empty keeps Ubuntu's default (nftables).",
+    "required": false,
+    "advanced": true,
+    "variable": "fail2ban_banaction",
+    "default": null,
+    "choices": null
+   }
+  ],
+  "values": {
+   "ssh_port": "22",
+   "ssh_allow_users": "",
+   "ssh_permit_root_login": "no",
+   "admin_sudo_nopasswd": true,
+   "ufw_ssh_limit": true,
+   "ufw_ssh_sources": "any",
+   "ufw_allow": "",
+   "fail2ban_ignoreip": "10.0.0.0/24",
+   "fail2ban_maxretry": "5",
+   "fail2ban_findtime": "10m",
+   "fail2ban_bantime": "1h",
+   "fail2ban_bantime_increment": true,
+   "fail2ban_bantime_maxtime": "1w",
+   "fail2ban_sshd_mode": "normal",
+   "fail2ban_banaction": ""
+  }
+ },
+ "servers": {
+  "columns": [
+   {
+    "name": "name",
+    "label": "Name",
+    "kind": "text",
+    "help": "",
+    "required": true,
+    "advanced": false,
+    "variable": "name",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "ansible_host",
+    "label": "IP address",
+    "kind": "text",
+    "help": "",
+    "required": true,
+    "advanced": false,
+    "variable": "ansible_host",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "pve_vmid",
+    "label": "VM ID",
+    "kind": "int",
+    "help": "Required, fixed per host so reruns can find the VM.",
+    "required": true,
+    "advanced": false,
+    "variable": "pve_vmid",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "vm_cores",
+    "label": "Cores",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_cores",
+    "default": "2",
+    "choices": null
+   },
+   {
+    "name": "vm_memory_mb",
+    "label": "Memory (MB)",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_memory_mb",
+    "default": "2048",
+    "choices": null
+   },
+   {
+    "name": "vm_disk_gb",
+    "label": "Disk (GB)",
+    "kind": "int",
+    "help": "",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_disk_gb",
+    "default": "32",
+    "choices": null
+   },
+   {
+    "name": "ufw_ports",
+    "label": "Extra firewall rules",
+    "kind": "list",
+    "help": "Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24.",
+    "required": false,
+    "advanced": false,
+    "variable": "ufw_ports",
+    "default": null,
+    "choices": null
+   }
+  ],
+  "rows": [
+   {
+    "name": "web-01",
+    "ansible_host": "10.0.0.61",
+    "pve_vmid": "4061",
+    "vm_cores": "",
+    "vm_memory_mb": "",
+    "vm_disk_gb": "",
+    "ufw_ports": "443/tcp"
+   },
+   {
+    "name": "db-01",
+    "ansible_host": "10.0.0.70",
+    "pve_vmid": "4070",
+    "vm_cores": "",
+    "vm_memory_mb": "8192",
+    "vm_disk_gb": "",
+    "ufw_ports": ""
+   }
+  ]
+ }
+}

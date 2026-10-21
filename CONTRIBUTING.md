@@ -32,8 +32,9 @@ ansible-galaxy collection install -r requirements.yml
 make lint        # yamllint ., ansible-lint and ruff check
 make syntax      # syntax-check playbooks/site.yml against inventory/hosts.example.yml
 make test        # integration tests against containers and a mock Proxmox API (docs/testing.md)
-make webui-test  # the web UI's unit tests
-make ui          # the web UI from this checkout on http://localhost:8080 (data in .webui-data/)
+make app         # install the web UI app's npm packages (npm ci) and build it (needs Node 24)
+make webui-test  # the web UI's unit tests: the server (pytest) and the app (TypeScript check, Vitest)
+make ui          # build the app, then run the web UI from this checkout on http://localhost:8080 (data in .webui-data/)
 make smoke       # build the image and smoke-test it (needs Docker)
 ```
 
@@ -58,12 +59,13 @@ together is in [docs/architecture.md](docs/architecture.md).
 | gitleaks | no secrets in the change or anywhere in the history | `gitleaks git .` | every pull request and push to `main` (required) |
 | ruff | the web UI's Python: style, bugs and bandit's security rules, as configured in `ruff.toml` | `ruff check` (part of `make lint`) | every pull request and push to `main` (required, in "Lint + syntax check") |
 | hadolint | the Dockerfile | `docker run --rm -i hadolint/hadolint < Dockerfile` | every pull request and push to `main` (required, in "Lint + syntax check") |
-| CodeQL | the GitHub Actions workflows and the Python code (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
-| osv-scanner | known vulnerabilities in every requirements file, including the lower bounds and what they pull in | `docker run --rm -v "$PWD:/src:ro" ghcr.io/google/osv-scanner scan source -r /src` | every pull request and push to `main` (required) |
+| CodeQL | the GitHub Actions workflows, the Python code and the web UI app's TypeScript (CodeQL has no Ansible analysis) | n/a | every pull request, `main` and weekly |
+| TypeScript | the web UI app and its tests, strict type check | `npm run check` in `webui/frontend` (part of `make webui-test`) | every pull request and push to `main` (required, in "Web UI tests") |
+| osv-scanner | known vulnerabilities in every requirements file and the app's `package-lock.json`, including the lower bounds and what they pull in | `docker run --rm -v "$PWD:/src:ro" ghcr.io/google/osv-scanner scan source -r /src` | every pull request and push to `main` (required) |
 | Dependency review | new or changed dependencies with known vulnerabilities or disallowed licenses | n/a | every pull request |
 | DCO | every commit is signed off | `git log` | every pull request (required) |
 | Integration tests | every playbook end to end: the installer ISO is remastered, VMs are created and installed through a mock Proxmox API (including a failed install that must clean up), and the baseline is applied to an Ubuntu 26.04 container and checked (SSH settings, firewall rules, Fail2Ban jail, sudo, refused password and root logins, key sync, port change). Every playbook must change nothing on a second run, and at least 80% of role tasks must run | `make test` (needs Docker) | every pull request and push to `main` (required) |
-| Web UI tests | the web UI's sign-in, guards, forms and validation against the roles' patterns, the inventory and Vault it writes, runs, and the pages' accessibility structure; at least 80% statement coverage | `make webui-test` | every pull request and push to `main` |
+| Web UI tests | the server: sign-in, guards, the API behind every page and form and its validation against the roles' patterns, the inventory and Vault it writes, runs, the page shell; the app: every page against a stand-in API, axe-core and structural accessibility checks, the contrast of every colour pair; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Image smoke test | the container image, driven like a browser against the mock Proxmox API, with a real playbook run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and before a release image is pushed |
 | Fuzzing | the templates and expressions that turn inventory values into files and commands, with arbitrary inputs (Atheris) | `make fuzz` (Linux x86-64) | every pull request and push to `main`, longer weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
@@ -90,9 +92,16 @@ can't be merged.
   back to the browser.
 - **Dockerfile**: [hadolint](https://github.com/hadolint/hadolint); base images pinned by digest, Python
   packages installed with `--require-hashes`, a non-root `USER`.
-- **Web UI pages**: server-rendered, working without JavaScript, with native form controls, a visible
-  label for every control and help and errors tied to it with `aria-describedby`; no inline script or
-  style (the Content Security Policy forbids them); see [docs/accessibility.md](docs/accessibility.md).
+- **TypeScript** (the web UI app in `webui/frontend`): `strict` TypeScript, React function components,
+  no dependency beyond those in `package.json` without a reason in the pull request (each one adds to the
+  supply chain; see [docs/dependencies.md](docs/dependencies.md)). Add packages with `npm install
+  --save-exact` and commit `package-lock.json`.
+- **Web UI pages**: native form controls styled with the tokens in `src/styles/tokens.css` (no colour
+  outside that file, and a contrast pair in `test/contrast.test.ts` for a new one), a visible label for
+  every control and help and errors tied to it with `aria-describedby`; no inline script or style, no
+  `dangerouslySetInnerHTML` and no `data:` URLs (the Content Security Policy forbids them); every check of
+  a value happens on the server, the app only shows its answer; see
+  [docs/accessibility.md](docs/accessibility.md).
 - **Web UI fields**: a field for a role variable names it and takes its default and allowlist pattern from
   the role (`webui/usas_web/schema.py`); don't copy a role's pattern or default into the UI.
 - **Roles**: every variable a role reads is listed in its `defaults/main.yml` with a comment saying what it
@@ -114,9 +123,9 @@ can't be merged.
   playbook or role does must add or extend a case in the integration tests (`tests/`, see
   [docs/testing.md](docs/testing.md)) covering what should happen and, where it applies, what should be
   refused, and must keep `make lint`, `make syntax` and `make test` passing, including the 80% task coverage
-  floor. A change to the web UI or the image must add or extend a test in `webui/tests/` (and in the smoke
-  test, for what only the image shows) and keep `make webui-test` above 80% statement coverage and
-  `make smoke` passing. This is mandatory: the maintainer doesn't merge behaviour changes without them.
+  floor. A change to the web UI or the image must add or extend a test in `webui/tests/` (the server) or
+  `webui/frontend/test/` (the app), and in the smoke test for what only the image shows, and keep
+  `make webui-test` above 80% statement coverage for each and `make smoke` passing. This is mandatory: the maintainer doesn't merge behaviour changes without them.
 - **Bug fixes must add a regression test** to the integration tests that fails without the fix, unless the
   bug can only happen on real hardware or a real Proxmox node; then the pull request says why and how the
   fix was verified.

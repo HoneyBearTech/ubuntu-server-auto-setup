@@ -5,6 +5,7 @@ exclude_paths:
   - collections/
   - .github/
   - .ansible/
+  - webui/frontend/node_modules/
 mock_roles: []
 skip_list:
   # Role variables are the inventory interface and are shared across roles
