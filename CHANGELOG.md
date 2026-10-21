@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+The web UI becomes USAS, a React app with a dark theme; passwordless sudo is removed after the first baseline
+run; the UI's files are versioned by content and release, with a favicon; the README and the Docker Hub page
+are branded; Dependabot groups the app's updates.
+
 ### Upgrading
 
 - **Passwordless sudo is now removed by default.** `admin_sudo_nopasswd` defaults to `false`: the next
@@ -15,6 +21,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   can work unattended), and later runs use `ansible_become_password`. Keep that set to the admin password,
   as the example inventory and the web UI do, or set `admin_sudo_nopasswd: true` to keep the old behaviour.
   The baseline refuses to remove passwordless `sudo` if no password is set, so nobody is locked out of it.
+- **The web UI needs JavaScript now.** Its page addresses, its port (8080) and its `/data` volume are the
+  same, so upgrade as before (`start.ps1 -Update`, or `docker pull` and recreate the container with the same
+  volume): the password, settings, inventory, Vault, SSH key and run history carry over. Anything that
+  posted to the old pages' forms directly must post to `/api/<page>` with the CSRF token in an
+  `X-CSRF-Token` header ([docs/web-ui.md](docs/web-ui.md#http-endpoints)).
+- **Running the web UI from a checkout needs Node.js 24**: `make ui` builds the app first (`make app`). The
+  container image needs nothing new.
 
 ### Added
 
@@ -46,6 +59,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   install scripts and watched by Dependabot, OSV and dependency review; the runtime image holds only the
   built files (no Node or npm). The Content Security Policy allows the app's own fonts (`font-src 'self'`)
   and still nothing inline.
+- Dependabot keeps the app's npm packages current: development tools come as one grouped pull request,
+  `react` and `react-dom` (with their type packages) always move together, and the image's Node.js build
+  stage follows long-term-support releases only.
 
 ### Fixed
 
@@ -240,7 +256,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.0
 [0.2.3]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.3
 [0.2.2]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.2
 [0.2.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.1

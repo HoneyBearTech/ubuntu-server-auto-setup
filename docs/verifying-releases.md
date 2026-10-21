@@ -53,10 +53,10 @@ It prints the verified attestation, including the commit and the workflow run. T
 ## The container image
 
 Check the image's signature before you run it (`start.ps1 -Verify` does the same on Windows). The examples use
-0.2.0; use the version you pull, or `latest`.
+0.3.0; use the version you pull, or `latest`.
 
 ```sh
-cosign verify docker.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
+cosign verify docker.io/honeybeartech/ubuntu-server-auto-setup:0.3.0 \
   --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -65,7 +65,7 @@ It proves the image was pushed by the release workflow on a version tag. Its bui
 GitHub attestation:
 
 ```sh
-gh attestation verify oci://docker.io/honeybeartech/ubuntu-server-auto-setup:0.2.0 \
+gh attestation verify oci://docker.io/honeybeartech/ubuntu-server-auto-setup:0.3.0 \
   --repo HoneyBearTech/ubuntu-server-auto-setup \
   --signer-workflow HoneyBearTech/ubuntu-server-auto-setup/.github/workflows/release.yml
 ```
