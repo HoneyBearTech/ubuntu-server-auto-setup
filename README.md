@@ -1,4 +1,9 @@
-# ubuntu-server-auto-setup
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/usas-banner-dark.svg">
+    <img alt="USAS, Ubuntu Server Auto Setup: a shield with two server units, and the name" src="docs/images/usas-banner-light.svg" width="520">
+  </picture>
+</h1>
 
 [![CI](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/checks.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/checks.yml)
 [![CodeQL](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/codeql.yml)
@@ -18,10 +23,14 @@
 [![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
 [![ansible-core 2.20](https://img.shields.io/badge/ansible--core-2.20.7%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
 
-Ansible playbooks that install Ubuntu Server 26.04 on fresh Proxmox VE VMs with no hands on the keyboard,
-load your GitHub SSH keys, and apply a hardened baseline (UFW, Fail2Ban, SSH hardening, unattended upgrades).
-Run them from a checkout with `make`, or from a container image with a web UI, **USAS**, that lays out every
-option and runs the playbooks for you, on Windows, Linux or macOS.
+**Ubuntu Server on Proxmox VE, installed hands-off and hardened: from Ansible, or from a web UI in one
+container.**
+
+ubuntu-server-auto-setup (USAS for short) is a set of Ansible playbooks that install Ubuntu Server 26.04 on
+fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys, and apply a hardened baseline
+(UFW, Fail2Ban, SSH hardening, unattended upgrades). Run them from a checkout with `make`, or from the
+container image, whose web UI lays out every option and runs the playbooks for you, on Windows, Linux or
+macOS.
 
 > [!WARNING]
 > **Provisioning creates VMs, and the installer wipes the target VM's disk.** `make provision` only
@@ -57,14 +66,20 @@ option and runs the playbooks for you, on Windows, Linux or macOS.
 
 ## What it does
 
-Three playbooks, run from your own machine (the "control node"), plus `playbooks/site.yml` that runs all
-three in order:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/usas-flow-dark.svg">
+  <img alt="Four steps: 1, the installer ISO, Ubuntu 26.04 checked and remastered on the node; 2, a Proxmox VM created through the API with a per-host seed ISO; 3, an unattended install with no keyboard, using autoinstall and your GitHub keys; 4, a hardened server with SSH, UFW, Fail2Ban and unattended upgrades" src="docs/images/usas-flow-light.svg">
+</picture>
+
+Three playbooks, run from your own machine (the "control node") or from the container image, plus
+`playbooks/site.yml` that runs all three in order:
 
 1. **`playbooks/build-installer.yml`** runs on your Proxmox node(s) (inventory group `proxmox_nodes`) over
    SSH as root. It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
    Ubuntu's published `SHA256SUMS`, and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
-   asks before wiping disks). Both ISOs go into the node's ISO storage (`/var/lib/vz/template/iso`).
+   asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
+   the playbook asks Proxmox for its folder, so shared storage such as NFS works too).
 2. **`playbooks/provision-vms.yml`** handles every host in the group `ubuntu_servers` whose VM (by
    `pve_vmid`) doesn't exist yet. It fetches your public keys from `https://github.com/<github_user>.keys`,
    renders the installer's answers (hostname, static IP, the admin user with a SHA-512 hashed password from
@@ -109,23 +124,32 @@ docker logs usas    # the setup code for the first sign-in
 ```
 
 Then open <http://localhost:8080>, set a password, and work through the pages: Proxmox, SSH key, defaults,
-servers, hardening, run. It opens in a dark theme; light, or your system's choice, is one click away.
-
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/webui-overview-light.png">
-  <img alt="The web UI's overview: the set-up steps as cards, marked done or to do, and the recent runs with their status" src="docs/images/webui-overview-dark.png">
-</picture>
-
- [`docker-compose.yml`](docker-compose.yml) does the same with extra hardening.
+servers, hardening, run. Your settings, the Vault and the SSH key live in the `usas-data` volume.
+[`docker-compose.yml`](docker-compose.yml) does the same with extra hardening (a read-only root file
+system, no capabilities). The same image is mirrored at `ghcr.io/honeybeartech/ubuntu-server-auto-setup`;
+tags are `X.Y.Z`, `X.Y` and `latest`, for `linux/amd64` and `linux/arm64`, signed with cosign
+([verifying releases](docs/verifying-releases.md)). `start.ps1 -Update` pulls a newer image, `-Verify`
+checks its signature first, `-Stop` stops it and `-Port 8081` uses another port.
 **The UI holds your Proxmox API token and a root SSH key: keep it on `127.0.0.1`** and read
 [exposing it](docs/web-ui.md#exposing-it-beyond-localhost) before you publish it anywhere else.
 [docs/web-ui.md](docs/web-ui.md) explains every step, where the data lives and how to back it up.
+
+### The web UI
+
+It opens in a dark theme; light, or your system's choice, is one click away and remembered for your
+browser. It works down to a phone's width.
+
+| | Dark (the default) | Light |
+| --- | --- | --- |
+| **Overview**: the steps, what is done, the recent runs | <img alt="The overview in the dark theme: five set-up steps as cards marked done or to do, and the recent runs with their status" src="docs/images/webui-overview-dark.png" width="400"> | <img alt="The overview in the light theme" src="docs/images/webui-overview-light.png" width="400"> |
+| **Proxmox**: the node is picked from the cluster's nodes after a connection test | <img alt="The Proxmox page in the dark theme: the node name is a dropdown of the cluster's nodes with their status, beside the last connection test" src="docs/images/webui-proxmox-dark.png" width="400"> | <img alt="The Proxmox page in the light theme, with the node dropdown" src="docs/images/webui-proxmox-light.png" width="400"> |
+| **A live run**: Ansible's output as it happens, coloured, with Stop | <img alt="A baseline run in progress in the dark theme: a Running badge, Stop the run, and the log streaming with coloured PLAY, TASK and skipping lines" src="docs/images/webui-run-live-dark.png" width="400"> | <img alt="A run in progress in the light theme" src="docs/images/webui-run-live-light.png" width="400"> |
 
 ### From a checkout: the command line
 
 You need:
 
-- a control node (Linux or macOS) with Python 3.11 or later and `git`;
+- a control node (Linux or macOS) with Python 3.12 or later (what ansible-core 2.20 needs) and `git`;
 - one or more Proxmox VE 8 or 9 nodes that you can reach over SSH as `root` with a key;
 - a Proxmox API token with the privileges listed in [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token);
 - free static IP addresses on the VMs' network, and a GitHub account with your SSH public keys on it.
@@ -216,12 +240,13 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `pve_api_user` | `ansible@pve` | The user that owns the API token. |
 | `pve_api_token_id`, `pve_api_token_secret` | `""` | Set them to the Vault values. |
 | `pve_validate_certs` | `true` | Verify the Proxmox API's TLS certificate. Leave it on; see [running it securely](#running-it-securely). |
+| `pve_api_timeout` | `60` | Seconds each Proxmox API call may take (disk allocation can be slow). |
 
 **Proxmox nodes** (group `proxmox_nodes`): each inventory host name must match the Proxmox node name, with
-`ansible_host` and `ansible_user: root`. The ISO location is set by `pve_iso_storage` (default `local`)
-and `pve_iso_dir` (default `/var/lib/vz/template/iso`); the Ubuntu release by `ubuntu_release` (`26.04`)
-and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3 seconds) and `installer_iso_rebuild`
-(`false`) control the remastered ISO.
+`ansible_host` and `ansible_user: root`. The ISO location is set by `pve_iso_storage` (default `local`); its
+folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The Ubuntu release is
+set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3
+seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 
 **New VMs** (group `ubuntu_servers`, used by `provision-vms.yml`)
 
@@ -252,6 +277,18 @@ and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3 seconds) and
 | `apt_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
 | `reboot_if_required` | `false` | Reboot after upgrades when the server asks for it (otherwise the run reports it). |
 | `unattended_upgrades_auto_reboot` | `false` | Let unattended upgrades reboot the server, at `unattended_upgrades_reboot_time` (`04:00`). |
+
+## Supported versions
+
+| What | Supported |
+| --- | --- |
+| Installed on new VMs | Ubuntu Server 26.04 LTS (amd64) |
+| Hardened by the baseline | Ubuntu Server 24.04 LTS and 26.04 LTS, including servers this project didn't install |
+| Hypervisor | Proxmox VE 8 and 9 |
+| Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |
+| Container image | Windows (Docker Desktop with WSL 2), Linux and macOS; `linux/amd64` and `linux/arm64`; Python 3.14 and ansible-core 2.20 inside |
+
+[SUPPORT.md](SUPPORT.md) says which releases get fixes, and for how long.
 
 ## Running it securely
 
@@ -294,4 +331,6 @@ last commit that has it is
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The USAS mark, the banner and the diagrams in `docs/images/` are the project's own work under
+the same license; their lettering is outlined from the Atkinson Hyperlegible Next and Mono fonts (SIL Open
+Font License 1.1), which the web UI also uses.

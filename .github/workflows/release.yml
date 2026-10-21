@@ -183,7 +183,8 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      # The README as the Docker Hub page, with relative links made absolute. Docker Hub's API needs a token
+      # docs/dockerhub.md as the Docker Hub page (the README uses HTML that Docker Hub doesn't render, and is
+      # close to its size limit). Docker Hub's API needs a token
       # with Read, Write, Delete scope for this. A failure here only leaves the old page text, so it doesn't
       # stop the release (the image is already pushed and signed); the job log shows it as a warning.
       - name: Update the Docker Hub description
@@ -193,9 +194,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: honeybeartech/ubuntu-server-auto-setup
-          short-description: Hands-off Ubuntu Server 26.04 on Proxmox VE with a hardened baseline, from a web UI.
-          readme-filepath: ./README.md
-          enable-url-completion: true
+          short-description: "USAS: Ubuntu Server on Proxmox VE, installed hands-off and hardened, from a web UI."
+          # A shorter overview for Docker Hub, with absolute image and link URLs (tests/check_dockerhub.py):
+          # Docker Hub doesn't render <picture> or Mermaid, nor relative URLs inside HTML, and keeps at most
+          # 25,000 bytes.
+          readme-filepath: ./docs/dockerhub.md
+          enable-url-completion: false
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

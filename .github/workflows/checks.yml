@@ -58,6 +58,11 @@ jobs:
       - name: Lint Python (ruff)
         run: ruff check --output-format github
 
+      # The Docker Hub overview the release publishes: within Docker Hub's size limit, Markdown it renders,
+      # absolute URLs only.
+      - name: Check the Docker Hub overview
+        run: python3 tests/check_dockerhub.py
+
       - name: Lint the Dockerfile (hadolint)
         run: >-
           docker run --rm -i
