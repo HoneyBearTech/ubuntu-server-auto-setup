@@ -320,7 +320,10 @@ Each release's notes list the exact ansible-core and collection versions its che
 - **Sudo needs the admin password.** The installer grants passwordless `sudo` only so the first baseline
   run can work unattended; that run removes it, so a stolen SSH key alone isn't root. Keep
   `ansible_become_password` set to the admin password (as in the example inventory); set
-  `admin_sudo_nopasswd: true` only if you accept that any authorized key is root.
+  `admin_sudo_nopasswd: true` only if you accept that any authorized key is root. Ubuntu 26.04's `sudo` is
+  sudo-rs, whose password prompt Ansible doesn't recognise yet, so the playbooks become root with the
+  classic sudo it also ships (`/usr/bin/sudo.ws`); give your own playbooks
+  `ansible_become_exe: /usr/bin/sudo.ws` for 26.04 servers too.
 - **Put your own management network in `fail2ban_ignoreip`**, and double-check `ssh_port`,
   `ufw_ssh_sources` and `ufw_allow` before the first baseline run on a server that's already in use.
 - **Seed files are temporary.** The seed ISO holds the password hash. Provisioning deletes it once the

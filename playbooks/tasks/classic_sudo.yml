@@ -1,0 +1,43 @@
+---
+# Ubuntu 26.04's sudo is sudo-rs, which wraps the password prompt Ansible waits for in "[sudo: ...] Password:",
+# so becoming root times out once passwordless sudo is gone (ansible-core 2.20 and 2.21 don't recognise it).
+# The classic sudo is installed next to it as sudo.ws and prints the prompt as given. Runs before anything
+# becomes root; an ansible_become_exe set in the inventory is left alone.
+- name: Look for the classic sudo
+  ansible.builtin.stat:
+    path: /usr/bin/sudo.ws
+  become: false
+  register: classic_sudo
+  when: ansible_become_exe is not defined
+  tags: [always]
+
+- name: Become root with the classic sudo
+  ansible.builtin.set_fact:
+    ansible_become_exe: /usr/bin/sudo.ws
+  when: classic_sudo.stat.exists | default(false)
+  tags: [always]
+
+- name: Check which sudo the server has
+  ansible.builtin.command: sudo --version
+  become: false
+  register: classic_sudo_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ansible_become_exe is not defined
+  tags: [always]
+
+# Stop before anything changes rather than at the first task after passwordless sudo is removed.
+- name: Fail if Ansible couldn't give sudo the admin password
+  ansible.builtin.assert:
+    that: >-
+      admin_sudo_nopasswd | default(false) | bool
+      or not (classic_sudo_version.stdout | default('')) is match('sudo-rs')
+    fail_msg: >-
+      sudo on {{ inventory_hostname }} is sudo-rs, whose password prompt Ansible doesn't recognise, and the
+      classic sudo (/usr/bin/sudo.ws) isn't installed: once passwordless sudo is removed, becoming root would
+      time out. Install the sudo package (it provides /usr/bin/sudo.ws), set ansible_become_exe to a sudo that
+      prints the prompt it is given, or keep passwordless sudo with admin_sudo_nopasswd: true.
+    quiet: true
+  when: classic_sudo_version is not skipped
+  tags: [always]

@@ -52,7 +52,8 @@ run; your own `~/.ssh` is never touched. The steps:
 6. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,
    Fail2Ban follows, and a rerun on the new port changes nothing.
 7. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
-   become password.
+   become password. The server's `sudo` is sudo-rs, as on Ubuntu Server 26.04, so this goes through the
+   classic sudo (`/usr/bin/sudo.ws`); with that hidden, the baseline must stop before changing anything.
 8. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
    that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
    expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
