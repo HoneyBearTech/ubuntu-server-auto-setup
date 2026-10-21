@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-21
+
+Extra SSH keys, the web UI's own included, are installed again; `--check --diff` works on a server the
+baseline hasn't run on yet; a pre-release checklist on real Proxmox VE, the tested ansible-core and
+collection versions in the release notes, and how to pin the Proxmox host key and certificate.
+
 ### Added
 
 - A pre-release checklist on real Proxmox VE (`docs/release-checklist.md`): what the maintainer checks on
@@ -25,11 +31,6 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
-- [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
-  virtual environment the Proxmox modules don't read the system's trust store.
-
-### Fixed
-
 - Keys in `admin_extra_ssh_keys`, including the web UI's own key, were left out of `authorized_keys` and the
   installer's configuration whenever `github_user` was set (since 0.2.0), and the baseline's exclusive key
   sync removed them. They are installed again.
@@ -38,6 +39,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Fail2Ban and other services that the run would install are skipped in check mode until they exist. A check
   run with a new `ssh_port` no longer tries to reconnect on a port sshd isn't using yet, and one with an
   `admin_user` that doesn't exist yet no longer fails on its `authorized_keys`.
+- [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
+  virtual environment the Proxmox modules don't read the system's trust store.
 
 ## [0.3.0] - 2026-10-21
 
@@ -287,7 +290,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.1
 [0.3.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.0
 [0.2.3]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.3
 [0.2.2]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.2
