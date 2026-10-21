@@ -1,5 +1,5 @@
 {% extends "section.html" %}
-{% from "_macros.html" import csrf_field, field %}
+{% from "_macros.html" import csrf_field, field, node_field %}
 {% block intro %}
 <p>The Proxmox VE API and the node the VMs are created on. The token needs the privileges listed in
 <a href="https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/installing.md#2-create-the-proxmox-api-token">installing.md</a>.
@@ -13,7 +13,10 @@ The token is stored in the encrypted Vault and never shown again.</p>
 </fieldset>
 <fieldset>
   <legend>Placement</legend>
-  {% for x in f if x.name not in ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id", "pve_api_token_secret", "pve_validate_certs") and not x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
+  {% for x in f if x.name not in ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id", "pve_api_token_secret", "pve_validate_certs") and not x.advanced %}
+  {%- if x.name == "pve_node" and cluster and cluster.nodes %}{{ node_field(x, values, errors, cluster) }}
+  {%- else %}{{ field(x, values, errors, config) }}{% if x.name == "pve_node" %}<p class="help">Use <strong>Test the connection</strong> to pick the node from a list of the cluster's nodes.</p>{% endif %}{% endif %}
+  {%- endfor %}
   <details>
     <summary>More settings</summary>
     {% for x in f if x.advanced %}{{ field(x, values, errors, config) }}{% endfor %}
@@ -24,7 +27,7 @@ The token is stored in the encrypted Vault and never shown again.</p>
 {% block after_buttons %}
 <div aria-live="polite">
 {% if test_result %}
-<p class="flash flash-ok" role="status">Connected to Proxmox VE {{ test_result.version }}. Nodes: {{ test_result.nodes|join(", ") }}.
+<p class="flash flash-ok" role="status">Connected to Proxmox VE {{ test_result.version }}{% if test_result.cluster %}, cluster {{ test_result.cluster }}{% endif %}. Nodes: {{ test_result.nodes|join(", ") }}. The node name is now a list of them.
 {% if values.pve_node and values.pve_node not in test_result.nodes %}<strong>The node name above isn't one of them.</strong>{% endif %}
 Nothing was saved yet.</p>
 {% elif test_error %}

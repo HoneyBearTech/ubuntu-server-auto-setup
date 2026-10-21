@@ -65,3 +65,23 @@
 {% macro when(ts) -%}
 <time datetime="{{ ts|int }}" data-epoch="{{ ts|int }}">{{ ts|int }}</time>
 {%- endmacro %}
+
+{# The Proxmox node as a dropdown of the cluster's nodes from the last connection test (cluster.nodes: name -> status). #}
+{% macro node_field(f, values, errors, cluster) %}
+{%- set id = "f-" ~ f.name -%}
+{%- set err = errors.get(f.name) -%}
+{%- set value = values.get(f.name) or "" -%}
+{%- set described = [id ~ "-help"] + ([id ~ "-error"] if err else []) -%}
+<div class="field{% if err %} has-error{% endif %}">
+  <label for="{{ id }}">{{ f.label }} <span class="req">(required)</span></label>
+  <select id="{{ id }}" name="{{ f.name }}" aria-describedby="{{ described|join(' ') }}"{% if err %} aria-invalid="true"{% endif %}>
+    {% if not value %}<option value="" selected disabled>Choose a node</option>
+    {% elif value not in cluster.nodes %}<option value="{{ value }}" selected>{{ value }} (not in the cluster)</option>{% endif %}
+    {% for name, status in cluster.nodes|dictsort %}
+    <option value="{{ name }}"{% if name == value %} selected{% endif %}>{{ name }} ({{ status }})</option>
+    {% endfor %}
+  </select>
+  <p class="help" id="{{ id }}-help">{% if cluster.name %}The nodes of cluster <strong>{{ cluster.name }}</strong>{% else %}The nodes the API reports{% endif %}, from the last connection test; test again to refresh the list. {{ f.help }} <span class="var">Variable <code>{{ f.name }}</code>.</span></p>
+  {% if err %}<p class="error" id="{{ id }}-error"><span class="visually-hidden">Error: </span>{{ err }}</p>{% endif %}
+</div>
+{% endmacro %}

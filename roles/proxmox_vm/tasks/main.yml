@@ -41,11 +41,36 @@
     url: "{{ pve_api_url }}/cluster/resources?type=vm"
     headers: "{{ pve_api_headers }}"
     validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
   register: pve_vms
   delegate_to: localhost
   become: false
   check_mode: false
   no_log: "{{ pve_hide_secrets }}"
+
+- name: List the cluster's nodes
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_nodes
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
+# Proxmox node names are case-sensitive (usually the lowercase host name), and a wrong one only fails
+# later, inside the API call that creates the VM.
+- name: Check that pve_node is one of them
+  vars:
+    pve_node_names: "{{ pve_nodes.json.data | map(attribute='node') | sort }}"
+  ansible.builtin.assert:
+    that: pve_node in pve_node_names
+    fail_msg: >-
+      pve_node '{{ pve_node }}' isn't a node in this cluster; its nodes are {{ pve_node_names | join(', ') }}.
+      {% if pve_node | lower in (pve_node_names | map('lower')) %}Node names are case-sensitive.{% endif %}
+    quiet: true
 
 - name: Check whether the cluster already has VM {{ pve_vmid }}
   ansible.builtin.set_fact:

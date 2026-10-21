@@ -69,6 +69,7 @@ example shows a typical value.
 | `pve_validate_certs` | `true` | Verify the API's TLS certificate. |
 | `pve_hide_secrets` | `true` | Hide the token and the password hash from task output; turn off only while debugging. |
 | `pve_node` | `""` | The node the VM is created on (required). |
+| `pve_api_timeout` | `60` | Seconds one Proxmox API request may take before it fails (the Proxmox modules' own default is 5, too short while disks are allocated). |
 | `pve_ssh_host` | `"{{ pve_node }}"` | The inventory host used to reach that node over SSH. |
 | `pve_vmid` | `""` | The VM ID (required, fixed per host). |
 | `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Disk storage and the EFI disk format (`qcow2` on directory storage). |

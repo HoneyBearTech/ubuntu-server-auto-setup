@@ -98,6 +98,7 @@
         api_user: "{{ pve_api_user }}"
         api_token_id: "{{ pve_api_token_id }}"
         api_token_secret: "{{ pve_api_token_secret }}"
+        api_timeout: "{{ pve_api_timeout | int }}"
         validate_certs: "{{ pve_validate_certs }}"
         node: "{{ pve_node }}"
         vmid: "{{ pve_vmid | int }}"
@@ -139,6 +140,7 @@
         method: POST
         headers: "{{ pve_api_headers }}"
         validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
       delegate_to: localhost
       become: false
       no_log: "{{ pve_hide_secrets }}"
@@ -148,6 +150,7 @@
         url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/current"
         headers: "{{ pve_api_headers }}"
         validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
       register: pve_vm_status
       until: pve_vm_status.json is defined and pve_vm_status.json.data.status == 'stopped'
       retries: "{{ (vm_install_timeout | int) // (vm_install_poll_interval | int) }}"
@@ -162,6 +165,7 @@
         method: PUT
         headers: "{{ pve_api_headers }}"
         validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
         body_format: form-urlencoded
         body:
           delete: ide2,ide3
@@ -202,6 +206,7 @@
     method: POST
     headers: "{{ pve_api_headers }}"
     validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
   delegate_to: localhost
   become: false
   no_log: "{{ pve_hide_secrets }}"

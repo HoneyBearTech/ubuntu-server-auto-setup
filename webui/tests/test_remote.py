@@ -101,3 +101,22 @@ def test_preview_problems(monkeypatch, response, message):
 def test_preview_needs_http():
     with pytest.raises(RemoteProblem, match="https"):
         preview_keys("file:///etc/passwd")
+
+
+def test_proxmox_node_status_and_cluster_name(monkeypatch):
+    nodes = Response(data={"data": [{"node": "pve-2", "status": "offline"}, {"node": "pve-1", "status": "online"}]})
+    cluster = Response(data={"data": [{"type": "cluster", "name": "homelab"}, {"type": "node", "name": "pve-1"}]})
+    result = run(monkeypatch, {"version": Response(data={"data": {"version": "9.1.1"}}), "nodes": nodes,
+                               "status": cluster})
+    assert result.nodes == ["pve-1", "pve-2"]
+    assert result.status == {"pve-1": "online", "pve-2": "offline"}
+    assert result.cluster == "homelab"
+
+
+@pytest.mark.parametrize("status", [Response(status=403), Response(data={"data": [{"type": "node"}]}),
+                                    Response(data=None), requests.exceptions.Timeout()])
+def test_proxmox_cluster_name_is_optional(monkeypatch, status):
+    # A single node has no cluster entry, and a token without Sys.Audit can't read /cluster/status at all.
+    result = run(monkeypatch, {"version": Response(data={"data": {"version": "9.1.1"}}),
+                               "nodes": Response(data={"data": [{"node": "pve"}]}), "status": status})
+    assert result.nodes == ["pve"] and result.status == {"pve": "unknown"} and result.cluster == ""

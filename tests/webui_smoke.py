@@ -97,6 +97,9 @@ def main() -> None:
     status, url, text = ui.post("/proxmox", {"action": "test", **api})
     check("Connected to Proxmox VE 9.1.1" in text and "pve-test" in text, "the connection test passes with the CA",
           text)
+    _, _, page = ui.get("/proxmox")
+    check('<select id="f-pve_node" name="pve_node"' in page and ">pve-test (online)</option>" in page
+          and "mock-cluster" in page, "the node is a dropdown of the cluster's nodes after the test")
     check(TOKEN_SECRET not in text, "the page doesn't show the token secret")
     status, url, text = ui.post("/proxmox", {"action": "save", **api})
     check(url.endswith("/proxmox") and "Saved the Proxmox settings" in text, "the Proxmox settings are saved", text)

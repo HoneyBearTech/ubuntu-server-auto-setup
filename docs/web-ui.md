@@ -70,8 +70,11 @@ The overview lists the steps and whether each is done.
 
 1. **Proxmox**: the API host and port, the token's user, name and secret, and whether to verify the API's
    TLS certificate (keep it on). **Test the connection** calls the API with what you typed, without
-   saving, and lists the cluster's nodes. Then the node the VMs are created on, the storage, the bridge and
-   an optional VLAN tag. The token needs the privileges in
+   saving the form, and lists the cluster's nodes with their status (and the cluster's name, if the token
+   may read it). From then on the node the VMs are created on is a dropdown of those nodes, such as
+   `hephaestus (online)`; node names are case-sensitive, and a name that isn't in the cluster is refused.
+   Test again to refresh the list (it is kept in `webui.json`). Then the storage, the bridge and an
+   optional VLAN tag. The token needs the privileges in
    [installing.md](installing.md#2-create-the-proxmox-api-token).
 
    Proxmox nodes use certificates from the cluster's own CA. Paste `/etc/pve/pve-root-ca.pem` from the
@@ -118,6 +121,7 @@ directories):
 | `ssh/known_hosts` | The trusted host keys: the Proxmox node's, and each new VM's (added by provisioning). |
 | `pve-ca.pem`, `ca-bundle.pem` | The cluster CA you saved, and that CA together with the public ones. |
 | `auth.json` | The UI password's argon2id hash. |
+| `webui.json` | The cluster's name and nodes from the last connection test, for the node dropdown. |
 | `runs/` | The run history: one `.json` and one `.log` per run. |
 
 **The Vault password is in the same volume by default**, so the encryption protects `vault.yml` when it is

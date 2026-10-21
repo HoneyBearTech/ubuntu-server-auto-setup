@@ -7,6 +7,7 @@ Ansible never treats it as a template, whatever it contains; only the few templa
 and the API token) are in inventory/group_vars/all/vault.yml, encrypted with Ansible Vault.
 """
 
+import json
 import os
 import secrets
 import tempfile
@@ -119,6 +120,29 @@ class Store:
     def write_secrets(self, values: dict[str, str]) -> None:
         plain = dump_yaml({k: Unsafe(values[k]) for k in VAULT_NAMES if values.get(k)})
         write_private(self.settings.vault_file, self._vault().encrypt(plain.encode()))
+
+    # --- UI-only settings (webui.json) ---------------------------------------------------------------------
+
+    def _ui_settings(self) -> dict[str, Any]:
+        path = self.settings.settings_file
+        try:
+            data = json.loads(path.read_text()) if path.exists() else {}
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def cluster(self) -> dict[str, Any]:
+        """The cluster's name and nodes ({"name": ..., "nodes": {name: status}}) from the last connection test."""
+        cluster = self._ui_settings().get("cluster") or {}
+        nodes = cluster.get("nodes") if isinstance(cluster, dict) else None
+        if not isinstance(nodes, dict):
+            return {}
+        return {"name": str(cluster.get("name") or ""), "nodes": {str(k): str(v) for k, v in nodes.items()}}
+
+    def save_cluster(self, name: str, nodes: dict[str, str]) -> None:
+        data = self._ui_settings()
+        data["cluster"] = {"name": name, "nodes": dict(sorted(nodes.items()))}
+        write_private(self.settings.settings_file, json.dumps(data, indent=2) + "\n")
 
     # --- Inventory ---------------------------------------------------------------------------------------
 
