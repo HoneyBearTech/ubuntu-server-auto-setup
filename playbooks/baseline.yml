@@ -24,6 +24,9 @@
       when: baseline_ssh_probe is not skipped
       tags: [always]
 
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: tasks/classic_sudo.yml
+
     - name: Gather facts
       ansible.builtin.setup:
       tags: [always]

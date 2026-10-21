@@ -7,6 +7,9 @@
   gather_facts: false
   vars:
     want_port: "{{ expect_port | default(22) | int }}"
+  pre_tasks:
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
   tasks:
     - name: Read the effective sshd settings
       ansible.builtin.command: sshd -T

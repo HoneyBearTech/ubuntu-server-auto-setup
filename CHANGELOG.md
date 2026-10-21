@@ -10,14 +10,19 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [0.4.0] - 2026-10-21
 
-Provisioning no longer detaches the installer before a slow-starting VM is running; Ubuntu's GPG signature
-on `SHA256SUMS` is verified before the ISO checksum is trusted; extra SSH keys, the web UI's own included,
-are installed again; `--check --diff` works on a fresh server. New: optional extra hardening and update and
-ban notifications (all off by default), a read-only VMs page in the web UI, browser and screen-reader
-checks of the web UI, and a pre-release checklist on real Proxmox VE.
+The first baseline run on Ubuntu 26.04 completes again (sudo-rs), and provisioning no longer detaches the
+installer before a slow-starting VM is running; Ubuntu's GPG signature on `SHA256SUMS` is verified before
+the ISO checksum is trusted; extra SSH keys, the web UI's own included, are installed again; `--check
+--diff` works on a fresh server. New: optional extra hardening and update and ban notifications (all off by
+default), a read-only VMs page in the web UI, browser and screen-reader checks of the web UI, and a
+pre-release checklist on real Proxmox VE.
 
 ### Upgrading
 
+- **From 0.3.0, on Ubuntu 26.04: run the baseline again.** A first baseline run there stopped right after it
+  removed passwordless sudo, so SSH hardening, the firewall and Fail2Ban were never applied; the next run
+  applies them. Key logins and `sudo` with the admin password worked all along. Your own playbooks that
+  become root on 26.04 with a password need `ansible_become_exe: /usr/bin/sudo.ws` as well.
 - **A mirror in `ubuntu_iso_base_url` must publish `SHA256SUMS.gpg`** next to `SHA256SUMS`, signed by
   Ubuntu's CD image key: `make build-installer` now stops before the download if the signature is missing
   or wrong. releases.ubuntu.com and old-releases.ubuntu.com publish it. The Proxmox node gets `gpgv` if it
@@ -84,6 +89,12 @@ checks of the web UI, and a pre-release checklist on real Proxmox VE.
 
 ### Fixed
 
+- The first baseline run stopped on Ubuntu 26.04 (since 0.3.0) right after it removed passwordless sudo:
+  26.04's `sudo` is sudo-rs, which wraps the password prompt Ansible waits for, so the next task timed out
+  "waiting for privilege escalation prompt" before SSH, the firewall and Fail2Ban were set up. The baseline
+  now becomes root with the classic sudo (`/usr/bin/sudo.ws`) where it is installed, unless
+  `ansible_become_exe` is set; where only sudo-rs is installed, it stops before changing anything and says
+  what to set. The test server image now uses sudo-rs as its `sudo`, like Ubuntu Server 26.04.
 - Provisioning could leave a new VM booting from an empty disk (since 0.1.0). Proxmox answers a start
   request before the VM is running, and when the start took a moment the first status check still read
   "stopped": the run took the install as finished and detached the installer and seed ISOs before the VM
