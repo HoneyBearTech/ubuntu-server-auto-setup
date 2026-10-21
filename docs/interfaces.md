@@ -53,12 +53,14 @@ example shows a typical value.
 | --- | --- | --- |
 | `ubuntu_release` | `"26.04"` | The release directory on the mirror. |
 | `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
-| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO and `SHA256SUMS` come from. |
+| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from. A mirror must publish all three. |
 | `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image); a storage shared by the cluster, such as NFS, works for every node. |
 | `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
 | `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). |
 | `installer_grub_timeout` | `3` | Seconds the installer's GRUB menu waits. |
 | `installer_iso_rebuild` | `false` | Rebuild the remastered ISO even if it exists. |
+| `installer_signing_keyring` | `ubuntu-cdimage-keyring.gpg` | The binary OpenPGP keyring `SHA256SUMS.gpg` is checked against, on the control node: a file in `roles/installer_iso/files/` or an absolute path. The default holds only Ubuntu's CD image signing key. |
+| `installer_signing_fingerprint` | `843938DF228D22F7B3742BC0D94AA3F0EFE21092` | The full fingerprint of the key that must have signed `SHA256SUMS` (Ubuntu CD Image Automatic Signing Key (2012), as published at [ubuntu.com](https://ubuntu.com/tutorials/how-to-verify-ubuntu)). Change it, with the keyring, only for a mirror that signs its own `SHA256SUMS`. |
 
 **Proxmox API and VMs** (`proxmox_vm`)
 
@@ -199,8 +201,8 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 | System | From | Protocol and authentication | What for |
 | --- | --- | --- | --- |
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them. |
-| Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso`, build ISOs and seed ISOs, delete seed files. |
-| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication | The Ubuntu ISO and `SHA256SUMS`. |
+| Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso` and `gpgv`, build ISOs and seed ISOs, delete seed files. |
+| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |

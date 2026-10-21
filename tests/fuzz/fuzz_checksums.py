@@ -6,6 +6,7 @@ appears on a line naming exactly that file ("<sum> <name>" or "<sum> *<name>"), 
 never supply the checksum.
 """
 
+import base64
 import sys
 
 import atheris
@@ -35,7 +36,9 @@ def one_input(data):
             pieces.append(roles.text(fdp, 80))
     content = "\n".join(pieces) + fdp.PickValueInList(["", "\n"])
 
-    picked = PICK.render(installer_sums={"content": content}, ubuntu_iso_name=name)
+    # The role reads the verified file with slurp, which returns it base64-encoded.
+    encoded = base64.b64encode(content.encode()).decode()
+    picked = PICK.render(installer_sums={"content": encoded}, ubuntu_iso_name=name)
     assert isinstance(picked, str), repr(picked)
     picked = picked.strip()
     if not picked:

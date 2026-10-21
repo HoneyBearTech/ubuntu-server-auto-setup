@@ -31,7 +31,13 @@ and in [web-ui.md](web-ui.md#security).
 **Downloads**
 
 - The Ubuntu ISO is downloaded over HTTPS and checked against the SHA-256 checksum Ubuntu publishes for it
-  (also fetched over HTTPS); a mismatch stops the run.
+  in `SHA256SUMS`. Before that checksum is used, `gpgv` checks Ubuntu's signature on `SHA256SUMS`
+  (`SHA256SUMS.gpg`) against the Ubuntu CD image signing key that ships with the role
+  (`roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`), pinned by its full fingerprint
+  `8439 38DF 228D 22F7 B374 2BC0 D94A A3F0 EFE2 1092` (`installer_signing_fingerprint`). The key is never
+  fetched from a keyserver at run time. A missing or bad signature, a signature by any other key, or a
+  checksum mismatch stops the run before the ISO is used. To inspect the shipped key:
+  `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`.
 - SSH public keys come from `https://github.com/<github_user>.keys` over HTTPS. Only lines that look like
   public keys are used, and they reach the installer configuration as data written with `to_nice_yaml`, so they can't add other
   configuration or commands.
@@ -150,6 +156,6 @@ in the trust store, and how to do the same in the web UI's data volume.
   Fail2Ban until the baseline has run; `make site` runs it straight away.
 - **Upstream components.** Vulnerabilities in Ubuntu, Proxmox VE, OpenSSH, Ansible or its collections
   are fixed upstream; how the project tracks them is in [dependencies.md](dependencies.md).
-- **The checksum file's own authenticity beyond HTTPS.** The ISO is checked against `SHA256SUMS`, but the
-  GPG signature on `SHA256SUMS` isn't verified yet (it's on the [roadmap](roadmap.md)); the check relies on
-  the TLS connection to `releases.ubuntu.com`.
+- **Ubuntu's signing key itself.** The ISO is trusted because Ubuntu's CD image signing key signed its
+  checksum. If Ubuntu replaces that key, the role stops until a release ships the new key; if the key were
+  compromised, the check would not catch it.

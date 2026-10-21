@@ -23,7 +23,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
    ├──────────────────────────────────────────────────────────────────────────────────┘
    │  HTTPS
    ├──▶ github.com/<github_user>.keys     (public SSH keys)
-   └──▶ releases.ubuntu.com (from the Proxmox node: ISO + SHA256SUMS)
+   └──▶ releases.ubuntu.com (from the Proxmox node: ISO + SHA256SUMS + SHA256SUMS.gpg)
 ```
 
 | Part | What it is | Where |
@@ -46,11 +46,15 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 
 ### 1. The installer ISO (`build-installer.yml`, on `proxmox_nodes`, as root over SSH)
 
-1. Install `xorriso` on the node.
-2. Fetch `SHA256SUMS` from `releases.ubuntu.com` over HTTPS and pick the line for
-   `ubuntu-26.04.1-live-server-amd64.iso`; stop if it isn't there (a newer point release has replaced it).
-3. Download the ISO into the node's ISO storage, verifying that checksum (`get_url` with `checksum`).
-4. If the remastered ISO doesn't exist yet (or `installer_iso_rebuild` is set): extract `boot/grub/grub.cfg`,
+1. Install `xorriso` and `gpgv` on the node.
+2. Fetch `SHA256SUMS` and its signature `SHA256SUMS.gpg` from `releases.ubuntu.com` over HTTPS, and check
+   the signature with `gpgv` against the Ubuntu CD image signing key that ships with the role
+   (`files/ubuntu-cdimage-keyring.gpg`); stop unless it is a good signature by the key with the pinned
+   fingerprint (`installer_signing_fingerprint`).
+3. From that verified file, pick the line for `ubuntu-26.04.1-live-server-amd64.iso`; stop if it isn't
+   there (a newer point release has replaced it).
+4. Download the ISO into the node's ISO storage, verifying that checksum (`get_url` with `checksum`).
+5. If the remastered ISO doesn't exist yet (or `installer_iso_rebuild` is set): extract `boot/grub/grub.cfg`,
    add the `autoinstall` kernel argument to the installer entries and shorten the GRUB timeout, check that
    the argument is really there, and write a new ISO with `xorriso`, replaying the original boot records
    (BIOS and UEFI). Without the `autoinstall` argument, Ubuntu's installer stops and asks before it wipes a

@@ -57,7 +57,7 @@ themselves; anything on the servers beyond the baseline.
 | --- | --- | --- | --- |
 | B1 | Control node → Proxmox API | VM create/start/config/status calls, the API token | HTTPS with certificate verification (`pve_validate_certs`, default `true`); a token with a narrow role and privilege separation ([installing.md](installing.md#2-create-the-proxmox-api-token)); token handling hidden from output (`pve_hide_secrets`, `roles/proxmox_vm/tasks/`). |
 | B2 | Control node → Proxmox node (SSH as root) | ISO builds, seed files with the password hash | SSH with host key checking (`ansible.cfg`: `host_key_checking = true`); seed directory `0700`, files `0600`; seed ISO and directory deleted after the install (`roles/proxmox_vm/tasks/provision.yml`). |
-| B3 | Proxmox node → `releases.ubuntu.com` | The Ubuntu ISO and `SHA256SUMS` | HTTPS; the ISO is verified against the published SHA-256 before use, and the run stops if the release isn't listed (`roles/installer_iso/tasks/main.yml`). |
+| B3 | Proxmox node → `releases.ubuntu.com` | The Ubuntu ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` | HTTPS; `gpgv` checks the signature on `SHA256SUMS` against Ubuntu's CD image signing key, shipped with the role and pinned by its full fingerprint (never fetched at run time); the checksum is then read from those verified bytes, the ISO is verified against it before use, and the run stops if the signature is missing or bad, is by another key, or the release isn't listed (`roles/installer_iso/tasks/main.yml`). |
 | B4 | Control node → `github.com` | Public SSH keys | HTTPS; lines filtered to public-key formats; an empty result stops the run; written into the installer configuration (`roles/proxmox_vm/templates/user-data.j2`, `roles/common/tasks/ssh_keys.yml`). |
 | B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are written as data with `to_nice_yaml` where they are free text. |
 | B6 | Control node → new VM (first SSH contact) | The VM's host key | Trust on first use: the old `known_hosts` entry for the IP is replaced with the scanned ed25519 key (`provision_manage_known_hosts`). Later port changes use the key read over the verified connection (`roles/ssh_hardening/tasks/main.yml`). |
@@ -92,7 +92,7 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
 - **Economy of mechanism.** Ubuntu's own installer, OpenSSH, UFW, Fail2Ban and unattended-upgrades, configured
   with small files; no agent, daemon or custom code on the servers. One role per concern.
 - **Fail-safe defaults.** Provisioning skips existing VMs rather than reconciling them; the ISO step stops
-  if the checksum or the release is missing; the key sync stops rather than writing an empty list;
+  if the signature, the checksum or the release is missing; the key sync stops rather than writing an empty list;
   `ssh_hardening` stops if `ssh_allow_users` would exclude the admin user; sshd configuration is validated
   before it is installed; certificate verification is on by default; secrets are hidden from output by
   default.
@@ -133,7 +133,7 @@ this kind:
 | **Hard-coded or committed credentials** (CWE-798, CWE-540) | Secrets only in a gitignored, encrypted Vault; examples hold placeholders; gitleaks scans every change and the full history; GitHub secret scanning and push protection. |
 | **Cleartext storage of sensitive information** (CWE-312, CWE-532) | The password reaches the node only as a SHA-512 crypt hash, in root-only files that are deleted after the install; `no_log` on tasks that handle the token or the hash; ansible-lint's `no-log-password` rule. |
 | **Cleartext transmission** (CWE-319) and **improper certificate validation** (CWE-295) | HTTPS for the API, GitHub and Ubuntu downloads, with certificate verification on by default. |
-| **Download of code without integrity check** (CWE-494) | The ISO is verified against Ubuntu's SHA-256 before use; collections and packages come from Galaxy and PyPI over HTTPS (see [dependencies.md](dependencies.md)). |
+| **Download of code without integrity check** (CWE-494) | The ISO is verified against Ubuntu's SHA-256 before use, taken from a `SHA256SUMS` whose signature by Ubuntu's pinned CD image signing key has been checked; collections and packages come from Galaxy and PyPI over HTTPS (see [dependencies.md](dependencies.md)). |
 | **OS command injection** (CWE-78) and **improper neutralization in templates** (CWE-1336) | Commands run with argument lists (`ansible.builtin.command` with `argv`), never through a shell; the installer's YAML is built as data and written with `to_nice_yaml`; key lines are filtered to public-key formats. Values that reach a configuration file or a shell command are validated against allowlist patterns, and Atheris fuzz targets check the generated user-data, sshd and Fail2Ban files on every change. |
 | **Incorrect default permissions** (CWE-276) | Explicit file modes everywhere (`0600` seed files, `0440` sudoers validated with `visudo`, `0644` configuration); ansible-lint's `risky-file-permissions` rule. |
 | **Improper restriction of authentication attempts** (CWE-307) | SSH key-only, `MaxAuthTries 4`, UFW rate limit and Fail2Ban with incremental bans. |
@@ -181,7 +181,8 @@ this kind:
   least 80% of role tasks must run ([testing.md](testing.md)). A weekly job remasters the real Ubuntu ISO.
 - **Manual end-to-end runs** for what containers can't show (a real install, reboots), as the
   [test policy](../CONTRIBUTING.md#test-policy) requires.
-- **Runtime checks inside the playbooks**: assertions on required variables, on the ISO checksum, on the
+- **Runtime checks inside the playbooks**: assertions on required variables, on the signature on Ubuntu's
+  `SHA256SUMS` and the ISO checksum, on the
   remastered GRUB configuration, on a non-empty key list and on `ssh_allow_users`; `sshd -t` and `visudo`
   validation before files are installed.
 - **OpenSSF Scorecard** weekly, and the [OpenSSF Best Practices entry](https://www.bestpractices.dev/projects/15740).

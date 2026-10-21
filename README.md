@@ -76,7 +76,7 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 
 1. **`playbooks/build-installer.yml`** runs on your Proxmox node(s) (inventory group `proxmox_nodes`) over
    SSH as root. It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
-   Ubuntu's published `SHA256SUMS`, and uses `xorriso` to build a copy whose GRUB menu adds the
+   Ubuntu's published `SHA256SUMS` after verifying Ubuntu's GPG signature on that file, and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
    the playbook asks Proxmox for its folder, so shared storage such as NFS works too).

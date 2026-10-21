@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Remasters the real Ubuntu live-server ISO in the test "Proxmox node" container and checks the result,
-# including that the BIOS and UEFI boot records match the original. Downloads about 3 GB.
+# including that the BIOS and UEFI boot records match the original. Downloads about 3 GB. The role's own
+# defaults apply (not tests/run.sh's test key), so Ubuntu's real signature on SHA256SUMS is checked with
+# the CD image signing key that ships in roles/installer_iso/files/.
 # Used by .github/workflows/installer-iso.yml; runs locally too (needs Docker).
 set -euo pipefail
 

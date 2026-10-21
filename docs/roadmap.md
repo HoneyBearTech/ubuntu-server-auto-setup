@@ -25,7 +25,8 @@ that run on each pull request.
   ([release-checklist.md](release-checklist.md)).
 
 **Provisioning**
-- Verify the GPG signature on Ubuntu's `SHA256SUMS`, not only the checksum.
+- Done: Ubuntu's GPG signature on `SHA256SUMS` is verified, with its CD image signing key pinned by
+  fingerprint, before the ISO's checksum is trusted.
 - Optional IPv6 and DHCP network configuration, and more disk layouts (including LUKS encryption).
 - Running the ISO build as a non-root user on the Proxmox node.
 
