@@ -69,7 +69,7 @@ together is in [docs/architecture.md](docs/architecture.md).
 | Image smoke test | the container image, driven like a browser against the mock Proxmox API, with a real playbook run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and before a release image is pushed |
 | Fuzzing | the templates and expressions that turn inventory values into files and commands, with arbitrary inputs (Atheris) | `make fuzz` (Linux x86-64) | every pull request and push to `main`, longer weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
-| Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy |
+| Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy, and before every release ([checklist](docs/release-checklist.md)) |
 
 A pull request can only merge when the required checks pass. A failing check's log names the file, line and
 rule. How the integration tests are built, and how to add a case, is in [docs/testing.md](docs/testing.md).
@@ -132,6 +132,9 @@ can't be merged.
 - **Changes the containers can't show** (a real install, `cloud-init`, the QEMU guest agent, reboots) are
   also run against a disposable VM on a real Proxmox node, and the pull request describes that run: the
   commands, the Proxmox VE and Ubuntu versions, and that a second run reported no changes.
+- **Before every release** the maintainer runs the
+  [pre-release checklist on real Proxmox VE](docs/release-checklist.md) against the commit to be tagged
+  and records the result in the release pull request.
 - Security-relevant changes (SSH, firewall, users, secrets, disk handling, and the web UI's sign-in,
   sessions, CSRF and host checks) must show that the protection still works, for example that password
   SSH and root login are refused after the change, or that a cross-site form post is refused.

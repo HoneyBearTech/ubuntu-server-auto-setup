@@ -13,7 +13,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | Real installer ISO | the remastering against the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
-| Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy) |
+| Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy), and before every release with the [pre-release checklist](release-checklist.md) |
 
 ## The integration tests
 
@@ -52,7 +52,8 @@ run; your own `~/.ssh` is never touched. The steps:
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
    the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
-   report and covered by the real-run part of the test policy.
+   report and covered by the real-run part of the test policy and the
+   [pre-release checklist](release-checklist.md).
 
 UFW rate-limits new SSH connections (6 in 30 seconds per address), and in the tests every connection comes
 from Docker's one address, so the script pauses between some steps.

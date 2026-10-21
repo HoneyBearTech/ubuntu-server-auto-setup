@@ -34,7 +34,8 @@ their defaults.
 - [Architecture](architecture.md), [external interfaces](interfaces.md),
   [security requirements](security.md) and the [assurance case](assurance-case.md).
 - [Accessibility](accessibility.md) of the web UI: what is checked and the known gaps.
-- [Testing](testing.md): the integration tests, how to run them and how to add a case.
+- [Testing](testing.md): the integration tests, how to run them and how to add a case; the
+  [pre-release checklist](release-checklist.md) on real Proxmox VE.
 - [Dependencies and vulnerability management](dependencies.md): how dependencies are chosen and tracked,
   and the remediation policies for dependency and static-analysis findings.
 - [Roadmap](roadmap.md), [changelog](../CHANGELOG.md), [support](../SUPPORT.md), [governance](../GOVERNANCE.md),
