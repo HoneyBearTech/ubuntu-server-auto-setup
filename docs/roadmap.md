@@ -21,7 +21,8 @@ that run on each pull request.
   request, with idempotence checks and an 80% task coverage floor, plus a weekly run against the real
   Ubuntu ISO ([testing.md](testing.md)).
 - Run the baseline tests against Ubuntu 24.04 as well as 26.04.
-- A documented end-to-end test against a real Proxmox VE node before every release.
+- Done: a documented end-to-end test on real Proxmox VE before every release
+  ([release-checklist.md](release-checklist.md)).
 
 **Provisioning**
 - Verify the GPG signature on Ubuntu's `SHA256SUMS`, not only the checksum.
