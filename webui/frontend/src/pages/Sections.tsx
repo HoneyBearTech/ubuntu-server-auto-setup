@@ -59,9 +59,11 @@ function useSectionForm(api: string, reload: () => void) {
   return { errors, status, setStatus, busy, submit };
 }
 
+// The answer to a form's post, above its buttons. The live region is always there (so screen readers
+// announce what appears in it) and takes no room while it is empty.
 function FormStatus({ status, children }: { status: NoticeT | null; children?: ReactNode }) {
   return (
-    <div className="stack-sm" aria-live="polite">
+    <div className="form-status" aria-live="polite">
       {status ? <Notice notice={status}>{children}</Notice> : null}
     </div>
   );
@@ -237,9 +239,7 @@ export function Proxmox() {
               ) : null}
             </FieldSet>
           ))}
-          <div className="card-body">
-            <FormStatus status={form.status} />
-          </div>
+          <FormStatus status={form.status} />
           <div className="card-foot">
             <button type="submit" className="button" name="action" value="save" aria-disabled={form.busy || undefined}>
               Save
@@ -350,9 +350,7 @@ export function Defaults() {
         <datalist id="timezones">
           {(data.timezones ?? []).map((tz) => <option key={tz} value={tz} />)}
         </datalist>
-        <div className="card-body">
-          <FormStatus status={form.status} />
-        </div>
+        <FormStatus status={form.status} />
         <div className="card-foot">
           <button type="submit" className="button" name="action" value="save" aria-disabled={form.busy || undefined}>
             Save
@@ -392,9 +390,7 @@ export function Hardening() {
         {groups.map((g) => (
           <FieldSet key={g.legend} legend={g.legend} fields={g.fields} values={data.values} errors={errors} />
         ))}
-        <div className="card-body">
-          <FormStatus status={form.status} />
-        </div>
+        <FormStatus status={form.status} />
         <div className="card-foot">
           <button type="submit" className="button" name="action" value="save" aria-disabled={form.busy || undefined}>
             Save

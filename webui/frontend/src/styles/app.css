@@ -522,6 +522,10 @@ main:focus {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
+form.card > .form-status:not(:empty) {
+  padding: var(--space-4) var(--space-6) 0;
+}
+
 .loading {
   color: var(--muted);
 }
@@ -1517,6 +1521,12 @@ pre.log .line::before {
 }
 
 @media (min-width: 60.01rem) {
+  /* The side card (the last connection test) stays in view beside a long form. */
+  .two-columns > aside {
+    position: sticky;
+    top: var(--space-6);
+  }
+
   .sidebar-panel {
     display: flex;
     flex-direction: column;
