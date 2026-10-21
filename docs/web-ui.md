@@ -73,7 +73,9 @@ The overview lists the steps and whether each is done.
    saving the form, and lists the cluster's nodes with their status (and the cluster's name, if the token
    may read it). From then on the node the VMs are created on is a dropdown of those nodes, such as
    `hephaestus (online)`; node names are case-sensitive, and a name that isn't in the cluster is refused.
-   Test again to refresh the list (it is kept in `webui.json`). Then the storage, the bridge and an
+   The **ISO storage** (under More settings) becomes a dropdown of the storages that allow ISO images
+   in the same way, if the token may list storages; the playbooks find its folder on the node themselves.
+   Test again to refresh the lists (they are kept in `webui.json`). Then the storage, the bridge and an
    optional VLAN tag. The token needs the privileges in
    [installing.md](installing.md#2-create-the-proxmox-api-token).
 

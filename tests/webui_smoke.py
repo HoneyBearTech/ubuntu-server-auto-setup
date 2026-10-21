@@ -100,6 +100,9 @@ def main() -> None:
     _, _, page = ui.get("/proxmox")
     check('<select id="f-pve_node" name="pve_node"' in page and ">pve-test (online)</option>" in page
           and "mock-cluster" in page, "the node is a dropdown of the cluster's nodes after the test")
+    check('<select id="f-pve_iso_storage" name="pve_iso_storage"' in page
+          and ">synology-nfs (nfs, shared)</option>" in page,
+          "the ISO storage is a dropdown of the storages that allow ISO images")
     check(TOKEN_SECRET not in text, "the page doesn't show the token secret")
     status, url, text = ui.post("/proxmox", {"action": "save", **api})
     check(url.endswith("/proxmox") and "Saved the Proxmox settings" in text, "the Proxmox settings are saved", text)

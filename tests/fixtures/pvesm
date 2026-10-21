@@ -1,0 +1,26 @@
+#!/bin/sh
+# A stand-in for Proxmox VE's pvesm in the test "node" container: two storages allow ISO images, "local"
+# (a directory) and "synology-nfs" (NFS, shared by the cluster); "backup-nfs" exists but holds backups only.
+# Only the two calls the roles make are implemented.
+set -eu
+case "${1:-} ${2:-} ${3:-}" in
+  "status --content iso")
+    printf '%-14s %-6s %-8s %14s %14s %14s %8s\n' Name Type Status Total Used Available %
+    printf '%-14s %-6s %-8s %14s %14s %14s %8s\n' local dir active 98497780 12345678 81234567 12.53%
+    printf '%-14s %-6s %-8s %14s %14s %14s %8s\n' synology-nfs nfs active 7814026240 1234567890 6579458350 15.80%
+    ;;
+  path\ *)
+    volume="$2"
+    storage="${volume%%:*}"
+    file="${volume#*:iso/}"
+    case "$storage" in
+      local) echo "/var/lib/vz/template/iso/$file" ;;
+      synology-nfs | backup-nfs) echo "/mnt/pve/$storage/template/iso/$file" ;;
+      *) echo "storage '$storage' does not exist" >&2; exit 255 ;;
+    esac
+    ;;
+  *)
+    echo "fake pvesm: unsupported arguments: $*" >&2
+    exit 2
+    ;;
+esac

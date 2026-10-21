@@ -406,11 +406,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return section_page(request, "proxmox", config, submitted, status=200, ca=saved_ca(settings),
                                     test_error=str(exc))
             # The node list (names and status only) is kept for the node dropdown; the form isn't saved.
-            store.save_cluster(result.cluster, result.status)
+            store.save_cluster(result.cluster, result.status, result.iso_storages)
             return section_page(request, "proxmox", config, submitted, ca=saved_ca(settings), test_result=result)
+        problems = {}
         problem = node_problem(str(config.values.get("pve_node") or ""))
         if problem:
-            return section_page(request, "proxmox", config, submitted, Problems({"pve_node": problem}), 422,
+            problems["pve_node"] = problem
+        storages = store.cluster().get("iso_storages") or {}
+        iso_storage = str(config.values.get("pve_iso_storage") or "")
+        if storages and iso_storage and iso_storage not in storages:
+            problems["pve_iso_storage"] = (f"{iso_storage} isn't a storage that allows ISO images "
+                                           f"({', '.join(storages)}). Allow ISO images on it in Proxmox "
+                                           "(Datacenter → Storage → Content), then test the connection again.")
+        if problems:
+            return section_page(request, "proxmox", config, submitted, Problems(problems), 422,
                                 ca=saved_ca(settings))
         store.save(config)
         flash(request, "Saved the Proxmox settings.")

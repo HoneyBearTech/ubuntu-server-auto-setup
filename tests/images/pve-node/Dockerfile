@@ -5,10 +5,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-server python3 python3-apt xorriso ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /run/sshd /root/.ssh /var/lib/vz/template/iso /srv/ubuntu \
+ && mkdir -p /run/sshd /root/.ssh /var/lib/vz/template/iso /mnt/pve/synology-nfs/template/iso /srv/ubuntu \
  && chmod 700 /root/.ssh \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/10-test.conf
 COPY grub.cfg /srv/iso-tree/boot/grub/grub.cfg
+# Proxmox's storage tool, faked: the roles ask it which storages allow ISO images and where they keep them.
+COPY --chmod=0755 pvesm /usr/local/bin/pvesm
 # A small stand-in for the Ubuntu live-server ISO, served over HTTP with a SHA256SUMS file in Ubuntu's format.
 RUN mkdir -p /srv/iso-tree/casper \
  && echo kernel > /srv/iso-tree/casper/vmlinuz \

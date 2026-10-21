@@ -1,0 +1,42 @@
+---
+# After tests/run.sh built the installer and provisioned srv-nfs with pve_iso_storage=synology-nfs.
+- name: Verify the VM's CD-ROMs used the ISO storage
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the create request and the install
+      vars:
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form')
+                    | selectattr('vmid', 'equalto', '4062') | first }}"
+        vm: "{{ verify_api.json.data.vms['4062'] }}"
+      ansible.builtin.assert:
+        that:
+          - create.ide2 == 'synology-nfs:iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,media=cdrom'
+          - create.ide3 == 'synology-nfs:iso/seed-srv-nfs.iso,media=cdrom'
+          - vm.starts == 2
+          - "'ide2' not in vm.config and 'ide3' not in vm.config"
+
+- name: Verify the files landed in the storage's folder
+  hosts: proxmox_nodes
+  gather_facts: false
+  tasks:
+    - name: Look at the NFS storage's ISO folder
+      ansible.builtin.find:
+        paths: [/mnt/pve/synology-nfs/template/iso]
+        patterns: ["*.iso"]
+      register: verify_nfs
+
+    - name: Check the installer ISOs are there and the seed is gone
+      vars:
+        names: "{{ verify_nfs.files | map(attribute='path') | map('basename') | sort }}"
+      ansible.builtin.assert:
+        that:
+          - names == ['ubuntu-26.04.1-live-server-amd64-autoinstall.iso', 'ubuntu-26.04.1-live-server-amd64.iso']
+        fail_msg: "Unexpected files in /mnt/pve/synology-nfs/template/iso: {{ names }}"

@@ -137,11 +137,14 @@ class Store:
         nodes = cluster.get("nodes") if isinstance(cluster, dict) else None
         if not isinstance(nodes, dict):
             return {}
-        return {"name": str(cluster.get("name") or ""), "nodes": {str(k): str(v) for k, v in nodes.items()}}
+        storages = cluster.get("iso_storages")
+        return {"name": str(cluster.get("name") or ""), "nodes": {str(k): str(v) for k, v in nodes.items()},
+                "iso_storages": {str(k): str(v) for k, v in storages.items()} if isinstance(storages, dict) else {}}
 
-    def save_cluster(self, name: str, nodes: dict[str, str]) -> None:
+    def save_cluster(self, name: str, nodes: dict[str, str], iso_storages: dict[str, str] | None = None) -> None:
         data = self._ui_settings()
-        data["cluster"] = {"name": name, "nodes": dict(sorted(nodes.items()))}
+        data["cluster"] = {"name": name, "nodes": dict(sorted(nodes.items())),
+                           "iso_storages": dict(sorted((iso_storages or {}).items()))}
         write_private(self.settings.settings_file, json.dumps(data, indent=2) + "\n")
 
     # --- Inventory ---------------------------------------------------------------------------------------
