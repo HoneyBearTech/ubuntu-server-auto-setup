@@ -21,6 +21,11 @@ updates:
       interval: "weekly"
     assignees: ["HoneyBearTech"]
     groups:
+      # react and react-dom must always have the exact same version (React refuses to run otherwise), and the
+      # type packages follow them, so they move together. Listed before frontend-dev, which would otherwise
+      # take the type packages: Dependabot uses the first group that matches.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       frontend-dev:
         dependency-type: "development"
         update-types: ["minor", "patch"]
@@ -48,3 +53,7 @@ updates:
       # package in requirements-webui.txt ships wheels for it).
       - dependency-name: "python"
         versions: [">=3.15"]
+      # The front-end build stage follows Node.js long-term-support releases (even numbers). Odd releases are
+      # never LTS and reach end of life within months (25 did in June 2026).
+      - dependency-name: "node"
+        versions: [">= 25, < 26", ">= 27, < 28", ">= 29, < 30"]
