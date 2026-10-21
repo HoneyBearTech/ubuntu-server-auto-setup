@@ -72,6 +72,17 @@ def main() -> None:
 
     status, url, text = ui.get("/runs")
     check(url.endswith("/setup"), "a fresh install sends every page to the first-run setup")
+    assets = re.findall(r'(?:href|src)="(/static/[a-z]+\.(?:css|js|svg)\?v=[0-9a-f]+)"', text)
+    check(len(assets) == 3, "the stylesheet, script and icon URLs carry a hash of their contents", text)
+    for asset in assets:
+        status, _, _ = ui.get(asset)
+        check(status == 200, f"{asset} is served")
+    with urllib.request.urlopen(ARGS.url + "/favicon.ico", timeout=10) as resp:
+        check(resp.url.endswith("/favicon.ico") and resp.headers["Content-Type"].startswith("image/svg+xml"),
+              "/favicon.ico answers with the icon, without a sign-in")
+    version = re.search(r"web UI (\S+) ·", text)
+    check(version is not None and (not ARGS.version or version.group(1) == ARGS.version),
+          f"the footer shows the version ({version.group(1) if version else 'none'})", text)
     status, url, text = ui.post("/setup", {"setup_code": "WRONG-CODE-0000", "password": PASSWORD, "confirm": PASSWORD})
     check(status == 422 and "setup code is wrong" in text, "a wrong setup code is refused", text)
     status, url, text = ui.request("POST", "/setup", {"setup_code": ARGS.setup_code, "password": PASSWORD,
@@ -186,5 +197,6 @@ if __name__ == "__main__":
     parser.add_argument("--mock", required=True)
     parser.add_argument("--ca", required=True)
     parser.add_argument("--keys", required=True)
+    parser.add_argument("--version", default="", help="the version the image must show (default: any)")
     ARGS = parser.parse_args()
     main()

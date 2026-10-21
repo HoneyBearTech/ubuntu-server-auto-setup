@@ -42,6 +42,8 @@ COPY roles /app/roles
 COPY inventory/hosts.example.yml inventory/vault.example.yml /app/inventory/
 COPY webui/usas_web /app/webui/usas_web
 COPY LICENSE /usr/share/licenses/ubuntu-server-auto-setup/LICENSE
+# The version the web UI shows: the release workflow passes the tag without its v; local builds say "dev".
+ARG USAS_VERSION=dev
 ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app/webui \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -49,7 +51,8 @@ ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     HOME=/home/usas \
     ANSIBLE_CONFIG=/app/ansible.cfg \
     USAS_PROJECT_DIR=/app \
-    USAS_DATA_DIR=/data
+    USAS_DATA_DIR=/data \
+    USAS_VERSION=${USAS_VERSION}
 LABEL org.opencontainers.image.title="ubuntu-server-auto-setup" \
       org.opencontainers.image.description="Install Ubuntu Server on Proxmox VE VMs hands-off and harden them, from a web UI" \
       org.opencontainers.image.source="https://github.com/HoneyBearTech/ubuntu-server-auto-setup" \
