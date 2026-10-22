@@ -1,6 +1,6 @@
 ---
 # After tests/run.sh provisioned srv-luks (vm_disk_encryption) and srv-01 (the defaults). The node's test
-# xorriso kept a copy of each seed's user-data in /srv/seeds/ (tests/fixtures/xorriso).
+# xorriso kept a copy of each seed's user-data in /srv/seed-copies/ (tests/fixtures/xorriso).
 - name: Verify the encrypted VM's hardware through the API
   hosts: localhost
   gather_facts: false
@@ -16,13 +16,13 @@
 
     - name: Check its EFI disk, vTPM and install
       vars:
-        vm: "{{ verify_api.json.data.vms['4063'] }}"
+        vm: "{{ verify_api.json.data.vms['4069'] }}"
       ansible.builtin.assert:
         that:
           - vm.config.bios == 'ovmf'
           - vm.config.machine == 'q35'
-          - vm.config.efidisk0 == 'local-lvm:vm-4063-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M'
-          - vm.config.tpmstate0 == 'local-zfs:vm-4063-disk-1,size=4M,version=v2.0'
+          - vm.config.efidisk0 == 'local-lvm:vm-4069-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M'
+          - vm.config.tpmstate0 == 'local-zfs:vm-4069-disk-1,size=4M,version=v2.0'
           - vm.installed
           - vm.starts == 2
           - vm.config_updates | length == 1
@@ -40,7 +40,7 @@
   tasks:
     - name: Read the user-data the installers got
       ansible.builtin.slurp:
-        src: /srv/seeds/seed-{{ item }}/user-data
+        src: /srv/seed-copies/seed-{{ item }}/user-data
       loop: [srv-luks, srv-01]
       register: verify_seeds
 

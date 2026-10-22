@@ -60,3 +60,19 @@ all:
           # vm_disk_passphrase: "{{ vault_disk_passphrase }}"
           ufw_allow:
             - { port: "5432", proto: tcp, from: 10.10.10.0/24, comment: postgres }
+        # Address from DHCP: read from the VM's guest agent after the install (the token needs
+        # VM.GuestAgent.Audit on Proxmox VE 9). A fixed MAC address lets you reserve the address on the
+        # DHCP server; then you can also set ansible_host to it, and the agent isn't asked.
+        # app-01:
+        #   pve_vmid: 4063
+        #   net_mode: dhcp
+        #   net_mac: "BC:24:11:40:63:01"
+        # A VLAN on the first card, and two more cards: storage on VLAN 20 (static, jumbo frames) and
+        # VLAN 30 (DHCP). Only one card has the default route (here net_gateway, on the first card).
+        # nas-gw-01:
+        #   ansible_host: 10.10.10.64
+        #   pve_vmid: 4064
+        #   pve_vlan: 10
+        #   vm_extra_nics:
+        #     - { bridge: vmbr1, vlan: 20, mode: static, address: 10.20.0.64, prefix: 24, mtu: 9000 }
+        #     - { bridge: vmbr1, vlan: 30, mode: dhcp }

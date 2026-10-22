@@ -7,6 +7,10 @@ polls, then "stopped" (the installer powering the VM off). VMs whose ID is in HA
 the role's failure path. Like Proxmox, a start request only starts a task: the VM's status stays "stopped"
 until that task has been seen running and then finished.
 
+Once an installed VM runs, its guest agent answers network-get-interfaces (after saying it isn't running
+yet, as while the system boots): one interface per network card, with the card's MAC address. net0 of a VM
+in DHCP_LEASES has that address; the others have only a link-local one, as with no DHCP server.
+
 It also serves a public-keys file over plain HTTP, standing in for https://github.com/<user>.keys.
 
 With --fixture-vms it also lists the fixed VMs in FIXTURE_VMS, for the web UI's VMs page: their configs and
@@ -32,6 +36,10 @@ TOKEN = "PVEAPIToken=ansible@pve!test=00000000-0000-4000-8000-000000000000"
 NODE = "pve-test"
 HANG_VMIDS = {4099}
 POLLS_BEFORE_POWEROFF = 2
+# The address DHCP "gives" net0. The test server is a container reached on this machine, hence 127.0.0.1.
+DHCP_LEASES = {4063: "127.0.0.1"}
+FORBIDDEN_AGENT_VMIDS = {4066}  # the token may not ask these VMs' agents (no VM.GuestAgent.Audit)
+AGENT_POLLS_BEFORE_READY = 1
 
 LOCK = threading.Lock()
 STATE = {"vms": {}, "requests": []}
@@ -215,6 +223,27 @@ class PveHandler(BaseHTTPRequestHandler):
             return self._reply(501, {"path": f"{what} is not implemented by the mock"})
         return self._reply(200, {"result": results[what]})
 
+    def _agent_interfaces(self, vmid, vm):
+        """What the guest agent of a VM the tests created reports: its cards, net0 with the DHCP lease if any."""
+        if vm["status"] != "running":
+            return self._message(500, f"VM {vmid} is not running")
+        if vmid in FORBIDDEN_AGENT_VMIDS:
+            return self._message(403, f"Permission check failed (/vms/{vmid}, VM.GuestAgent.Audit|VM.GuestAgent.Unrestricted)")
+        vm["agent_polls"] += 1
+        if not vm["installed"] or vm["agent_polls"] <= AGENT_POLLS_BEFORE_READY:
+            return self._message(500, "QEMU guest agent is not running")
+        interfaces = [{"name": "lo", "hardware-address": "00:00:00:00:00:00",
+                       "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4", "prefix": 8}]}]
+        for key in sorted((k for k in vm["config"] if re.fullmatch(r"net[0-9]+", k)), key=lambda k: int(k[3:])):
+            mac = vm["config"][key].split(",")[0].partition("=")[2].lower()
+            index = int(key[3:])
+            lease = DHCP_LEASES.get(vmid) if index == 0 else None
+            addresses = [{"ip-address": lease, "ip-address-type": "ipv4", "prefix": 24}] if lease else [
+                {"ip-address": f"169.254.{index}.{vmid % 250}", "ip-address-type": "ipv4", "prefix": 16}]
+            addresses.append({"ip-address": f"fe80::{index}", "ip-address-type": "ipv6", "prefix": 64})
+            interfaces.append({"name": f"ens{18 + index}", "hardware-address": mac, "ip-addresses": addresses})
+        return self._reply(200, {"result": interfaces})
+
     def _message(self, status, message):
         body = json.dumps({"data": None, "message": message + "\n"}).encode()
         self.send_response(status, message)
@@ -272,13 +301,14 @@ class PveHandler(BaseHTTPRequestHandler):
             error = _special_disks(config, vmid)
             if error:
                 return self._reply(400, {"config": error})
-            if "net0" in config:  # Proxmox adds a MAC address to the NIC
-                model, _, rest = config["net0"].partition(",")
-                config["net0"] = f"{model}=BC:24:11:00:{int(vmid) // 100 % 100:02d}:{int(vmid) % 100:02d},{rest}"
+            for key in [k for k in config if re.fullmatch(r"net[0-9]+", k)]:
+                model, _, rest = config[key].partition(",")
+                if "=" not in model:  # Proxmox adds a MAC address to a card that has none
+                    config[key] = f"{model}=BC:24:11:{int(key[3:]):02d}:{int(vmid) // 100 % 100:02d}:{int(vmid) % 100:02d},{rest}"
             vms[vmid] = {"config": config, "status": "stopped", "starts": 0, "polls": 0, "installed": False,
-                         "config_updates": []}
+                         "config_updates": [], "agent_polls": 0}
             return self._reply(200, upid("qmcreate", vmid))
-        m = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|status/current|status/start)", path)
+        m = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|status/current|status/start|agent/network-get-interfaces)", path)
         if not m:
             return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
         vmid, action = m.group(1), m.group(2)
@@ -293,6 +323,8 @@ class PveHandler(BaseHTTPRequestHandler):
                 vm["config"].pop(key.strip(), None)
             vm["config"].update({k: v for k, v in form.items() if k != "delete"})
             return self._reply(200, None)
+        if action == "agent/network-get-interfaces" and method == "GET":
+            return self._agent_interfaces(int(vmid), vm)
         if action == "status/start" and method == "POST":
             vm["starting"] = 1
             vm["starts"] += 1

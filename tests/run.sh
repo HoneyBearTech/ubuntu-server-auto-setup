@@ -174,7 +174,7 @@ docker exec "$SRV" sh -c 'printf "#!/bin/sh\necho /dev/sda3\n" >/usr/local/sbin/
   printf "#!/bin/sh\necho \"\$*\" >>/tmp/cryptenroll.calls\n" >/usr/local/sbin/systemd-cryptenroll
   chmod 755 /usr/local/sbin/blkid /usr/local/sbin/systemd-cryptenroll'
 play playbooks/provision-vms.yml --limit srv-luks -v --diff -e pve_hide_secrets=false
-if grep -lF test-disk-passphrase-4063 "$TEST_TMP"/play.*; then
+if grep -lF test-disk-passphrase-4069 "$TEST_TMP"/play.*; then
   echo "ERROR: the disk passphrase is in the output above" >&2
   exit 1
 fi
@@ -192,7 +192,7 @@ play --idempotent playbooks/provision-vms.yml --limit srv-luks
 play tests/verify-disk-encryption.yml
 
 step "The installer's TPM enrollment script edits only the root disk's crypttab line, and a second run changes nothing"
-docker exec "$PVE" cat /srv/seeds/seed-srv-luks/user-data >"$TEST_TMP/user-data-luks"
+docker exec "$PVE" cat /srv/seed-copies/seed-srv-luks/user-data >"$TEST_TMP/user-data-luks"
 python3 -c 'import sys, yaml
 files = {f["path"]: f["content"] for f in yaml.safe_load(open(sys.argv[1]))["write_files"]}
 sys.stdout.write(files["/run/usas/enroll-tpm2.sh"])' "$TEST_TMP/user-data-luks" >"$TEST_TMP/enroll-tpm2.sh"
@@ -232,6 +232,32 @@ play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doe
   playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
 play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
 
+step "provision-vms: a server on DHCP, its address read from the guest agent, then a rerun that reads it again"
+play playbooks/provision-vms.yml --limit srv-dhcp
+play --idempotent playbooks/provision-vms.yml --limit srv-dhcp
+
+step "provision-vms: a VLAN on net0 and two more cards, each matched by its MAC address"
+play playbooks/provision-vms.yml --limit srv-vlan
+play tests/verify-network.yml
+
+step "provision-vms: no DHCP lease, or a guest agent the token may not ask, stops with what to do"
+play_fails 'VM 4065 (srv-nolease) reported no DHCP address on net0' playbooks/provision-vms.yml --limit srv-nolease
+play_fails 'add VM.GuestAgent.Audit (Proxmox VE 9) or VM.Monitor (Proxmox VE 8)' playbooks/provision-vms.yml \
+  --limit srv-forbidden
+
+step "provision-vms: network settings that could add options to a card, or a second default route, are refused"
+play_fails 'pve_bridge must be a bridge name' playbooks/provision-vms.yml --limit srv-vlan -e 'pve_bridge=vmbr0,firewall=0'
+play_fails 'vm_extra_nics item 1 (net1) may have only the keys' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"bridge": "vmbr1", "vlan": "20,mtu=1500"}]}'
+play_fails 'vm_extra_nics item 2 (net2) may have only the keys' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"mode": "none"}, {"mode": "dhcp", "address": "10.20.0.5"}]}'
+play_fails 'needs exactly one default gateway' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"address": "10.20.0.5", "prefix": 24, "gateway": "10.20.0.1"}]}'
+play_fails 'needs exactly one default gateway' playbooks/provision-vms.yml --limit srv-dhcp \
+  -e '{"vm_extra_nics": [{"address": "10.20.0.5", "prefix": 24, "gateway": "10.20.0.1"}]}'
+play_fails 'must all differ' playbooks/provision-vms.yml --limit srv-dhcp \
+  -e '{"vm_extra_nics": [{"mode": "none", "mac": "02:00:00:00:40:63"}]}'
+
 step "baseline: check mode on the fresh server fails nothing and changes nothing"
 # Before the first run UFW and Fail2Ban aren't installed and nothing limits SSH connections.
 play playbooks/baseline.yml --limit srv-01 --check --diff
@@ -244,6 +270,10 @@ step "baseline: first run, second run, checks"
 play playbooks/baseline.yml --limit srv-01
 play --idempotent playbooks/baseline.yml --limit srv-01
 play tests/verify-baseline.yml
+cool_down
+
+step "baseline: a server on DHCP is reached at the address its guest agent reports"
+play --idempotent playbooks/baseline.yml --limit srv-dhcp --tags ssh_keys
 cool_down
 
 step "baseline: check mode on a server that has the baseline reports no changes"

@@ -77,7 +77,7 @@ example shows a typical value.
 | `pve_vmid` | `""` | The VM ID (required, fixed per host). |
 | `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Storage for the VM's disk and its 4 MB EFI disk, and the EFI disk's format (`qcow2` on directory storage). |
 | `pve_tpmstate_storage` | `"{{ pve_storage }}"` | With `vm_disk_encryption`, the storage for the 4 MB vTPM state volume. On another storage than the disk, a copy of the disks' storage alone doesn't hold what unlocks them ([security.md](security.md#secure-boot-and-disk-encryption)). |
-| `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Network bridge and optional VLAN tag. |
+| `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Bridge and optional VLAN tag (1-4094) of the first network card, `net0`. |
 | `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. |
 | `vm_cores`, `vm_sockets`, `vm_cpu_type` | `2`, `1`, `host` | CPU. |
 | `vm_memory_mb`, `vm_disk_gb` | `2048`, `32` | Memory and disk size. |
@@ -87,16 +87,20 @@ example shows a typical value.
 | `vm_onboot` | `true` | Start the VM when the node boots. |
 | `vm_install_timeout` | `3600` | Seconds to wait for the installer to power off. |
 | `vm_install_poll_interval` | `20` | Seconds between checks of the VM's power state during the install. |
-| `ansible_host` | (required) | The static IPv4 address the installer configures. |
-| `net_prefix`, `net_gateway` | `24`, `""` | Prefix length and gateway (gateway required). |
-| `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
-| `net_interface_match` | `en*` | Which interface gets the static address. |
+| `net_mode` | `static` | How `net0` gets its IPv4 address: `static` or `dhcp` ([networks](#networks)). |
+| `ansible_host` | (required for `static`) | The static IPv4 address the installer configures. With `dhcp`, leave it out to have the address read from the guest agent, or set it to the address reserved for the server on the DHCP server. |
+| `net_prefix`, `net_gateway` | `24`, `""` | Prefix length and gateway of a static `net0`. Exactly one card has the default route: `net_gateway`, a DHCP `net0`, or one card in `vm_extra_nics`. |
+| `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains (with DHCP, in addition to the ones DHCP gives). |
+| `net_mac` | `""` | MAC address of `net0`, for example for a DHCP reservation. Empty uses one derived from the host name and VM ID. |
+| `vm_nic_model` | `virtio` | Model of every card that doesn't set its own: `virtio`, `e1000`, `e1000e`, `vmxnet3` or `rtl8139`. |
+| `vm_extra_nics` | `[]` | More network cards, `net1` and up ([networks](#networks)). |
+| `net_dhcp_timeout` | `300` | Seconds to wait for the guest agent to report the address DHCP gave `net0`. |
 | `admin_realname` | `Administrator` | The admin account's full name. |
 | `autoinstall_locale`, `autoinstall_keyboard_layout` | `en_US.UTF-8`, `us` | Locale and keyboard. |
 | `autoinstall_source_id` | `ubuntu-server` | `ubuntu-server` or `ubuntu-server-minimal`. |
 | `autoinstall_storage_layout` | `lvm` | `lvm`, `direct` or `zfs`. |
 | `autoinstall_updates` | `security` | Updates applied during the install: `security` or `all`. |
-| `autoinstall_packages` | `[qemu-guest-agent]` | Extra packages installed by the installer. |
+| `autoinstall_packages` | `[qemu-guest-agent]` | Extra packages installed by the installer (`qemu-guest-agent` is always added with `net_mode: dhcp`). |
 | `provision_manage_known_hosts` | `true` | Replace the control node's `known_hosts` entry for the new VM's IP with its fresh host key. |
 | `provision_known_hosts_file` | `~/.ssh/known_hosts` | The control node's `known_hosts` file that gets that entry. |
 
@@ -174,6 +178,47 @@ example shows a typical value.
 | `fail2ban_webhook_url` | `""` | POST a message for every ban to this http(s) URL, normally from the Vault (`"{{ vault_fail2ban_webhook_url }}"`). |
 | `fail2ban_webhook_format` | `text` | `text` (the message is the body, for ntfy) or `json` (`title`, `text`, `message` and `content`, for Slack, Mattermost, Gotify and Discord). |
 
+### Networks
+
+Every VM has a first network card, `net0`, and up to 31 more from `vm_extra_nics`. Each card gets a fixed
+MAC address (`net_mac` or a card's `mac`, otherwise one derived from the host name, the VM ID and the card
+number under Proxmox's prefix `BC:24:11`, so a VM created again keeps it), and the installed system matches
+each card by that MAC address rather than by interface name. In the installed system's netplan
+configuration, `net0` is `primary` and the others are named like their Proxmox cards (`net1`, `net2`, ...).
+
+`net0` is static (`ansible_host`, `net_prefix`, `net_gateway`, `net_dns`, `net_search`) or, with
+`net_mode: dhcp`, configured by DHCP. DHCP identifies the card by its MAC address (`dhcp-identifier: mac`), so
+an address reserved for that MAC address on the DHCP server is the one both the installer and the installed
+system get. Unless `ansible_host` is set, provisioning waits for the installed system's guest agent (the
+`qemu-guest-agent` package, enabled on the VM) to report the address of the card with `net0`'s MAC address,
+up to `net_dhcp_timeout` seconds, prints it, and uses it as `ansible_host` for the rest of the run. The
+baseline playbook does the same when it runs on its own. The API token needs `VM.GuestAgent.Audit` on
+Proxmox VE 9 or `VM.Monitor` on Proxmox VE 8 for that ([installing.md](installing.md#2-create-the-proxmox-api-token)).
+Only an IPv4 address that matches `provision_ipv4_pattern` and isn't link-local is used: the guest reports it,
+so it is treated as untrusted. The new VM's host key is trusted for that address right after the install;
+if DHCP later gives the server another address, SSH refuses it until its key is in `known_hosts` for the new
+address, so reserving the address is the easier way.
+
+Each item of `vm_extra_nics` is a mapping with these keys:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `static` | `static`, `dhcp`, or `none` (the card is attached and up, without an address). |
+| `bridge` | `pve_bridge` | The Proxmox bridge (letters, digits, `.`, `_` or `-`, at most 15). |
+| `vlan` | none | VLAN tag, 1-4094. |
+| `model` | `vm_nic_model` | The card's model. |
+| `mac` | derived | The card's MAC address (unicast). |
+| `mtu` | the bridge's | MTU, 576-9216, set on the Proxmox card and in the guest; `virtio` cards only. |
+| `address`, `prefix` | (required for `static`) | The card's IPv4 address and prefix length, 1-32. |
+| `gateway` | none | A default route through this card (`static` only). Then set `net_gateway: ""` for the host. |
+
+A `dhcp` card in `vm_extra_nics` takes neither the default route nor DNS servers from DHCP, and extra cards
+are `optional`, so booting doesn't wait for them. There must be exactly one default route: a check stops
+provisioning otherwise. IPv6 isn't configured yet (`dhcp6` is off on every card).
+
+The firewall's rules aren't bound to an interface: SSH and every `ufw_allow` rule are open on every card,
+VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and use `from` in `ufw_allow`.
+
 ### Vault variables
 
 | Variable | Used by | Meaning |
@@ -234,7 +279,7 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 
 | System | From | Protocol and authentication | What for |
 | --- | --- | --- | --- |
-| Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them. |
+| Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them; for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso` and `gpgv`, build ISOs and seed ISOs, delete seed files. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |

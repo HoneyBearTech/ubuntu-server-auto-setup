@@ -1,0 +1,114 @@
+---
+# For a server whose first network card (net0) gets its address from DHCP (net_mode: dhcp): asks the VM's QEMU
+# guest agent for that card's IPv4 address and uses it as ansible_host for the rest of the run. The role runs
+# it after the install and for existing VMs; playbooks/baseline.yml runs it when provisioning didn't.
+# The agent's answer comes from inside the guest, so only an address that matches provision_ipv4_pattern, on
+# the card with net0's MAC address, is used.
+- name: Build the API auth header
+  ansible.builtin.set_fact:
+    pve_api_headers:
+      Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Look up VM {{ pve_vmid }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/cluster/resources?type=vm"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_dhcp_vms
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Note which node runs the VM
+  ansible.builtin.set_fact:
+    pve_dhcp_vm: "{{ pve_dhcp_vms.json.data | selectattr('vmid', 'equalto', pve_vmid | int) | first | default({}) }}"
+
+- name: Fail unless the VM is running
+  ansible.builtin.assert:
+    that: pve_dhcp_vm.status | default('') == 'running'
+    fail_msg: >-
+      {{ inventory_hostname }} gets its address from DHCP (net_mode: dhcp), which is read from the guest agent of
+      VM {{ pve_vmid }}, but that VM {{ ('is ' ~ pve_dhcp_vm.status ~ ': start it and run again') if pve_dhcp_vm
+      else "doesn't exist: run playbooks/provision-vms.yml first" }}.
+    quiet: true
+
+- name: Read the VM's configuration (net0's MAC address)
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_dhcp_vm.node }}/qemu/{{ pve_vmid }}/config"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_dhcp_config
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Note net0's MAC address
+  ansible.builtin.set_fact:
+    pve_dhcp_mac: >-
+      {{ pve_dhcp_config.json.data.net0 | default('') | regex_search('^[a-z0-9]+=([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
+         | default('', true) | regex_replace('^[a-z0-9]+=', '') | lower }}
+
+- name: Fail unless net0 has a MAC address
+  ansible.builtin.assert:
+    that: pve_dhcp_mac is match(provision_mac_pattern)
+    fail_msg: VM {{ pve_vmid }} has no network card net0 with a MAC address, so its DHCP address can't be found.
+    quiet: true
+
+# Proxmox answers 500 until the agent runs in the booted system. Other errors (such as 403, a missing privilege)
+# don't go away by waiting.
+- name: Wait for the guest agent to report the address DHCP gave net0, {{ pve_dhcp_mac }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_dhcp_vm.node }}/qemu/{{ pve_vmid }}/agent/network-get-interfaces"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_dhcp_agent
+  until: pve_dhcp_agent.status not in [-1, 500, 596] and (pve_dhcp_agent.status != 200 or pve_dhcp_leases | length > 0)
+  retries: "{{ [(net_dhcp_timeout | int) // 5, 1] | max }}"
+  delay: 5
+  failed_when: false
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+  vars: &pve_dhcp_leases
+    pve_dhcp_leases: >-
+      {{ (pve_dhcp_agent.json.data.result | default([]) if pve_dhcp_agent.status | default(0) == 200 else [])
+         | selectattr('hardware-address', 'defined') | selectattr('hardware-address', 'in', [pve_dhcp_mac, pve_dhcp_mac | upper])
+         | map(attribute='ip-addresses', default=[]) | flatten | selectattr('ip-address-type', 'defined')
+         | selectattr('ip-address-type', 'equalto', 'ipv4') | map(attribute='ip-address') | select('string')
+         | select('match', provision_ipv4_pattern) | reject('match', '169[.]254[.]') | list }}
+
+- name: Fail unless the guest agent reported an address
+  ansible.builtin.assert:
+    that: pve_dhcp_leases | length > 0
+    fail_msg: "{{ pve_dhcp_forbidden if pve_dhcp_agent.status == 403 else pve_dhcp_no_lease }}"
+    quiet: true
+  vars:
+    <<: *pve_dhcp_leases
+    pve_dhcp_forbidden: >-
+      The API token may not ask the guest agent of VM {{ pve_vmid }} for its addresses, which a server with
+      net_mode dhcp needs: add VM.GuestAgent.Audit (Proxmox VE 9) or VM.Monitor (Proxmox VE 8) to the token's
+      role, as docs/installing.md describes.
+    pve_dhcp_no_lease: >-
+      VM {{ pve_vmid }} ({{ inventory_hostname }}) reported no DHCP address on net0 ({{ pve_dhcp_mac }}) within
+      {{ net_dhcp_timeout }} seconds. Check that a DHCP server answers on that card's bridge and VLAN, and that
+      qemu-guest-agent runs in the VM. Proxmox said:
+      {{ pve_dhcp_agent.json.message | default(pve_dhcp_agent.msg | default(pve_dhcp_agent.status)) | trim }}
+
+- name: Use the address DHCP gave net0 as ansible_host
+  ansible.builtin.set_fact:
+    ansible_host: "{{ pve_dhcp_leases | first }}"
+    provision_dhcp_address: "{{ pve_dhcp_leases | first }}"
+  vars: *pve_dhcp_leases
+
+- name: Report the address
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} has {{ provision_dhcp_address }} from DHCP on net0 ({{ pve_dhcp_mac }}). It is used
+      for the rest of this run; reserve it for that MAC address on the DHCP server to keep it.

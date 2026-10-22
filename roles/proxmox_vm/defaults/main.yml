@@ -21,8 +21,8 @@ pve_efidisk_format: raw        # raw for LVM/ZFS/Ceph, qcow2 for directory stora
 # Storage for the vTPM's state (vm_disk_encryption). Somewhere other than pve_storage keeps a copy of the
 # disks' storage alone from holding what unlocks them.
 pve_tpmstate_storage: "{{ pve_storage }}"
-pve_bridge: vmbr0
-pve_vlan: ""                   # VLAN tag, empty for none
+pve_bridge: vmbr0              # bridge of the first network card, net0
+pve_vlan: ""                   # VLAN tag of net0 (1-4094), empty for none
 pve_vmid: ""                   # required, fixed per host so reruns can find the VM
 pve_tags: [ubuntu, ansible]
 
@@ -54,11 +54,31 @@ admin_password: ""             # from Vault; hashed (SHA-512) before it goes in 
 github_user: ""
 github_keys_url: "https://github.com/{{ github_user }}.keys"
 admin_extra_ssh_keys: []       # extra public keys besides the GitHub ones
+# --- Network ---
+# How the first network card gets its IPv4 address: static (ansible_host, net_prefix and net_gateway) or dhcp.
+# With dhcp and no ansible_host, the address is read from the QEMU guest agent once the installed system boots
+# and used as ansible_host for the rest of the run; the API token needs VM.GuestAgent.Audit (PVE 9) or
+# VM.Monitor (PVE 8). With dhcp and an ansible_host (an address reserved for net_mac), that address is used.
+net_mode: static
 net_prefix: 24
 net_gateway: ""
 net_dns: []
 net_search: []
-net_interface_match: "en*"
+# MAC address of net0, for example to reserve its DHCP address on the router. Empty uses one derived from the
+# host name and VM ID, so a VM created again gets the same one.
+net_mac: ""
+vm_nic_model: virtio           # model of every network card unless a card sets its own
+# Seconds to wait for the guest agent to report the address DHCP gave net0.
+net_dhcp_timeout: 300
+# More network cards (net1, net2, ...), each a mapping with these keys (only mode is needed for dhcp or none):
+#   mode: static, dhcp or none (attached, no address); bridge (default pve_bridge); vlan (1-4094);
+#   model (default vm_nic_model); mac (default derived like net_mac); mtu (576-9216, virtio only);
+#   address and prefix (static only); gateway (static only, if this card has the default route instead of net0).
+# The installed system matches each card by its MAC address. Example:
+#   vm_extra_nics:
+#     - { bridge: vmbr1, vlan: 20, mode: static, address: 10.20.0.61, prefix: 24 }
+#     - { bridge: vmbr1, vlan: 30, mode: dhcp }
+vm_extra_nics: []
 autoinstall_locale: en_US.UTF-8
 autoinstall_keyboard_layout: us
 autoinstall_source_id: ubuntu-server   # or ubuntu-server-minimal

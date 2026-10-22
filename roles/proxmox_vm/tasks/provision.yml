@@ -138,8 +138,7 @@
         ide:
           ide2: "{{ pve_iso_storage }}:iso/{{ installer_iso_name }},media=cdrom"
           ide3: "{{ pve_iso_storage }}:iso/seed-{{ inventory_hostname }}.iso,media=cdrom"
-        net:
-          net0: "virtio,bridge={{ pve_bridge }}{{ (',tag=' ~ pve_vlan) if pve_vlan | string | length > 0 else '' }}"
+        net: "{{ dict(provision_nics | map(attribute='key') | zip(provision_nics | map(attribute='proxmox'))) }}"
         boot: order=scsi0;ide2
         agent: enabled=1
         onboot: "{{ vm_onboot | bool }}"
@@ -233,6 +232,10 @@
 
 - name: Wait until the installed system is booting
   ansible.builtin.include_tasks: wait_for_start.yml
+
+- name: Find the address DHCP gave the new VM
+  ansible.builtin.include_tasks: dhcp_address.yml
+  when: net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]
 
 - name: Wait for the installed system to answer
   block:

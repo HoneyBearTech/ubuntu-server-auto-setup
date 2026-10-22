@@ -22,6 +22,8 @@ W="$(realpath "$W")"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.secboot.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.ms.fd}"
 SSH_PORT=2299
+# The installer matches the network card by its MAC address (provision_nics, as tasks/main.yml builds it).
+VM_MAC=BC:24:11:00:00:99
 INSTALL_TIMEOUT="${INSTALL_TIMEOUT:-3000}"
 qemu_pid=""
 swtpm_pid=""
@@ -119,7 +121,9 @@ cat >"$W/vars.json" <<EOF
  "admin_user": "sysadmin", "ansible_host": "10.0.2.15", "net_prefix": 24, "net_gateway": "10.0.2.2",
  "net_dns": ["10.0.2.3"], "provision_password_hash": "$(openssl passwd -6 test-password)",
  "provision_ssh_keys": ["$(cat "$W/id_ed25519.pub")"], "vm_disk_encryption": true,
- "vm_disk_passphrase": "$DISK_PASSPHRASE"}
+ "vm_disk_passphrase": "$DISK_PASSPHRASE", "net_mode": "static",
+ "provision_nics": [{"key": "net0", "mode": "static", "mac": "$VM_MAC", "mtu": "", "address": "10.0.2.15",
+                     "prefix": 24, "gateway": "10.0.2.2"}]}
 EOF
 ANSIBLE_CONFIG="$ROOT/ansible.cfg" ansible-playbook -i localhost, -c local "$W/render.yml" -e "@$W/vars.json" \
   | sed -n '/PLAY RECAP/,$p'
@@ -159,7 +163,7 @@ start_vm() {
     -device virtio-scsi-pci,id=scsihw0 \
     -drive "if=none,id=drive-scsi0,file=$W/disk.qcow2,format=qcow2,discard=unmap" \
     -device scsi-hd,drive=drive-scsi0,bus=scsihw0.0,bootindex=1 \
-    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" -device virtio-net-pci,netdev=net0 \
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" -device "virtio-net-pci,netdev=net0,mac=$VM_MAC" \
     -display none -vga std -monitor "unix:$W/monitor.sock,server,nowait" "$@" &
   qemu_pid=$!
 }

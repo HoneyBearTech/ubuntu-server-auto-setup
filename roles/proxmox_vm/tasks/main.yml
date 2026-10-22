@@ -7,13 +7,14 @@
       - pve_api_token_secret | length > 0
       - pve_node | length > 0
       - pve_vmid | string is match('^[0-9]+\Z')
-      - ansible_host is defined and ansible_host != inventory_hostname
-      - net_gateway | length > 0
+      - net_mode in provision_net_modes
+      - net_mode == 'dhcp' or (ansible_host is defined and ansible_host != inventory_hostname)
       - github_user | length > 0 or admin_extra_ssh_keys | length > 0
       - admin_password | length > 0
     fail_msg: >-
-      Set pve_api_host, the API token, pve_node, a numeric pve_vmid, ansible_host (the static IP),
-      net_gateway, github_user (or admin_extra_ssh_keys) and admin_password for {{ inventory_hostname }}.
+      Set pve_api_host, the API token, pve_node, a numeric pve_vmid, net_mode (static or dhcp), ansible_host
+      (the static IP, unless net_mode is dhcp), github_user (or admin_extra_ssh_keys) and admin_password for
+      {{ inventory_hostname }}.
     quiet: true
 
 # These values go into the installer's configuration and a shell command run as root during the install.
@@ -22,14 +23,126 @@
     that:
       - admin_user is match(provision_username_pattern)
       - inventory_hostname_short is match(provision_hostname_pattern)
-      - ansible_host is match(provision_ipv4_pattern)
-      - net_gateway is match(provision_ipv4_pattern)
+      - (net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]) or ansible_host is match(provision_ipv4_pattern)
+      - net_gateway | string | length == 0 or net_gateway is match(provision_ipv4_pattern)
       - net_prefix | string is match('^[0-9]{1,2}\Z') and 1 <= (net_prefix | int) <= 32
     fail_msg: >-
       {{ inventory_hostname }}: admin_user must be a lowercase Linux user name, the inventory name a valid
       host name (letters, digits, hyphens), ansible_host and net_gateway IPv4 addresses, and net_prefix 1-32.
     quiet: true
 
+# The network cards' settings go into the VM's configuration (as key=value options, so a comma could add
+# another) and into the installer's network configuration.
+- name: Check the network card settings
+  ansible.builtin.assert:
+    that:
+      - pve_bridge is string and pve_bridge is match(provision_bridge_pattern)
+      - pve_vlan | string | length == 0 or pve_vlan | string is match(provision_vlan_pattern)
+      - net_mac | string | length == 0 or net_mac | string is match(provision_mac_pattern)
+      - vm_nic_model in provision_nic_models
+      - net_dhcp_timeout | string is match('^[0-9]{1,5}\Z')
+      - vm_extra_nics is sequence and vm_extra_nics is not string and vm_extra_nics is not mapping
+      - vm_extra_nics | length <= 31
+      - vm_extra_nics | reject('mapping') | list | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: pve_bridge must be a bridge name (letters, digits, '.', '_' or '-', at most 15),
+      pve_vlan empty or 1-4094, net_mac empty or a unicast MAC address (like BC:24:11:12:34:56), vm_nic_model one
+      of {{ provision_nic_models | join(', ') }}, net_dhcp_timeout a number of seconds, and vm_extra_nics a list
+      of at most 31 mappings.
+    quiet: true
+
+- name: Fill in the defaults of the extra network cards
+  ansible.builtin.set_fact:
+    provision_extra_nics: "{{ [provision_nic_defaults] | product(vm_extra_nics) | map('combine') | list }}"
+  vars:
+    provision_nic_defaults:
+      mode: static
+      bridge: "{{ pve_bridge }}"
+      vlan: ""
+      model: "{{ vm_nic_model }}"
+      mac: ""
+      mtu: ""
+      address: ""
+      prefix: ""
+      gateway: ""
+
+- name: Check the extra network cards
+  ansible.builtin.assert:
+    that:
+      - item.keys() | list | difference(provision_nic_keys) | length == 0
+      - item.mode in provision_nic_modes
+      - item.bridge is string and item.bridge is match(provision_bridge_pattern)
+      - item.vlan | string | length == 0 or item.vlan | string is match(provision_vlan_pattern)
+      - item.model in provision_nic_models
+      - item.mac | string | length == 0 or item.mac | string is match(provision_mac_pattern)
+      - item.mtu | string | length == 0 or (item.model == 'virtio' and item.mtu | string is match(provision_mtu_pattern))
+      - item.mode == 'static' or (item.address | string ~ item.prefix | string ~ item.gateway | string) | length == 0
+      - item.mode != 'static' or item.address | string is match(provision_ipv4_pattern)
+      - item.mode != 'static' or item.prefix | string is match(provision_prefix_pattern)
+      - item.gateway | string | length == 0 or item.gateway | string is match(provision_ipv4_pattern)
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_extra_nics item {{ provision_nic_index + 1 }} (net{{ provision_nic_index + 1 }})
+      may have only the keys {{ provision_nic_keys | join(', ') }}. mode is static, dhcp or none; bridge a bridge
+      name; vlan 1-4094; model one of {{ provision_nic_models | join(', ') }}; mac a unicast MAC address; mtu
+      576-9216, for virtio only. A static card needs an IPv4 address and a prefix 1-32, and may have a gateway;
+      dhcp and none cards have none of those three.
+    quiet: true
+  loop: "{{ provision_extra_nics }}"
+  loop_control:
+    index_var: provision_nic_index
+    label: net{{ provision_nic_index + 1 }}
+
+- name: Check that exactly one network card has the default route
+  ansible.builtin.assert:
+    that: >-
+      (1 if net_mode == 'dhcp' or net_gateway | string | length > 0 else 0)
+      + (provision_extra_nics | map(attribute='gateway') | map('string') | select | list | length) == 1
+    fail_msg: >-
+      {{ inventory_hostname }} needs exactly one default gateway: net_gateway, or the gateway of one card in
+      vm_extra_nics (then set net_gateway to "" for this host). With net_mode dhcp, net0 gets its gateway from
+      DHCP, so no extra card may set one.
+    quiet: true
+
+- name: Start the list of network cards
+  ansible.builtin.set_fact:
+    provision_nics: []
+
+# Each card gets a fixed MAC address, so the installed system can match it (interface names depend on the
+# PCI layout). Unless one is set, it is derived from the host name, VM ID and card number, under Proxmox's
+# own prefix, so a VM created again keeps its MAC addresses and any DHCP reservations for them.
+- name: Describe the VM's network cards (net0 to net{{ vm_extra_nics | length }})
+  ansible.builtin.set_fact:
+    provision_nics: "{{ provision_nics + [provision_nic] }}"
+  vars:
+    provision_primary_nic:
+      mode: "{{ net_mode }}"
+      bridge: "{{ pve_bridge }}"
+      vlan: "{{ pve_vlan }}"
+      model: "{{ vm_nic_model }}"
+      mac: "{{ net_mac }}"
+      mtu: ""
+      address: "{{ ansible_host if net_mode == 'static' else '' }}"
+      prefix: "{{ net_prefix if net_mode == 'static' else '' }}"
+      gateway: "{{ net_gateway if net_mode == 'static' else '' }}"
+    provision_nic_hash: "{{ (inventory_hostname ~ '/' ~ pve_vmid ~ '/net' ~ provision_nic_index) | hash('sha256') }}"
+    provision_nic_mac: >-
+      {{ (item.mac | string if item.mac | string | length > 0
+          else 'BC:24:11:' ~ provision_nic_hash[0:2] ~ ':' ~ provision_nic_hash[2:4] ~ ':' ~ provision_nic_hash[4:6]) | upper }}
+    provision_nic: >-
+      {{ item | combine({'key': 'net' ~ provision_nic_index, 'mac': provision_nic_mac,
+         'proxmox': item.model ~ '=' ~ provision_nic_mac ~ ',bridge=' ~ item.bridge
+                    ~ ((',tag=' ~ item.vlan) if item.vlan | string | length > 0 else '')
+                    ~ ((',mtu=' ~ item.mtu) if item.mtu | string | length > 0 else '')}) }}
+  loop: "{{ [provision_primary_nic] + provision_extra_nics }}"
+  loop_control:
+    index_var: provision_nic_index
+    label: net{{ provision_nic_index }}
+
+- name: Check that no two network cards share a MAC address
+  ansible.builtin.assert:
+    that: provision_nics | map(attribute='mac') | unique | length == provision_nics | length
+    fail_msg: "{{ inventory_hostname }}: net_mac and the mac of each card in vm_extra_nics must all differ."
+    quiet: true
 # The TPM only releases the disk key while PCR 7 (Secure Boot state) matches, so encryption without Secure
 # Boot would bind it to nothing. Subiquity encrypts only the lvm layout.
 - name: Check the disk encryption settings
@@ -121,3 +234,8 @@
 - name: Install Ubuntu on a new VM
   ansible.builtin.include_tasks: provision.yml
   when: not pve_vm_exists
+
+# With net_mode dhcp and an ansible_host (an address reserved on the DHCP server), that address is used as is.
+- name: Find the address DHCP gave the existing VM
+  ansible.builtin.include_tasks: dhcp_address.yml
+  when: pve_vm_exists and net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]

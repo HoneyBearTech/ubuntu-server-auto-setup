@@ -156,7 +156,7 @@ You need:
 - a control node (Linux or macOS) with Python 3.12 or later (what ansible-core 2.20 needs) and `git`;
 - one or more Proxmox VE 8 or 9 nodes that you can reach over SSH as `root` with a key;
 - a Proxmox API token with the privileges listed in [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token);
-- free static IP addresses on the VMs' network, and a GitHub account with your SSH public keys on it.
+- free static IP addresses on the VMs' network (or a DHCP server there), and a GitHub account with your SSH public keys on it.
 
 1. Get the code and install the dependencies in a virtual environment:
 
@@ -258,15 +258,17 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 
 | Variable | Default | What it is |
 | --- | --- | --- |
-| `ansible_host` | (required) | The server's static IP address; the installer configures it. |
+| `net_mode` | `static` | `static`, or `dhcp`: the address comes from your DHCP server and is read from the VM's guest agent. |
+| `ansible_host` | (required for `static`) | The server's static IP address; the installer configures it. |
 | `pve_vmid` | (required) | The Proxmox VM ID. Only IDs that don't exist anywhere in the cluster yet are created. |
 | `pve_node` | (required) | The Proxmox node the VM is created on (and, through `pve_ssh_host`, the inventory host used to reach it over SSH). |
 | `pve_storage` | `local-lvm` | The storage for the VM's disk and EFI disk (`pve_efidisk_format`: `raw`, or `qcow2` on directory storage). |
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | The network bridge and an optional VLAN tag. |
+| `vm_extra_nics` | `[]` | More network cards, each with a bridge, VLAN, and a static address, DHCP or none ([docs/interfaces.md](docs/interfaces.md#networks)). |
 | `vm_cores`, `vm_memory_mb`, `vm_disk_gb` | `2`, `2048`, `32` | The VM's size. |
 | `vm_secure_boot` | `true` | Secure Boot: Microsoft's keys are pre-enrolled in the EFI disk, so the VM boots only signed code. `false` opts a new VM out. |
 | `vm_disk_encryption` | `false` | Encrypt the root disk (LUKS2) and unlock it at boot with a vTPM, the passphrase (`vm_disk_passphrase: "{{ vault_disk_passphrase }}"`) kept as the recovery key. Read [what it protects](docs/security.md#secure-boot-and-disk-encryption) first. |
-| `net_prefix`, `net_gateway` | `24`, (required) | The network prefix length and the default gateway. |
+| `net_prefix`, `net_gateway` | `24`, (required for `static`) | The network prefix length and the default gateway. |
 | `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
 | `autoinstall_storage_layout` | `lvm` | The installer's disk layout: `lvm`, `direct` or `zfs`. |
 | `vm_install_timeout` | `3600` | Seconds to wait for the installer to finish. |

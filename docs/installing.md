@@ -18,8 +18,8 @@ and the ISO files the playbooks create. For a shorter walk-through, see the [qui
   you set another). Both must be storages that allow disk images; on directory storage set
   `pve_efidisk_format: qcow2`. If the TPM state goes to another storage, the token's permissions must cover
   it too (the `pveum acl modify /` line below does).
-- **Network**: a static IP address, gateway and DNS servers for every new VM, on a bridge (`vmbr0`) the
-  control node can reach over SSH.
+- **Network**: a static IP address, gateway and DNS servers for every new VM, or a DHCP server on its
+  network (`net_mode: dhcp`), on a bridge (`vmbr0`) the control node can reach over SSH.
 - **A GitHub account** with your SSH public keys (`https://github.com/<user>.keys`), protected with
   two-factor authentication.
 
@@ -66,7 +66,7 @@ with only the privileges it needs:
 | `VM.Audit` | list VMs (to skip existing ones) and watch the installer finish |
 | `Datastore.AllocateSpace`, `Datastore.Audit` | allocate the disks and use the ISOs in the ISO storage |
 | `SDN.Use` | attach the VM to a bridge (Proxmox VE 8 and later check this) |
-| `VM.GuestAgent.Audit` (Proxmox VE 9 and later) | the web UI's VMs page: ask the VMs' guest agents for their addresses, OS and host name, read-only. The playbooks don't use it. |
+| `VM.GuestAgent.Audit` (Proxmox VE 9 and later) | read-only questions to the VMs' guest agents: the address DHCP gave a server with `net_mode: dhcp` (provisioning and the baseline), and the web UI's VMs page (addresses, OS and host name). Servers with static addresses don't need it. |
 
 On a Proxmox node, as root:
 
@@ -90,6 +90,13 @@ commands as root in every VM with an agent and using the QEMU monitor. Adding `V
 is optional and not recommended. Without it, the VMs page shows each VM's address from the inventory (the
 Servers page) or from its cloud-init settings, and says why the agents' data is missing. If you add it
 anyway, anyone with the Vault or the web UI's password can run commands in those VMs.
+
+Servers with `net_mode: dhcp` and no `ansible_host` are found the same way: once the installed system boots,
+the playbooks ask its guest agent which address DHCP gave the first network card. On Proxmox VE 9 that is
+covered by `VM.GuestAgent.Audit`. On Proxmox VE 8 it needs `VM.Monitor`, with the risk above; to avoid it,
+reserve an address for the server on your DHCP server (set `net_mac` so the MAC address is known before the
+VM exists) and put that address in `ansible_host`: then the agent isn't asked. Without either, provisioning
+stops with a message naming the missing privilege.
 
 The token is created with **privilege separation** (`--privsep 1`): it gets only the permissions given to
 the token itself, and never more than its user has. `ansible@pve` has no password, so nobody can sign in to
@@ -122,7 +129,9 @@ cp inventory/hosts.example.yml inventory/hosts.yml
   and `ansible_user: root`;
 - `ubuntu_servers`: one host per server. For a new VM: `ansible_host` (its static IP), `pve_vmid`,
   `pve_node`, and the network and size variables. Group-wide values such as `net_gateway`, `net_dns`
-  and `fail2ban_ignoreip` go under the group's `vars`.
+  and `fail2ban_ignoreip` go under the group's `vars`. A server that gets its address from DHCP has
+  `net_mode: dhcp` and no `ansible_host`; more network cards and VLANs are set with `pve_vlan` and
+  `vm_extra_nics` ([interfaces.md](interfaces.md#networks)).
 
 Every variable is described in [interfaces.md](interfaces.md) and the README's
 [configuration section](../README.md#configuration); each role's `defaults/main.yml` has the full list.

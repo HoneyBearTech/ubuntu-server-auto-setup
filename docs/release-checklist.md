@@ -87,12 +87,34 @@ be tagged; replace them with yours.
   ```
 
 - [ ] A second run skips the VM ("VM 9001 already exists; skipping install") and reports `changed=0`.
+- [ ] **DHCP**, if the release touches networking: a second test VM (`test-02`, VM ID `9002`) with
+  `net_mode: dhcp`, no `ansible_host` and a `net_mac`, on a network with a DHCP server. Provisioning prints
+  "test-02 has <address> from DHCP on net0", and that is the address the DHCP server leased to `net_mac`.
+  The baseline then connects to it, in the same `make site` run and again with `make baseline` on its own.
+  On Proxmox VE 9 the token's `VM.GuestAgent.Audit` is enough; without it, the run stops naming that
+  privilege:
+
+  ```bash
+  qm config 9002 | grep -E '^(net0|agent):'   # net0: virtio=<net_mac>,bridge=...; agent: enabled=1
+  qm guest cmd 9002 network-get-interfaces | grep -i -A8 '<net_mac>'   # its ipv4 address
+  ```
+
+- [ ] **An extra network card on a VLAN**, if the release touches networking: `test-01` with
+  `vm_extra_nics: [{bridge: <bridge>, vlan: <tag>, mode: static, address: <address>, prefix: <prefix>}]` on a
+  VLAN the bridge carries (`bridge-vlan-aware yes`). The VM has `net1` with that tag, and in the VM the card
+  whose MAC address is `net1`'s has the address and comes up after a reboot; the default route still goes
+  through `net0`, and SSH answers on both addresses (the firewall's rules apply to every card):
+
+  ```bash
+  qm config 9001 | grep -E '^net[0-9]:'       # net1: virtio=<mac>,bridge=<bridge>,tag=<tag>
+  ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
+  ```
 
 ## Secure Boot and disk encryption
 
 CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
 VMs, but not on Proxmox itself. Here the test VM (Secure Boot is the default) and a second disposable VM
-with disk encryption, `test-02` (VM ID `9002`, address `192.0.2.11`), with `vm_disk_encryption: true`
+with disk encryption, `test-03` (VM ID `9003`, address `192.0.2.12`), with `vm_disk_encryption: true`
 and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real cluster.
 
 - [ ] Both VMs have an EFI disk with pre-enrolled keys, and only the encrypted one has a TPM state volume,
@@ -100,30 +122,30 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
 
   ```bash
   qm config 9001 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
-  qm config 9002 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
+  qm config 9003 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
   ```
 
 - [ ] Both report Secure Boot on:
 
   ```bash
   ssh sysadmin@192.0.2.10 mokutil --sb-state      # SecureBoot enabled
-  ssh sysadmin@192.0.2.11 mokutil --sb-state
+  ssh sysadmin@192.0.2.12 mokutil --sb-state
   ```
 
-- [ ] `test-02`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
+- [ ] `test-03`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
   passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto`:
 
   ```bash
-  ssh sysadmin@192.0.2.11 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
-  ssh sysadmin@192.0.2.11 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
-  ssh sysadmin@192.0.2.11 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
+  ssh sysadmin@192.0.2.12 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
+  ssh sysadmin@192.0.2.12 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
+  ssh sysadmin@192.0.2.12 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
   ```
 
 - [ ] A reboot unlocks without anyone typing: watch the console in Proxmox (no passphrase prompt) and wait
   for SSH:
 
   ```bash
-  ssh sysadmin@192.0.2.11 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.11 uptime
+  ssh sysadmin@192.0.2.12 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.12 uptime
   ```
 
 - [ ] The recovery passphrase works: it opens the LUKS volume, and after the TPM slot is wiped the VM stops
@@ -132,20 +154,20 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
   unattended again:
 
   ```bash
-  ssh -t sysadmin@192.0.2.11 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
-  ssh -t sysadmin@192.0.2.11 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.11 sudo systemctl reboot   # type the passphrase on the console, then:
-  ssh -t sysadmin@192.0.2.11 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.11 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.11 uptime
+  ssh -t sysadmin@192.0.2.12 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
+  ssh -t sysadmin@192.0.2.12 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.12 sudo systemctl reboot   # type the passphrase on the console, then:
+  ssh -t sysadmin@192.0.2.12 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.12 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.12 uptime
   ```
 
-- [ ] The installer's copy of its configuration is gone from `test-02`, and no seed is left on the node:
+- [ ] The installer's copy of its configuration is gone from `test-03`, and no seed is left on the node:
 
   ```bash
-  ssh sysadmin@192.0.2.11 'sudo ls /var/log/installer/'    # no autoinstall-user-data
+  ssh sysadmin@192.0.2.12 'sudo ls /var/log/installer/'    # no autoinstall-user-data
   ```
 
-- [ ] A Proxmox backup of `test-02` restores to a VM that boots unattended (the backup carries the TPM
+- [ ] A Proxmox backup of `test-03` restores to a VM that boots unattended (the backup carries the TPM
   state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
 
 ## baseline
@@ -263,8 +285,8 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] Delete the test VMs and any seed ISO a stopped run left behind:
 
   ```bash
-  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM
-  qm stop 9002; qm destroy 9002 --purge     # the encrypted test VM (its TPM state volume goes too)
+  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
+  qm stop 9003; qm destroy 9003 --purge     # the encrypted test VM (its TPM state volume goes too)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01
   ```

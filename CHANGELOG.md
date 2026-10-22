@@ -8,8 +8,49 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Upgrading
+
+- **New VMs now boot with Secure Boot** (`vm_secure_boot` defaults to `true`): their EFI disk gets
+  Microsoft's keys pre-enrolled (`pre-enrolled-keys=1`), so they run only Ubuntu's signed boot chain and the
+  kernel loads only signed modules. Existing VMs are untouched: provisioning skips every VM that exists.
+  To keep the old behaviour for new VMs (an EFI disk without keys, for example for an unsigned kernel or
+  out-of-tree DKMS modules), set `vm_secure_boot: false` in the inventory, for the group or the host. In the
+  web UI it is "Secure Boot keys" under the advanced options.
+
 ### Added
 
+- **Optional disk encryption with TPM2 unlocking** (`vm_disk_encryption`, off by default): the installer
+  puts the root file system on LUKS2 (the `lvm` layout with a passphrase), the VM gets a virtual TPM 2.0
+  (`tpmstate0`, on `pve_tpmstate_storage`, the VM storage by default). At the end of the install
+  `systemd-cryptenroll` adds a TPM2 key slot, with `tpm2-device=auto` in crypttab and the initramfs rebuilt,
+  so the VM boots unattended from its first boot; right after that boot, provisioning binds the slot to
+  PCR 7 (the Secure Boot state) as the installed system measures it. The passphrase comes from the Vault
+  (`vm_disk_passphrase: "{{ vault_disk_passphrase }}"`), stays enrolled as the recovery key, is written only
+  to the short-lived seed and the installer's RAM, and is hidden from all output; the installer's copy of its
+  configuration is deleted at the VM's first boot. It needs Secure Boot and the `lvm` layout (the run stops
+  otherwise). It protects a copy of the VM's disk taken without its TPM state, not a compromised Proxmox
+  host or a backup that includes the TPM state:
+  [docs/security.md](docs/security.md#secure-boot-and-disk-encryption) explains the threat model, why PCR 7,
+  and how to recover at the console.
+- CI installs from the real remastered ISO in a VM with Secure Boot and a TPM 2.0 (QEMU, OVMF with
+  Microsoft's keys, swtpm, set up as Proxmox does), with an encrypted disk, and checks Secure Boot, LUKS2
+  with a TPM2 key slot bound to PCR 7, unattended boots and reboots, that no file on the disk holds the
+  passphrase, and the recovery path (`tests/secure-boot-install.sh`, in the "Installer ISO" job).
+- A "Secure Boot and disk encryption" section in the pre-release checklist for the real-Proxmox checks
+  (`mokutil --sb-state`, `cryptsetup status`, an unattended reboot, the recovery passphrase).
+- **DHCP** for new VMs: `net_mode: dhcp` (per host or for a group; the default stays `static`). The installer
+  configures the first network card with DHCP, and once the installed system boots, provisioning asks its
+  QEMU guest agent for the address and uses it as `ansible_host` for the rest of the run, printing it; the
+  baseline playbook does the same when run on its own. It waits up to `net_dhcp_timeout` seconds (300) and
+  says what to check if no address comes. The API token needs `VM.GuestAgent.Audit` on Proxmox VE 9 or
+  `VM.Monitor` on Proxmox VE 8 for this; with an address reserved on the DHCP server for `net_mac` and set
+  as `ansible_host`, the agent isn't asked at all.
+- **More network cards and VLANs**: `vm_extra_nics` adds `net1` and up, each with its bridge, VLAN tag,
+  model, MAC address, MTU and a static address, DHCP or no address; `pve_vlan` already tags `net0`. Each
+  card gets a fixed MAC address (`net_mac`, a card's `mac`, or one derived from the host name and VM ID, so a
+  VM created again keeps it) and the installed system matches cards by MAC address, not by interface name.
+  Exactly one card may have the default route; every network value is checked before anything is created.
+  The firewall's rules apply to every card (docs/interfaces.md, Networks).
 - **Passkeys** in the web UI. Once signed in with the password, add passkeys on the account page (a name
   and the current password), see when each was added and last used, and remove them; the sign-in page
   offers **Sign in with a passkey** next to the password. **Require a passkey** turns password sign-in off;
@@ -21,6 +62,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/web-ui.md](docs/web-ui.md#passkeys), [docs/security.md](docs/security.md)).
 - The container log records every sign-in and failed sign-in, with the client's address, and passkeys
   being added, removed or required.
+
+### Changed
+
+- `vm_secure_boot` defaults to `true` (see Upgrading).
+- The mock Proxmox API stores `efidisk0` and `tpmstate0` the way Proxmox does and refuses what Proxmox
+  would; the integration tests check the installer configuration the VM actually got.
+- The installer matches the first network card by its MAC address instead of the interface name pattern
+  `net_interface_match`, which is no longer used. New VMs get a MAC address derived from their host name and
+  VM ID instead of a random one; existing VMs are untouched.
+- `pve_bridge` and `pve_vlan` are now checked (a bridge name, a VLAN tag 1-4094) before a VM is created.
 
 ### Fixed
 
