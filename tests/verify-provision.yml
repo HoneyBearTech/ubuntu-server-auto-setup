@@ -40,6 +40,21 @@
           - create[0].ide3 == 'local:iso/seed-srv-01.iso,media=cdrom'
           - create[0].boot == 'order=scsi0;ide2'
 
+    - name: Check the VM on the second node
+      vars:
+        vm: "{{ verify_api.json.data.vms['4081'] }}"
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test-2/qemu') | map(attribute='form') | list }}"
+      ansible.builtin.assert:
+        that:
+          - vm.node == 'pve-test-2'
+          - vm.installed
+          - vm.starts == 2
+          - create | length == 1
+          - create[0].name == 'srv-two'
+          - create[0].ide3 == 'local:iso/seed-srv-two.iso,media=cdrom'
+          - verify_api.json.data.requests | selectattr('path', 'search', '^/nodes/pve-test/qemu/4081/') | list | length == 0
+
     - name: Check the VM whose install never finished
       ansible.builtin.assert:
         that:

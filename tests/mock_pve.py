@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """A small stand-in for the Proxmox VE API, for the integration tests.
 
-It implements only the calls that the proxmox_vm role and community.proxmox.proxmox_kvm make, keeps VMs in
-memory, and pretends to run the installer: after a VM's first start it reports "running" for a few status
+It answers for a cluster of two nodes (NODES), each with its own ISO storages, and implements only the calls
+that the proxmox_vm role and community.proxmox.proxmox_kvm make. It keeps VMs in memory, on the node each was
+created on, and pretends to run the installer: after a VM's first start it reports "running" for a few status
 polls, then "stopped" (the installer powering the VM off). VMs whose ID is in HANG_VMIDS never stop, to test
 the role's failure path. Like Proxmox, a start request only starts a task: the VM's status stays "stopped"
 until that task has been seen running and then finished.
@@ -33,7 +34,21 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "PVEAPIToken=ansible@pve!test=00000000-0000-4000-8000-000000000000"
-NODE = "pve-test"
+# A cluster of two nodes. Each has the node-local "local" and the cluster's shared "synology-nfs" for ISO images;
+# only the first also has "usb-iso", a node-local storage the second can't use. A VM lives on the node it was
+# created on, and its calls must name that node, as in Proxmox.
+NODES = ("pve-test", "pve-test-2")
+NODE = NODES[0]  # where the fixture VMs live
+NODE_STORAGES = {
+    "pve-test": ("local", "local-lvm", "synology-nfs", "usb-iso"),
+    "pve-test-2": ("local", "local-lvm", "synology-nfs"),
+}
+STORAGES = {
+    "local": {"type": "dir", "content": "iso,vztmpl,backup", "shared": 0},
+    "local-lvm": {"type": "lvmthin", "content": "images,rootdir", "shared": 0},
+    "synology-nfs": {"type": "nfs", "content": "images,iso", "shared": 1},
+    "usb-iso": {"type": "dir", "content": "iso", "shared": 0},
+}
 HANG_VMIDS = {4099}
 POLLS_BEFORE_POWEROFF = 2
 # The address DHCP "gives" net0. The test server is a container reached on this machine, hence 127.0.0.1.
@@ -113,8 +128,17 @@ def fixture_resources():
     return data
 
 
-def upid(action, vmid):
-    return f"UPID:{NODE}:0000AAAA:00BBBBBB:6700CCCC:{action}:{vmid}:ansible@pve!test:"
+def storage_entry(name):
+    """A storage as /storage lists it: "nodes" names the nodes that have it, unless every node does."""
+    entry = {"storage": name, **STORAGES[name]}
+    nodes = [n for n in NODES if name in NODE_STORAGES[n]]
+    if len(nodes) < len(NODES):
+        entry["nodes"] = ",".join(nodes)
+    return entry
+
+
+def upid(action, vmid, node=NODE):
+    return f"UPID:{node}:0000AAAA:00BBBBBB:6700CCCC:{action}:{vmid}:ansible@pve!test:"
 
 
 class PveHandler(BaseHTTPRequestHandler):
@@ -215,21 +239,26 @@ class PveHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/version":
             return self._reply(200, {"version": "9.1.1", "release": "9.1", "repoid": "mock"})
         if method == "GET" and path == "/nodes":
-            return self._reply(200, [{"node": NODE, "status": "online", "type": "node"}])
+            return self._reply(200, [{"node": n, "status": "online", "type": "node"} for n in NODES])
         if method == "GET" and path == "/storage":
+            return self._reply(200, [storage_entry(name) for name in STORAGES])
+        m = re.fullmatch(r"/nodes/([^/]+)/storage", path)
+        if m and method == "GET":
+            if m.group(1) not in NODES:
+                return self._reply(500, {"node": f"no such node '{m.group(1)}'"})
+            content = query.get("content")
             return self._reply(200, [
-                {"storage": "local", "type": "dir", "content": "iso,vztmpl,backup"},
-                {"storage": "local-lvm", "type": "lvmthin", "content": "images,rootdir"},
-                {"storage": "synology-nfs", "type": "nfs", "content": "images,iso", "shared": 1},
+                {"storage": name, "active": 1, "enabled": 1, **STORAGES[name]}
+                for name in NODE_STORAGES[m.group(1)] if not content or content in STORAGES[name]["content"].split(",")
             ])
         if method == "GET" and path == "/cluster/status":
-            return self._reply(200, [{"type": "cluster", "name": "mock-cluster", "nodes": 1, "quorate": 1},
-                                     {"type": "node", "name": NODE, "online": 1, "local": 1}])
+            return self._reply(200, [{"type": "cluster", "name": "mock-cluster", "nodes": len(NODES), "quorate": 1}]
+                               + [{"type": "node", "name": n, "online": 1, "local": int(n == NODE)} for n in NODES])
         if method == "GET" and path == "/cluster/resources":
             if query.get("type", "vm") != "vm":  # only VMs here: no nodes, storages or pools
                 return self._reply(200, [])
             data = [
-                {"vmid": int(v), "name": vm["config"].get("name", ""), "node": NODE, "type": "qemu",
+                {"vmid": int(v), "name": vm["config"].get("name", ""), "node": vm["node"], "type": "qemu",
                  "status": vm["status"], "id": f"qemu/{v}"}
                 for v, vm in vms.items()
             ]
@@ -251,7 +280,9 @@ class PveHandler(BaseHTTPRequestHandler):
                 del vm["starting"]
                 vm["status"] = "running"
             return self._reply(200, {"status": "stopped", "exitstatus": "OK", "upid": task})
-        if method == "POST" and path == f"/nodes/{NODE}/qemu":
+        m = re.fullmatch(r"/nodes/([^/]+)/qemu", path)
+        if method == "POST" and m and m.group(1) in NODES:
+            node = m.group(1)
             vmid = str(form.get("vmid"))
             if vmid in vms:
                 return self._reply(500, {"vmid": f"VM {vmid} already exists"})
@@ -260,16 +291,16 @@ class PveHandler(BaseHTTPRequestHandler):
                 model, _, rest = config[key].partition(",")
                 if "=" not in model:  # Proxmox adds a MAC address to a card that has none
                     config[key] = f"{model}=BC:24:11:{int(key[3:]):02d}:{int(vmid) // 100 % 100:02d}:{int(vmid) % 100:02d},{rest}"
-            vms[vmid] = {"config": config, "status": "stopped", "starts": 0, "polls": 0, "installed": False,
-                         "config_updates": [], "agent_polls": 0}
-            return self._reply(200, upid("qmcreate", vmid))
-        m = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|status/current|status/start|agent/network-get-interfaces)", path)
+            vms[vmid] = {"node": node, "config": config, "status": "stopped", "starts": 0, "polls": 0,
+                         "installed": False, "config_updates": [], "agent_polls": 0}
+            return self._reply(200, upid("qmcreate", vmid, node))
+        m = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|status/current|status/start|agent/network-get-interfaces)", path)
         if not m:
             return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
-        vmid, action = m.group(1), m.group(2)
+        node, vmid, action = m.group(1), m.group(2), m.group(3)
         vm = vms.get(vmid)
-        if vm is None:
-            return self._reply(500, {"vmid": f"Configuration file 'nodes/{NODE}/qemu-server/{vmid}.conf' does not exist"})
+        if vm is None or vm["node"] != node:  # Proxmox looks for the VM's config on the node the path names
+            return self._reply(500, {"vmid": f"Configuration file 'nodes/{node}/qemu-server/{vmid}.conf' does not exist"})
         if action == "config" and method == "GET":
             return self._reply(200, vm["config"])
         if action == "config" and method == "PUT":
@@ -284,7 +315,7 @@ class PveHandler(BaseHTTPRequestHandler):
             vm["starting"] = 1
             vm["starts"] += 1
             vm["polls"] = 0
-            return self._reply(200, upid("qmstart", vmid))
+            return self._reply(200, upid("qmstart", vmid, node))
         if action == "status/current" and method == "GET":
             # First boot is the installer: power off after a few polls, unless this VM is meant to hang.
             if vm["status"] == "running" and vm["starts"] == 1 and int(vmid) not in HANG_VMIDS:

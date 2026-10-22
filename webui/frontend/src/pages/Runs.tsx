@@ -7,7 +7,7 @@ import { ErrorMessage, Loading, Notice, PageHead, StatusBadge } from "../compone
 import { useData } from "../data";
 import { duration, isoTime, runOptions, when } from "../format";
 import { Link, useRouter } from "../router";
-import type { Notice as NoticeT, RunDetailData, RunPageData } from "../types";
+import type { IsoPlan, Notice as NoticeT, RunDetailData, RunPageData } from "../types";
 import { RunsTable } from "./Overview";
 
 export function RunPage() {
@@ -50,6 +50,7 @@ export function RunPage() {
         <strong>Provisioning creates VMs and the installer wipes their disks; the baseline changes SSH and the
         firewall.</strong> Run against one server first (Limit), and try check mode before a real run.
       </p>
+      <IsoPlanCard plan={data.iso_plan} />
       <form className="card" method="post" action="/api/run" noValidate onSubmit={submit}>
         <fieldset className="card-body fieldset">
           <legend>What to run</legend>
@@ -104,6 +105,65 @@ export function RunPage() {
         </div>
       </form>
     </>
+  );
+}
+
+// Where build-installer puts the installer ISO for the servers (worked out by the playbooks' own code).
+function IsoPlanCard({ plan }: { plan: IsoPlan }) {
+  const builders = plan.builders.length;
+  return (
+    <section className="card" aria-labelledby="iso-plan-heading">
+      <div className="card-body">
+        <h2 id="iso-plan-heading">Where build-installer puts the installer ISO</h2>
+        {plan.pairs.length ? (
+          <p>
+            ISO storage <code>{plan.storage}</code>
+            {plan.shared ? " is shared by the cluster: the ISO is built once, on " : " is each node's own: the ISO is built on "}
+            {builders === 1 ? "one node" : `${builders} nodes`}. A node already holding the current ISO is skipped.
+          </p>
+        ) : <p>No server has a node yet: add servers on the <Link href="/servers">Servers</Link> page.</p>}
+        {!plan.known && plan.pairs.length ? (
+          <p className="help">
+            Test the connection on the <Link href="/proxmox">Proxmox</Link> page to find out whether {plan.storage} is
+            shared; until then it is shown as each node's own. The playbooks ask Proxmox again when they run.
+          </p>
+        ) : null}
+      </div>
+      {plan.pairs.length ? (
+        <div className="table-wrap" tabIndex={0} role="region" aria-labelledby="iso-plan-caption">
+          <table>
+            <caption id="iso-plan-caption" className="visually-hidden">The nodes the servers use, and which node builds
+              the installer ISO for each</caption>
+            <thead>
+              <tr>
+                <th scope="col">Node</th>
+                <th scope="col">Servers</th>
+                <th scope="col">ISO storage</th>
+                <th scope="col">Built by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plan.pairs.map((p) => (
+                <tr key={`${p.node}/${p.storage}`}>
+                  <th scope="row"><code>{p.node}</code>{p.address ? null : <span className="help"> (no SSH address yet)</span>}</th>
+                  <td>{p.servers.join(", ")}</td>
+                  <td><code>{p.storage}</code>{p.shared ? " (shared)" : ""}</td>
+                  <td>{p.built_by === p.node ? "this node" : <code>{p.built_by}</code>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {plan.pairs.length ? (
+        <div className="card-body">
+          <p className="help">
+            With a limit, only the servers in it count, and a node builds only if it is in the limit too (add its
+            name, such as <code>{plan.pairs[0].node}</code>); a node left out is skipped, and the run says so.
+          </p>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

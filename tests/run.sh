@@ -19,14 +19,18 @@ export ANSIBLE_FORCE_COLOR=0
 # below) points the installer role at that key instead of Ubuntu's.
 INV=(-i tests/inventory/hosts.yml -e "@$TEST_TMP/signing.yml")
 PVE=usas-test-pve
+PVE2=usas-test-pve2
 SRV=usas-test-srv
+# The cluster's shared ISO storage (synology-nfs): one volume both node containers mount at its folder.
+NFS=usas-test-nfs
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
 mock_pid=""
 
 cleanup() {
   status=$?
   if [ -n "$mock_pid" ]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
-  docker rm -f "$PVE" "$SRV" >/dev/null 2>&1 || true
+  docker rm -f "$PVE" "$PVE2" "$SRV" >/dev/null 2>&1 || true
+  docker volume rm "$NFS" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then
     echo "FAILED (logs kept in $TEST_TMP)" >&2
   else
@@ -72,6 +76,43 @@ play_fails() {
   echo "failed as expected: $expect"
 }
 
+# Runs a playbook that must succeed, and checks the output for an expected message.
+play_says() {
+  local expect="$1"; shift
+  local log; log="$(mktemp "$TEST_TMP/play.XXXXXX")"
+  if ! ansible-playbook "${INV[@]}" "$@" >"$log" 2>&1; then
+    cat "$log"
+    echo "ERROR: ansible-playbook $* failed" >&2
+    return 1
+  fi
+  if ! grep -q -- "$expect" "$log"; then
+    cat "$log"
+    echo "ERROR: expected '$expect' in the output" >&2
+    return 1
+  fi
+  echo "said as expected: $expect"
+}
+
+# Fails unless the mock API has none of the given VM IDs.
+no_vms() {
+  python3 - "$@" <<'PY'
+import json, ssl, sys, urllib.request
+state = json.load(urllib.request.urlopen("https://127.0.0.1:8006/mock/state", context=ssl._create_unverified_context()))
+made = sorted(set(sys.argv[1:]) & set(state["data"]["vms"]))
+if made:
+    sys.exit(f"ERROR: VMs {made} were created")
+PY
+}
+
+# How many of the node containers have the given path.
+nodes_with() {
+  local count=0 node
+  for node in "$PVE" "$PVE2"; do
+    if docker exec "$node" test -e "$1"; then count=$((count + 1)); fi
+  done
+  echo "$count"
+}
+
 # Every connection reaches the server from Docker's one address, so UFW's SSH rate limit (6 new connections
 # in 30 s) is shared by all steps. Steps that open many connections are followed by a pause.
 cool_down() { sleep 31; }
@@ -96,32 +137,64 @@ mock_pid=$!
 
 docker build -q -t usas-test-pve:latest -f tests/images/pve-node/Dockerfile tests/fixtures >/dev/null
 docker build -q -t usas-test-srv:latest tests/images/ubuntu-target >/dev/null
-docker rm -f "$PVE" "$SRV" >/dev/null 2>&1 || true
-docker run -d --name "$PVE" -p 127.0.0.1:2211:22 usas-test-pve:latest >/dev/null
+docker rm -f "$PVE" "$PVE2" "$SRV" >/dev/null 2>&1 || true
+docker volume rm "$NFS" >/dev/null 2>&1 || true
+docker volume create "$NFS" >/dev/null
+docker run -d --name "$PVE" -p 127.0.0.1:2211:22 -v "$NFS":/mnt/pve/synology-nfs usas-test-pve:latest >/dev/null
+docker run -d --name "$PVE2" --hostname pve-test-2 -p 127.0.0.1:2212:22 -v "$NFS":/mnt/pve/synology-nfs \
+  usas-test-pve:latest >/dev/null
 docker run -d --name "$SRV" --hostname srv-01 --privileged --cgroupns=host \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
   -p 127.0.0.1:2201:22 -p 127.0.0.1:2222:2222 usas-test-srv:latest >/dev/null
 
-# What the installer would have left: the admin's key on the server. The "node" gets root's key.
-docker exec -i "$PVE" sh -c 'cat > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys' \
-  <"$TEST_TMP/id_ed25519.pub"
+# What the installer would have left: the admin's key on the server. The "nodes" get root's key.
+for node in "$PVE" "$PVE2"; do
+  docker exec -i "$node" sh -c 'cat > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys' \
+    <"$TEST_TMP/id_ed25519.pub"
+done
 docker exec -i "$SRV" sh -c 'cat > /home/sysadmin/.ssh/authorized_keys && chown sysadmin: /home/sysadmin/.ssh/authorized_keys && chmod 600 /home/sysadmin/.ssh/authorized_keys' \
   <"$TEST_TMP/id_ed25519.pub"
 # Docker owns /etc/hosts in a container (it can't be replaced, only appended to), so put the line the
 # common role wants there up front.
 docker exec "$SRV" sh -c 'echo "127.0.1.1 srv-01" >> /etc/hosts'
 wait_ssh 2211
+wait_ssh 2212
 wait_ssh 2201
-# Only the node is trusted up front; the server's key is added by the provisioning role under test.
+# Only the nodes are trusted up front; the server's key is added by the provisioning role under test.
 ssh-keyscan -p 2211 127.0.0.1 2>/dev/null >"$TEST_TMP/known_hosts"
+ssh-keyscan -p 2212 127.0.0.1 2>/dev/null >>"$TEST_TMP/known_hosts"
+# The same, without the second node's key: for the steps where it isn't trusted.
+grep -v '^\[127.0.0.1\]:2212 ' "$TEST_TMP/known_hosts" >"$TEST_TMP/known_hosts.one"
+printf '{"ansible_ssh_common_args": "-o UserKnownHostsFile=%s/known_hosts.one -o StrictHostKeyChecking=yes"}\n' \
+  "$TEST_TMP" >"$TEST_TMP/untrusted.json"
 docker cp "$PVE":/srv/test-signing/keyring.gpg "$TEST_TMP/signing-keyring.gpg"
 printf 'installer_signing_keyring: %s\ninstaller_signing_fingerprint: %s\n' "$TEST_TMP/signing-keyring.gpg" \
   "$(docker exec "$PVE" cat /srv/test-signing/fingerprint)" >"$TEST_TMP/signing.yml"
 
-step "build-installer: remaster the ISO, then check a second run changes nothing"
-play playbooks/build-installer.yml
+step "build-installer: local ISO storage, so the ISO is remastered on each node its servers use"
+play_says 'local on pve-test-2: built by pve-test-2' playbooks/build-installer.yml
 play --idempotent playbooks/build-installer.yml
 play tests/verify-installer.yml
+
+step "build-installer: --limit leaves a node out, and that node is skipped (and said so), not built"
+docker exec "$PVE2" rm -f /var/lib/vz/template/iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso
+play_says 'local on pve-test-2: skipped, --limit leaves its node out' playbooks/build-installer.yml --limit srv-two
+[ "$(docker exec "$PVE2" ls /var/lib/vz/template/iso)" = ubuntu-26.04.1-live-server-amd64.iso ] \
+  || { echo "ERROR: a node outside --limit was built" >&2; exit 1; }
+play_says 'local on pve-test-2: built by pve-test-2' playbooks/build-installer.yml --limit srv-two,pve-test-2
+play tests/verify-installer.yml
+
+step "build-installer: a node whose SSH host key isn't trusted is named, and nothing is built"
+play_fails "Node pve-test-2 (127.0.0.1): its SSH host key isn't in known_hosts" playbooks/build-installer.yml \
+  -e "@$TEST_TMP/untrusted.json" -e installer_work_dir=/var/tmp/usas-untrusted
+[ "$(nodes_with /var/tmp/usas-untrusted)" = 0 ] || { echo "ERROR: a node built before every node answered" >&2; exit 1; }
+
+step "Nodes the cluster doesn't have are refused for every host at once, with the real names"
+BAD_NODES="pve_node isn't a node in this cluster for 2 host(s): srv-case ('PVE-Test', did you mean pve-test); \
+srv-gone ('pve-gone'). Its nodes are pve-test, pve-test-2 (node names are case-sensitive)"
+play_fails "$BAD_NODES" playbooks/build-installer.yml -i tests/inventory/bad-nodes.yml
+play_fails "$BAD_NODES" playbooks/provision-vms.yml -i tests/inventory/bad-nodes.yml
+no_vms 4061 4062 4081 4083 4084 4099
 play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
 
 step "build-installer: a checksum file that isn't signed by the pinned key is refused"
@@ -138,28 +211,42 @@ step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
 play --idempotent playbooks/provision-vms.yml --limit srv-01
 
+step "provision-vms: a VM on the second node, created through that node's API path, its seed ISO on that node"
+play playbooks/provision-vms.yml --limit srv-two
+play --idempotent playbooks/provision-vms.yml --limit srv-two
+
+step "provision-vms: the node of a new VM must answer over SSH with a trusted host key first"
+play_fails "Node pve-test-2 (127.0.0.1): its SSH host key isn't in known_hosts" playbooks/provision-vms.yml \
+  --limit srv-two -e pve_vmid=4082 -e "@$TEST_TMP/untrusted.json"
+no_vms 4082
+
 step "provision-vms: values that could break the installer's configuration are refused before anything is created"
 play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
   -e 'admin_user="x; touch /pwned"'
 play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
   -e '{"admin_user": "sysadmin\n"}'
 
-step "provision-vms: a node name the cluster doesn't have is refused, with the real names"
-play_fails "pve_node 'PVE-Test' isn't a node in this cluster; its nodes are pve-test" playbooks/provision-vms.yml \
-  --limit srv-01 -e pve_node=PVE-Test -e pve_ssh_host=pve-test
-
 step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml
 
-step "ISO storage other than local: its folder is asked from Proxmox, and the VM's CD-ROMs use it"
-play playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
-play --idempotent playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
+step "ISO storage the cluster shares (NFS): built once, by one node, and the VMs' CD-ROMs use it"
+SHARED=(-e pve_iso_storage=synology-nfs -e installer_work_dir=/var/tmp/usas-shared)
+play_says 'synology-nfs on pve-test-2 (shared): built by pve-test' playbooks/build-installer.yml "${SHARED[@]}"
+play --idempotent playbooks/build-installer.yml "${SHARED[@]}"
+# Only the node that built it has the build's work directory.
+[ "$(nodes_with /var/tmp/usas-shared)" = 1 ] && docker exec "$PVE" test -d /var/tmp/usas-shared \
+  || { echo "ERROR: the shared storage's ISO wasn't built exactly once, by pve-test" >&2; exit 1; }
 play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs
 play tests/verify-iso-storage.yml
-play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doesn't allow ISO images" \
-  playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
-play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
+
+step "ISO storages that don't fit a node are refused"
+play_fails "srv-two: storage 'usb-iso' doesn't allow ISO images on node pve-test-2, or isn't active there (ISO storages \
+there: local, synology-nfs)" playbooks/build-installer.yml -e pve_iso_storage=usb-iso
+# The API lists usb-iso on pve-test, but the node itself (pvesm) has no such storage.
+play_fails "Storage 'usb-iso' doesn't exist on pve-test, isn't active, or doesn't allow ISO images" \
+  playbooks/build-installer.yml --limit srv-01,pve-test -e pve_iso_storage=usb-iso
+play_fails "pve_iso_storage 'local;id' a storage ID" playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
 
 step "provision-vms: a server on DHCP, its address read from the guest agent, then a rerun that reads it again"
 play playbooks/provision-vms.yml --limit srv-dhcp
@@ -200,14 +287,15 @@ play playbooks/prepare-node.yml -e "@$build_user"
 play --idempotent playbooks/prepare-node.yml -e "@$build_user"
 play_fails 'logs in to pve-test as root, but pve_ssh_user is usas-build' playbooks/build-installer.yml \
   -e pve_ssh_user=usas-build -e ansible_user=root
-play_fails 'pve_ssh_user a lowercase Linux user name' playbooks/build-installer.yml -e 'pve_ssh_user=x;id'
+play_fails 'pve_ssh_user must be a lowercase Linux user name' playbooks/build-installer.yml -e 'pve_ssh_user=x;id'
 play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e installer_iso_rebuild=true
 play --idempotent playbooks/build-installer.yml -e pve_ssh_user=usas-build
 play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs
 play playbooks/provision-vms.yml --limit srv-user -e pve_ssh_user=usas-build
 play tests/verify-node-user.yml
-play_fails "doesn't name a folder for storage 'backup-nfs'" playbooks/build-installer.yml -e pve_ssh_user=usas-build \
-  -e pve_iso_storage=backup-nfs
+# usb-iso allows ISO images on pve-test (so the API check passes), but prepare-node.yml didn't record it.
+play_fails "doesn't name a folder for storage 'usb-iso'" playbooks/build-installer.yml --limit srv-01,pve-test \
+  -e pve_ssh_user=usas-build -e pve_iso_storage=usb-iso
 
 step "baseline: check mode on the fresh server fails nothing and changes nothing"
 # Before the first run UFW and Fail2Ban aren't installed and nothing limits SSH connections.

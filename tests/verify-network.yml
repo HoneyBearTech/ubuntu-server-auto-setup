@@ -32,8 +32,9 @@
           - config.net2 is match('e1000=BC:24:11:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2},bridge=vmbr2\Z')
           - "'net3' not in config"
 
+# srv-dhcp and srv-vlan are on the default node, pve-test, so their seeds were built there.
 - name: Verify the network configuration the installer got
-  hosts: proxmox_nodes
+  hosts: pve-test
   gather_facts: false
   vars:
     vms: "{{ hostvars['localhost'].verify_api.json.data.vms }}"

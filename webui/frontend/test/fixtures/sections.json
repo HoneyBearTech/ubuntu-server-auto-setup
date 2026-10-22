@@ -73,7 +73,7 @@
     "name": "pve_node",
     "label": "Node name",
     "kind": "text",
-    "help": "The Proxmox node the VMs are created on, as Proxmox names it. Proxmox node name.",
+    "help": "The Proxmox node the VMs are created on, as Proxmox names it, unless a server names its own node on the Servers page. Proxmox node name.",
     "required": true,
     "advanced": false,
     "variable": "pve_node",
@@ -817,6 +817,17 @@
     "choices": null
    },
    {
+    "name": "pve_node",
+    "label": "Node",
+    "kind": "text",
+    "help": "The Proxmox node of this server's VM; empty uses the node on the Proxmox page. Proxmox node name.",
+    "required": false,
+    "advanced": false,
+    "variable": "pve_node",
+    "default": null,
+    "choices": null
+   },
+   {
     "name": "vm_cores",
     "label": "Cores",
     "kind": "int",
@@ -866,6 +877,7 @@
     "name": "web-01",
     "ansible_host": "10.0.0.61",
     "pve_vmid": "4061",
+    "pve_node": "",
     "vm_cores": "",
     "vm_memory_mb": "",
     "vm_disk_gb": "",
@@ -875,11 +887,18 @@
     "name": "db-01",
     "ansible_host": "10.0.0.70",
     "pve_vmid": "4070",
+    "pve_node": "ares",
     "vm_cores": "",
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
     "ufw_ports": ""
    }
-  ]
+  ],
+  "nodes": [
+   "ares",
+   "hephaestus",
+   "hermes"
+  ],
+  "default_node": "hephaestus"
  }
 }

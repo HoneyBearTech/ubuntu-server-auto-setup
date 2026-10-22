@@ -9,7 +9,8 @@ all:
     admin_password: "{{ vault_admin_password }}"
     timezone: America/Chicago
 
-    # Proxmox VE API (token needs the privileges listed in docs/installing.md)
+    # Proxmox VE API (token needs the privileges listed in docs/installing.md). Any node of the cluster
+    # answers for all of them; one inventory uses the nodes of one cluster.
     pve_api_host: pve-1.example.lan
     pve_api_user: ansible@pve
     pve_api_token_id: "{{ vault_pve_api_token_id }}"
@@ -21,20 +22,24 @@ all:
     pve_ssh_user: root
 
   children:
-    # Proxmox nodes. Each inventory hostname must match the Proxmox node name.
+    # Proxmox nodes, reached over SSH as pve_ssh_user to build the ISOs and the seed files. Each inventory
+    # hostname must match the Proxmox node name. List every node a server uses, and pin each one's SSH host key
+    # (docs/host-keys.md).
     proxmox_nodes:
       vars:
         ansible_user: "{{ pve_ssh_user }}"
       hosts:
         pve-1:
           ansible_host: 10.10.10.10
+        pve-2:
+          ansible_host: 10.10.10.11
 
     ubuntu_servers:
       vars:
         ansible_user: "{{ admin_user }}"
         # Sudo needs the admin password once the first baseline run has removed passwordless sudo.
         ansible_become_password: "{{ vault_admin_password }}"
-        pve_node: pve-1
+        pve_node: pve-1        # the default; a server can set its own (see db-01)
         pve_storage: local-lvm
         pve_bridge: vmbr0
         net_prefix: 24
@@ -55,6 +60,7 @@ all:
         db-01:
           ansible_host: 10.10.10.62
           pve_vmid: 4062
+          pve_node: pve-2      # created on the cluster's other node
           vm_cores: 4
           vm_memory_mb: 8192
           vm_disk_gb: 64

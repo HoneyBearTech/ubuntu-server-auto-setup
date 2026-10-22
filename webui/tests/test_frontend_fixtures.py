@@ -18,7 +18,7 @@ def answers(ui) -> dict:
     post(ui, "/servers", {"server_count": "2", "servers-0-name": "web-01", "servers-0-ansible_host": "10.0.0.61",
                           "servers-0-pve_vmid": "4061", "servers-0-ufw_ports": "443/tcp", "servers-1-name": "db-01",
                           "servers-1-ansible_host": "10.0.0.70", "servers-1-pve_vmid": "4070",
-                          "servers-1-vm_memory_mb": "8192"})
+                          "servers-1-vm_memory_mb": "8192", "servers-1-pve_node": "ares"})
     ui.app_state.store.save_cluster("olympus", {"hephaestus": "online", "ares": "online", "hermes": "offline"},
                                     {"local": "dir", "synology-nfs": "nfs, shared"})
     data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers")}

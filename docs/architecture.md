@@ -11,7 +11,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 ## Components
 
 ```text
- control node (you)                      Proxmox VE node(s)                    new / existing servers
+ control node (you)                      Proxmox VE nodes (one cluster)        new / existing servers
  ------------------                      ------------------                    ----------------------
  inventory/hosts.yml        SSH (root)   ISO storage                            Ubuntu 26.04 (or 24.04)
  Vault (encrypted)  ───────────────────▶ ubuntu-26.04.1-live-server-amd64.iso   admin user + GitHub keys
@@ -45,7 +45,23 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 
 ## How a server is built
 
-### 1. The installer ISO (`build-installer.yml`, on `proxmox_nodes`, over SSH as `pve_ssh_user`)
+### 1. The installer ISO (`build-installer.yml`, on the nodes the servers use, over SSH as `pve_ssh_user`)
+
+One inventory places VMs on the nodes of one Proxmox VE cluster: each server names its node (`pve_node`, the
+group's value by default), and one API endpoint answers for every node. The first play plans, without
+connecting to any host:
+
+- every server in the run needs the ISO in its ISO storage on its node (with no server in the run, every
+  node in the run in its own `pve_iso_storage`);
+- the API's node list must contain every server's node, and each node's ISO storages
+  (`/nodes/<node>/storage?content=iso`) the storage that server uses; one error names every wrong host;
+- a storage Proxmox marks `shared` (NFS, CIFS, CephFS) is one folder for the whole cluster, so the ISO is built
+  there once, by the first node (by name) that uses it; a node-local storage (`local`) gets it on every node
+  that uses it (`roles/proxmox_vm/filter_plugins/pve_cluster.py`, which the web UI's Run page uses too);
+- the nodes chosen join the group `pve_iso_build`, each with its storages.
+
+The second play runs on `pve_iso_build`. It first reaches every node over SSH with strict host-key checking,
+and stops with one message naming each node that didn't answer, before any node builds. Then each node:
 
 The playbooks log in to the node as root by default. With the optional node user (`prepare-node.yml`,
 which runs once as root), they log in as a user with no sudo that can write only to its work directory and
@@ -59,7 +75,8 @@ recorded, because `pvesm` runs for root only.
    fingerprint (`installer_signing_fingerprint`).
 3. From that verified file, pick the line for `ubuntu-26.04.1-live-server-amd64.iso`; stop if it isn't
    there (a newer point release has replaced it).
-4. Download the ISO into the node's ISO storage, verifying that checksum (`get_url` with `checksum`).
+4. For each ISO storage the node builds for: download the ISO into it, verifying that checksum (`get_url`
+   with `checksum`), and then:
 5. If the remastered ISO doesn't exist yet (or `installer_iso_rebuild` is set): extract `boot/grub/grub.cfg`,
    add the `autoinstall` kernel argument to the installer entries and shorten the GRUB timeout, check that
    the argument is really there, and write a new ISO with `xorriso`, replaying the original boot records
@@ -68,13 +85,16 @@ recorded, because `pvesm` runs for root only.
 
 ### 2. The VM (`provision-vms.yml`, on `ubuntu_servers`, from the control node)
 
-For each host, after checking that the required variables are set:
+For each host, after checking that the required variables are set, and for all hosts at once that each
+node is in the cluster and each ISO storage allows ISO images on its node:
 
 1. List the cluster's VMs through the API; if `pve_vmid` exists anywhere, report it and **skip the host**.
+   Every node that gets a new VM must answer over SSH with a trusted host key; one error names each that
+   doesn't, before any VM is created.
 2. Fetch the public keys from `https://github.com/<github_user>.keys`, add `admin_extra_ssh_keys`, keep
    only lines that look like public keys, and stop if none are left.
 3. Hash the admin password with SHA-512 crypt on the control node.
-4. On the node, write the autoinstall `user-data` and `meta-data` into a `0700` directory under
+4. On the VM's own node, write the autoinstall `user-data` and `meta-data` into a `0700` directory under
    `/var/tmp/ubuntu-server-auto-setup/` and pack them into `seed-<host>.iso` (volume label `CIDATA`, the
    cloud-init NoCloud convention), mode `0600`. The `user-data` sets the hostname, the static network
    configuration, the disk layout, the admin user with the password hash, the authorized keys, password SSH

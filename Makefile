@@ -52,8 +52,8 @@ site: ## Build installer, provision missing VMs, apply baseline
 prepare-node: ## Optional, once, as root: set up pve_ssh_user on the Proxmox node(s) so the builds need no root
 	$(PLAYBOOK) playbooks/prepare-node.yml $(LIMIT_ARG) $(ARGS)
 
-build-installer: ## Download and remaster the Ubuntu ISO on the Proxmox node(s)
-	$(PLAYBOOK) playbooks/build-installer.yml $(ARGS)
+build-installer: ## Download and remaster the Ubuntu ISO on the Proxmox nodes the servers use
+	$(PLAYBOOK) playbooks/build-installer.yml $(LIMIT_ARG) $(ARGS)
 
 provision: ## Create and auto-install VMs that don't exist yet
 	$(PLAYBOOK) playbooks/provision-vms.yml $(LIMIT_ARG) $(ARGS)

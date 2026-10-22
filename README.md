@@ -74,9 +74,10 @@ macOS.
 Three playbooks, run from your own machine (the "control node") or from the container image, plus
 `playbooks/site.yml` that runs all three in order:
 
-1. **`playbooks/build-installer.yml`** runs on your Proxmox node(s) (inventory group `proxmox_nodes`) over
-   SSH as root, or as a user of its own without root's privileges (optional, set up once by
-   `playbooks/prepare-node.yml`). It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
+1. **`playbooks/build-installer.yml`** runs on the Proxmox nodes your servers use (inventory group
+   `proxmox_nodes`) over SSH as root, or as a user of its own without root's privileges (optional, set up once
+   by `playbooks/prepare-node.yml`): once for a storage the cluster shares, on each node for a node-local one.
+   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
    Ubuntu's published `SHA256SUMS` after verifying Ubuntu's GPG signature on that file, and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
@@ -205,7 +206,7 @@ You need:
 | `make image`, `make smoke` | Build the container image; build it and smoke-test it against the mock Proxmox API. |
 | `make ui` | Build the app, then run the web UI from the checkout on <http://localhost:8080>, with its data in `.webui-data/`. |
 | `make site` | Build the installer, provision missing VMs, apply the baseline. |
-| `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox node(s). |
+| `make build-installer` | Download and remaster the Ubuntu ISO on the Proxmox nodes the servers use. |
 | `make provision` | Create and auto-install the VMs that don't exist yet. |
 | `make baseline` | Apply the baseline to the servers. |
 | `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
@@ -266,7 +267,7 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 | `net_mode` | `static` | `static`, or `dhcp`: the address comes from your DHCP server and is read from the VM's guest agent. |
 | `ansible_host` | (required for `static`) | The server's static IP address; the installer configures it. |
 | `pve_vmid` | (required) | The Proxmox VM ID. Only IDs that don't exist anywhere in the cluster yet are created. |
-| `pve_node` | (required) | The Proxmox node the VM is created on (and, through `pve_ssh_host`, the inventory host used to reach it over SSH). |
+| `pve_node` | (required) | The Proxmox node the VM is created on (and, through `pve_ssh_host`, the inventory host used to reach it over SSH). Set it for the group, and on a server to place it on another node of the same cluster. |
 | `pve_storage` | `local-lvm` | The storage for the VM's disk and EFI disk (`pve_efidisk_format`: `raw`, or `qcow2` on directory storage). |
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | The network bridge and an optional VLAN tag. |
 | `vm_extra_nics` | `[]` | More network cards, each with a bridge, VLAN, and a static address, DHCP or none ([docs/interfaces.md](docs/interfaces.md#networks)). |

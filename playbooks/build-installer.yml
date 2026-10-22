@@ -1,6 +1,24 @@
 ---
-- name: Build the hands-off Ubuntu installer ISO on the Proxmox nodes
-  hosts: proxmox_nodes
+# The servers in the run decide which nodes need the installer ISO (with no server in the run, the nodes in
+# the run do): a storage the cluster shares gets it once, a node-local one on every node that uses it.
+- name: Work out which Proxmox nodes need the installer ISO
+  hosts: ubuntu_servers:proxmox_nodes
   gather_facts: false
+  tasks:
+    - name: Plan the ISO builds
+      ansible.builtin.include_role:
+        name: proxmox_vm
+        tasks_from: iso_plan
+
+- name: Build the hands-off Ubuntu installer ISO on the Proxmox nodes
+  hosts: pve_iso_build
+  gather_facts: false
+  pre_tasks:
+    - name: Check SSH to every node before building
+      ansible.builtin.include_role:
+        name: proxmox_vm
+        tasks_from: ssh_check
+      vars:
+        pve_ssh_check_host: "{{ inventory_hostname }}"
   roles:
     - installer_iso

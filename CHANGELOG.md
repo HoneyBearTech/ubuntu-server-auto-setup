@@ -8,8 +8,34 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Upgrading
+
+- **`make build-installer` now uses the Proxmox API** (read-only: the cluster's nodes and each node's ISO
+  storages), so it needs `pve_api_host` and the token like provisioning does. It builds on the nodes the
+  servers use rather than on every host in `proxmox_nodes`: a node no server uses gets no ISO unless the run
+  has no server in it. Single-node inventories work unchanged. `make build-installer` now passes `LIMIT=`.
+
 ### Added
 
+- **Several Proxmox nodes per inventory.** A server can set its own `pve_node` (and `pve_ssh_host`); the
+  group's value stays the default. One API endpoint, any member of the cluster, serves every node; nodes of
+  another cluster need another inventory.
+  - Before anything is built or created, every server's node is checked against the cluster's nodes, and its
+    ISO storage against that node's storages, with one error naming every wrong host (node names are
+    case-sensitive). Every node needed must answer over SSH with a host key already in `known_hosts`
+    (checked with `StrictHostKeyChecking=yes`); one error names each node that doesn't, and why.
+  - `build-installer` works out where the installer ISO is needed: once for a storage the cluster shares
+    (NFS, CIFS, CephFS), built by one node that uses it, and on every node that uses a node-local storage.
+    A node that already has the current ISO is skipped, and with `--limit` a node outside the limit is
+    reported as skipped. Each VM's seed ISO goes to its own node.
+  - Web UI: a node dropdown per server (the cluster's nodes from the connection test, the Proxmox page's node
+    as the default); the SSH key page lists every node in use with its own address, host-key scan, trust and
+    login test; the Run page shows which node builds the ISO for each node.
+  - Tests: the mock Proxmox API answers for two nodes with per-node storage and routes VMs by node; the
+    integration tests run a second node container that shares only the NFS storage's folder with the first,
+    and check per-node builds for local storage, one build for shared storage, a refused node list, the
+    host-key check and second runs that change nothing. A new fuzz target checks the ISO plan and the node
+    checks.
 - **A Proxmox node user other than root (optional).** `playbooks/prepare-node.yml` (`make prepare-node`),
   run once as root, creates `pve_ssh_user` (for example `usas-build`) on each node: no password, no groups,
   no sudo, only the keys in `proxmox_node_user_ssh_keys`, its own work directory, and write access to the ISO
