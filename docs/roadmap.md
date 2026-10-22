@@ -44,7 +44,8 @@ that run on each pull request.
 - Done: a container image (amd64 and arm64, signed, with an SBOM and provenance) with a web UI that lays
   out the options, writes the inventory and the Vault, and runs the playbooks with a live log, so the
   project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
-- Passkeys as an optional second way to sign in, for setups served under a fixed host name over HTTPS.
+- Done: passkeys (WebAuthn) as another way to sign in, or the only one with "Require a passkey", on
+  `http://localhost` or under the host name in `USAS_PUBLIC_URL` ([web-ui.md](web-ui.md#passkeys)).
 - Several Proxmox nodes per inventory (choosing the node per server).
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.

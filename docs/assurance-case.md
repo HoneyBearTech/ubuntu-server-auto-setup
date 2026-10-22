@@ -12,8 +12,8 @@ The top-level claim is:
 > for the token, the new server's installer for the password hash); and every server they harden ends up
 > reachable only with the authorized SSH keys, behind a default-deny firewall, with automatic security
 > updates, as stated in [security.md](security.md). Run from the container image, the web UI lets only the
-> person who set its password configure and start those runs, and never hands the secrets it holds to the
-> browser or to another site.**
+> person who set its password (or holds one of the passkeys they added) configure and start those runs, and
+> never hands the secrets it holds to the browser or to another site.**
 
 It rests on four arguments: the threat model is understood (1), every trust boundary is mediated (2),
 the design follows secure design principles (3), and the implementation counters common weaknesses and
@@ -23,8 +23,9 @@ is continuously checked (4).
 
 **Assets**, most valuable first: root access to the servers and the Proxmox nodes (through the control
 node's SSH keys and the admin user's sudo); the Proxmox API token; the admin password (and its hash); the
-Vault password; with the container image, the web UI's password and sessions and the data volume (which
-holds the key, the Vault and by default the Vault password); the integrity of the installed system (the
+Vault password; with the container image, the web UI's password, its passkeys (their public keys and
+counters, whose integrity matters: a key added by someone else is a way in) and sessions, and the data
+volume (which holds the key, the Vault and by default the Vault password); the integrity of the installed system (the
 ISO, the installer configuration, the authorized keys); the availability of the servers (a lockout or a
 wiped disk); the project's release artifacts, including the container image.
 
@@ -42,12 +43,13 @@ wiped disk); the project's release artifacts, including the container image.
 | Malicious contributor | Opening pull requests | Smuggle a backdoor into a role (an extra key, a weakened setting), exfiltrate CI credentials. |
 | A web page open in the operator's browser | Nothing | Drive the web UI through the browser: cross-site form posts (CSRF), DNS rebinding to reach `127.0.0.1`, framing the UI (clickjacking), injecting script through stored values (XSS). |
 | A malicious guest (whoever controls a VM on the cluster) | Their own VM | Feed the web UI false or hostile data through the VM's guest agent: another VM's address or a made-up OS to mislead the operator, markup, control or text-direction characters to inject script or disguise text, huge or slow answers to stall the UI. |
-| Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
+| Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, replay or forge a passkey response, use a passkey response from another site (phishing), add a passkey of their own through an open session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
 | Another user or process on the Docker host | Their own account | Read the data volume or the container's memory. (Treated as trusted: see "Out of scope".) |
 
 **Out of scope** (see [security.md](security.md#what-it-does-not-protect-against)): a compromised
 control node (for the image: the Docker host, its administrators and anyone who can read the data
-volume); someone who knows the web UI's password, or controls the browser it is used from; root on the
+volume); someone who knows the web UI's password (while passkeys aren't required) or holds an unlocked device
+with one of its passkeys, or controls the browser it is used from; root on the
 Proxmox nodes; the GitHub account behind `github_user` being taken over;
 an operator using the playbooks to do harm; vulnerabilities in Ubuntu, Proxmox VE, OpenSSH or Ansible
 themselves; anything on the servers beyond the baseline.
@@ -64,7 +66,7 @@ themselves; anything on the servers beyond the baseline.
 | B6 | Control node → new VM (first SSH contact) | The VM's host key | Trust on first use: the old `known_hosts` entry for the IP is replaced with the scanned ed25519 key (`provision_manage_known_hosts`). Later port changes use the key read over the verified connection (`roles/ssh_hardening/tasks/main.yml`). |
 | B7 | Internet / LAN → servers | SSH and whatever `ufw_allow` opens | UFW default deny with rate-limited SSH; sshd public-key only, no root, `AllowUsers` optional; Fail2Ban (`roles/firewall/`, `roles/ssh_hardening/`, `roles/fail2ban/`). |
 | B8 | Contributors → `main` → releases | Code changes, release artifacts, the Docker Hub token | Protected `main` (pull request, required checks), DCO, lint and secret scanning, read-only workflow tokens, pinned actions, keyless signing and provenance (`.github/workflows/`). The Docker Hub token is a secret of the `release` environment, which only `v*` tags can deploy to, so pull requests and branches can't read it; release tags are protected from being moved or deleted. |
-| B9 | Browser → web UI | Sign-in, form values, the API token and admin password once, run requests | Published on `127.0.0.1` only; allowed host names (DNS rebinding) and HTTPS for any other name; argon2id password with a first-run setup code and throttling; server-side sessions in an `HttpOnly`, `SameSite=Strict` cookie, renewed at sign-in; a CSRF token on every form plus `Origin`/`Sec-Fetch-Site` checks; CSP, no framing; secrets never sent back (`webui/usas_web/main.py`, `auth.py`). |
+| B9 | Browser → web UI | Sign-in (a password or a passkey response), form values, the API token and admin password once, run requests | Published on `127.0.0.1` only; allowed host names (DNS rebinding) and HTTPS for any other name; argon2id password with a first-run setup code and throttling; optional passkeys (WebAuthn, py_webauthn): added only with the password again, a random challenge per session that is used once and expires in 5 minutes, the origin and RP ID checked against `USAS_PUBLIC_URL` (or `localhost`), never the `Host` header, user verification required, the signature counter checked, failures throttled with the password's, and "Require a passkey" refusing the password unchecked; an unreadable passkeys file fails closed; server-side sessions in an `HttpOnly`, `SameSite=Strict` cookie, renewed at sign-in; a CSRF token on every form plus `Origin`/`Sec-Fetch-Site` checks; CSP, no framing; secrets never sent back; sign-ins logged (`webui/usas_web/main.py`, `auth.py`, `passkeys.py`). |
 | B10 | Web UI → inventory, Vault and `ansible-playbook` | Validated values, the run's options | Values checked against the roles' own allowlist patterns (`schema.py`, read from `roles/*/vars/main.yml`) and written with `!unsafe`; secrets only in the Vault; files `0600`; `ansible-playbook`, `ssh` and `ssh-keyscan` started with argument lists; `--limit` only from inventory names; run IDs from a fixed format (`store.py`, `runner.py`, `sshkeys.py`). |
 | B12 | Guest agents (through the Proxmox API) → web UI | Each VM's addresses, OS release and host name, as the guest reports them | Read-only: `GET` calls with `VM.GuestAgent.Audit` (no command execution or file access; `VM.Monitor` on Proxmox VE 8 stays opt-in), over the verified API connection. VM IDs and node names are checked before they go into an API path. Answers are parsed by `webui/usas_web/vms.py`: IPv4 only, special-use ranges dropped, at most 16 addresses, strings stripped of control and direction characters and cut to 120 characters, host names checked against the roles' pattern. The data is display-only, labelled with its source, and shown as text by React. At most 4 agent calls at a time, 5 seconds each, 15 seconds per refresh, with caches shared by every session and negative caching of silent agents, all in a worker thread (`webui/usas_web/remote.py`). |
 | B13 | Guest agent (through the Proxmox API) → provisioning and the baseline (`net_mode: dhcp`) | The address DHCP gave `net0`, as the guest reports it | Only for servers with `net_mode: dhcp` and no `ansible_host`. Read-only `GET` calls (`VM.GuestAgent.Audit`) over the verified API connection; only the interface with `net0`'s MAC address (read from the VM's configuration) counts, and only an address matching `provision_ipv4_pattern` that isn't link-local is used, as the SSH target only. SSH still checks the host key: right after the install, the VM's fresh key is trusted as in B6 (nothing but the installer has run in it yet); on later runs the address must answer with a key already in `known_hosts`, so a guest that reports another address can't make Ansible talk to an unknown host (`roles/proxmox_vm/tasks/dhcp_address.yml`). |
@@ -82,7 +84,7 @@ themselves; anything on the servers beyond the baseline.
 | Seed ISO in ISO storage | root on the node, Proxmox users with access to that storage | `0600`, short-lived, deleted after install | `roles/proxmox_vm/tasks/provision.yml` |
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
-| The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in, sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `schema.py` |
+| The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in (password or passkey), sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `passkeys.py`, `schema.py` |
 | Guest agents, through provisioning (`net_mode: dhcp`) | whoever controls that VM | read-only privilege, MAC and IPv4-pattern filter, host key checking | `roles/proxmox_vm/tasks/dhcp_address.yml` |
 | Guest agents, through the VMs page | whoever controls a VM on the cluster | read-only privilege, parsing and limits in `vms.py`, display-only, bounded fan-out and timeouts | `webui/usas_web/vms.py`, `webui/usas_web/remote.py` |
 | The data volume | the Docker host's administrators | file modes `0600`/`0700`, Vault encryption (optionally with the password outside the volume), non-root container user | `webui/usas_web/store.py`, `Dockerfile` |
@@ -99,6 +101,7 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   with small files; no agent, daemon or custom code on the servers. One role per concern.
 - **Fail-safe defaults.** Provisioning skips existing VMs rather than reconciling them; the ISO step stops
   if the signature, the checksum or the release is missing; the key sync stops rather than writing an empty list;
+  an unreadable passkeys file turns password sign-in off and accepts no passkey;
   `ssh_hardening` stops if `ssh_allow_users` would exclude the admin user; sshd configuration is validated
   before it is installed; certificate verification is on by default; secrets are hidden from output by
   default.
@@ -153,7 +156,8 @@ this kind:
 | **Cross-site scripting** (CWE-79) and **clickjacking** (CWE-1021) | React escapes every value it shows (the app sets no raw HTML) and the page shell is a Jinja template with auto-escaping; a Content Security Policy with `script-src 'self'`, `style-src 'self'` and `font-src 'self'`, no inline script or style (tests check the shell and the built files); `frame-ancestors 'none'` and `X-Frame-Options: DENY`. |
 | **Template injection into Ansible** (CWE-1336) | Every value the UI writes into the inventory or the Vault is tagged `!unsafe`, so Ansible never evaluates it (`webui/usas_web/store.py`; a unit test runs Ansible on such values). |
 | **Argument injection** (CWE-88) and **path traversal** (CWE-22) | `--limit=` takes only inventory host and group names; host names for `ssh` and `ssh-keyscan` are checked and passed after `--`; run IDs must match a fixed format before any file is opened. |
-| **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. |
+| **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially, with passkey failures counted alongside wrong passwords; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. Optional passkeys can replace the password entirely ("Require a passkey"), which removes guessing. |
+| **Authentication bypass by capture-replay** (CWE-294) and **by spoofing** (CWE-290, CWE-346) | Passkey challenges are 32 random bytes, kept with the session that asked for them, removed on first use whatever the outcome, and valid for 5 minutes; a response's origin must be the configured one exactly and its RP ID hash must match, so a response made on another site can't be used here; the signature is checked against the public key saved at registration, the signature counter must go up when the authenticator keeps one, the user handle must match, and user verification is required (`webui/usas_web/passkeys.py`; `webui/tests/test_passkeys.py` tests each with a software authenticator). |
 | **Improper input validation** (CWE-20) and **insufficient verification of data authenticity** (CWE-345) | What guest agents report is parsed defensively (`webui/usas_web/vms.py`): only usable IPv4 addresses, length and count limits, control and direction characters removed, VM IDs and node names checked before they reach an API path. The guest's claims are never trusted to decide anything: the OS classification is labelled as reported by the guest, every address shows its source (agent, inventory or cloud-init), and nothing on the VMs page starts a run. Unit tests and the image smoke test feed it hostile strings. |
 | **Allocation of resources without limits** (CWE-770) | The VMs page's API calls run in a pool of 4 worker threads, never on the event loop that streams the run logs, with a 10-second timeout per API call, 5 seconds per agent call and a 15-second budget per refresh; answers are cached for every session, silent agents for 2 minutes; the app polls every 30 seconds only while its tab is visible and backs off to 2 minutes after an error. |
 | **Open redirect** (CWE-601) | The sign-in page returns only to the UI's own pages. |
@@ -168,11 +172,14 @@ this kind:
   bandit security rules) for the web UI's server, TypeScript's strict check for its app, hadolint for the
   Dockerfile, and CodeQL for the workflows, the Python code and the app's TypeScript. Any finding fails the check (`.github/workflows/checks.yml`, `.github/workflows/codeql.yml`).
 - **Web UI tests on every pull request**: unit tests (at least 80% statement coverage) of sign-in,
-  sessions, the CSRF header and Origin checks, the host check, every form's API and its validation against
+  passkeys (registration, sign-in and every refusal: another origin or RP ID, a replayed or expired
+  challenge, a counter going back, no user verification) with a software authenticator, sessions, the CSRF
+  header and Origin checks, the host check, every form's API and its validation against
   the roles' patterns, the inventory and Vault files Ansible reads back, runs and their logs; the app's
   tests of every page against a stand-in API, with axe-core, structural accessibility checks and the
   contrast of every colour pair; browser tests in Chromium of the whole setup by keyboard only, focus on
-  every page and axe-core with real layout in every theme; and a smoke test that builds the image and drives
+  every page and axe-core with real layout in every theme, and adding a passkey and signing in with it
+through Chromium's virtual authenticator; and a smoke test that builds the image and drives
   the UI against the mock Proxmox API through a real `ansible-playbook` run and the VMs page with fixture
   guests (a slow agent, a forbidden one, hostile strings) ([testing.md](testing.md#the-web-ui)). Release images
   are also scanned with Trivy and fail on fixable high or critical vulnerabilities.

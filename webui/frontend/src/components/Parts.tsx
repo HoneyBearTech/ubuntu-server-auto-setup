@@ -42,8 +42,13 @@ export function Notice({ notice, children }: { notice: NoticeT; children?: React
 }
 
 // The problems with a form, at its top. It takes the focus when it appears, so screen readers read it and
-// keyboard users start there; each problem links to its field. label names a field for its error key.
-export function ErrorSummary({ errors, label }: { errors: Errors; label?: (key: string) => string }) {
+// keyboard users start there; each problem links to its field. label names a field for its error key. id tells
+// two forms on one page apart.
+export function ErrorSummary({ errors, label, id = "error-summary" }: {
+  errors: Errors;
+  label?: (key: string) => string;
+  id?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const entries = Object.entries(errors);
   useEffect(() => {
@@ -59,7 +64,7 @@ export function ErrorSummary({ errors, label }: { errors: Errors; label?: (key: 
     target.scrollIntoView?.({ block: "center" });
   };
   return (
-    <div className="error-summary" role="alert" tabIndex={-1} id="error-summary" ref={ref}>
+    <div className="error-summary" role="alert" tabIndex={-1} id={id} ref={ref}>
       <h2>{entries.length === 1 ? "There is a problem" : `There are ${entries.length} problems`}</h2>
       <ul>
         {entries.map(([key, message]) => {
@@ -76,14 +81,14 @@ export function ErrorSummary({ errors, label }: { errors: Errors; label?: (key: 
 }
 
 // A single error that isn't about one field, such as a wrong password, at the top of a form.
-export function ErrorMessage({ message }: { message: string | null }) {
+export function ErrorMessage({ message, id = "error-summary" }: { message: string | null; id?: string }) {
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (message) ref.current?.focus();
   }, [message]);
   if (!message) return null;
   return (
-    <div className="error-summary" role="alert" tabIndex={-1} id="error-summary" ref={ref}>
+    <div className="error-summary" role="alert" tabIndex={-1} id={id} ref={ref}>
       <p>{message}</p>
     </div>
   );

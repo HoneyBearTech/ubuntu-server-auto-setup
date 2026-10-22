@@ -9,6 +9,7 @@ import json
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from argon2 import PasswordHasher
@@ -46,6 +47,10 @@ class Session:
     authenticated: bool = False
     # Host keys scanned but not trusted yet: the ones the user compared are the ones that get trusted.
     pending_hostkeys: list | None = None
+    # How it signed in: "password", or the ID of the passkey it used.
+    signed_in_with: str = ""
+    # The passkey challenge this session was given, if any (passkeys.Challenge): used once, then gone.
+    passkey_challenge: object | None = None
 
 
 class Auth:
@@ -140,22 +145,26 @@ class Auth:
         for sid in [sid for sid, s in self._sessions.items() if self._expired(s, now)]:
             del self._sessions[sid]
 
-    def log_in(self, old: Session | None) -> Session:
+    def log_in(self, old: Session | None, via: str = "password") -> Session:
         """A new, signed-in session (a new ID, so a session fixed before sign-in is worthless)."""
         if old is not None:
             self.end(old)
         session = self.new_session()
         session.authenticated = True
+        session.signed_in_with = via
         return session
 
     def end(self, session: Session) -> None:
         with self._lock:
             self._sessions.pop(session.sid, None)
 
-    def end_all_except(self, keep: Session) -> None:
+    def end_all_except(self, keep: Session, which: Callable[[Session], bool] = lambda s: True) -> int:
+        """Ends the other sessions (those which picks); returns how many ended."""
         with self._lock:
-            for sid in [sid for sid in self._sessions if sid != keep.sid]:
+            ended = [sid for sid, s in self._sessions.items() if sid != keep.sid and which(s)]
+            for sid in ended:
                 del self._sessions[sid]
+        return len(ended)
 
 
 def csrf_ok(session: Session | None, token: str | None) -> bool:

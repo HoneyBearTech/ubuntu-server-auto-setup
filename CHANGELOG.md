@@ -23,6 +23,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   VM created again keeps it) and the installed system matches cards by MAC address, not by interface name.
   Exactly one card may have the default route; every network value is checked before anything is created.
   The firewall's rules apply to every card (docs/interfaces.md, Networks).
+- **Passkeys** in the web UI. Once signed in with the password, add passkeys on the account page (a name
+  and the current password), see when each was added and last used, and remove them; the sign-in page
+  offers **Sign in with a passkey** next to the password. **Require a passkey** turns password sign-in off;
+  deleting `passkeys.json` from the data volume turns it on again. Passkeys work at `http://localhost`
+  on any port, or over HTTPS under the host name set in the new `USAS_PUBLIC_URL`; elsewhere the page
+  explains why it doesn't offer them. WebAuthn through py_webauthn (`webauthn` 3.0.1, hash-pinned in the
+  image): user verification required, single-use challenges tied to the session that expire after
+  5 minutes, origin and RP ID checks, signature counters, and the same throttling as the password
+  ([docs/web-ui.md](docs/web-ui.md#passkeys), [docs/security.md](docs/security.md)).
+- The container log records every sign-in and failed sign-in, with the client's address, and passkeys
+  being added, removed or required.
 
 ### Changed
 

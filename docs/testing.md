@@ -122,6 +122,7 @@ without touching any system. They cover:
 | `test_schema.py` | every field names a role variable and every pattern in `roles/*/vars/main.yml` is used (except the ones `NOT_FORM_FORMATS` lists: the sysctl mapping's formats, file paths and package lists); defaults, help and patterns come from the role files; the UI's own ranges match the roles' assert tasks; valid and invalid values for every kind of field |
 | `test_store.py` | the inventory and Vault round-trip; files are `0600` and the Vault is encrypted; typed values are tagged `!unsafe`, and `ansible` reads the inventory without templating them |
 | `test_auth.py` | argon2id hashing and rehashing, the setup code, throttling, sessions and their expiry, CSRF tokens |
+| `test_passkeys.py` | passkeys with a software authenticator (`softauthn.py`, ES256 with "none" attestation): `USAS_PUBLIC_URL`, adding (the password and a name needed, the options, the same passkey twice, the limit), signing in, and every response that must be refused (another origin or RP ID, no user verification, a replayed, expired or another session's challenge, a signature counter going back, another user handle, unreadable or oversized answers), throttling, "Require a passkey", a broken file failing closed, removal signing out its sessions, the CSRF header, and the log lines |
 | `test_app.py` | first run, sign-in and sign-out, open redirects, throttling, password change, the CSRF header (a token in the form isn't enough), `Origin` and `Sec-Fetch-Site`, no cross-origin answers, allowed hosts and HTTPS, cookies and security headers, the page shell and the built app's files, the theme cookie, every page's API and form with its errors, the connection test, the CA, the SSH key and host keys, the servers table, runs, streaming, history and stopping |
 | `test_runner.py`, `test_remote.py`, `test_sshkeys.py`, `test_config.py` | the command line and environment of runs, `--limit` checks, the Proxmox and GitHub checks against stand-in responses, key formats and fingerprints, `known_hosts` handling, settings |
 | `test_accessibility.py` | the HTML the server sends for every page: language, title, one `h1`, landmarks, the skip link, unique IDs, a message without JavaScript, and nothing inline the Content Security Policy would block ([accessibility.md](accessibility.md)) |
@@ -141,6 +142,7 @@ for the settings pages (`test/fixtures/sections.json`):
 | `a11y.test.tsx` | every page, signed in and out, empty and with errors, with axe-core's WCAG 2.1 A and AA rules and the same structural checks as `test_accessibility.py` |
 | `contrast.test.ts` | the WCAG contrast of every colour pair, from `src/styles/tokens.css`, in both themes |
 | `app.test.tsx` | the theme switch and what it posts, the router (links, back and forward, titles, focus), sign-in, sign-out, first run, the password change, an expired session, the API client |
+| `passkeys.test.tsx` | the base64url helpers, when a page can use passkeys (secure context, WebAuthn, host name), the `navigator.credentials` calls and the JSON they send (with a stand-in authenticator), the sign-in page with and without passkeys and with one required, the account page's list, adding (with errors in the summary), removing (focus to the section) and requiring |
 | `pages.test.tsx` | every page: what it shows from the API, what its forms post (field names, the CSRF header, the button's `action`), errors by field and in the summary, the connection test and the node dropdown, the servers table's rows, the SSH key and host keys, starting, following and stopping a run, the log's colours |
 
 `npm run check` type-checks the app and its tests (TypeScript, strict). The run fails below 80% statement
@@ -155,7 +157,8 @@ refused; the first password is set; the theme is remembered;
 the connection test fails on the mock's certificate until its CA is saved, then passes; every page is
 saved; invalid values are refused with the roles' patterns; a provisioning run for a VM that already exists
 goes through `ansible-playbook`, which reads the token from the Vault and calls the mock API over verified
-TLS; its log streams, contains no secret and lands in the history. Finally it checks that the Vault in the
+TLS; its log streams, contains no secret and lands in the history; adding a passkey starts with a
+challenge for `localhost` that needs user verification. Finally it checks that the Vault in the
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
@@ -167,13 +170,14 @@ does, without Docker: a certificate for `tests/mock_pve.py` and a published key,
 from the checkout on `127.0.0.1` with an empty data directory, whose first-run setup code goes to the
 tests; the VM the run provisions already exists in the mock, so the run is a real `ansible-playbook` run
 that needs no SSH. The mock runs with `--fixture-vms`, so the VMs page has guests to list. The tests run in
-two projects (`playwright.config.ts`):
+three projects (`playwright.config.ts`):
 
 | File | What |
 | --- | --- |
 | `flow.spec.ts` | by keyboard only, the way someone without a mouse does it: the skip link; the first-run setup; the Proxmox form typed field by field, the connection test failing on the certificate, saving the CA, the test passing, picking the node from its dropdown (arrow keys, Escape, Tab) and saving; a provisioning run chosen with the arrow keys, started with Enter and followed to the end with focus left where it was and the status changing in a polite live region; then signing in again, with a wrong password first. Leaves a signed-in session for `pages.spec.ts` |
 | `pages.spec.ts` | every page: axe-core (WCAG 2.0 and 2.1, A and AA) with real layout in the dark and light themes and "System" with the browser preferring each, with each accent palette (one, Ember, for now), also with a form error and with the phone menu open; Tab order, focus outlines that are visible and not covered, no keyboard trap, Shift+Tab back; the phone menu (Enter, Escape, focus back on the button, closing when focus leaves); the servers table's add and remove; the theme switch with the arrow keys |
 | `vms.spec.ts` | the VMs page against the fixture guests: sorting with Enter and Space (`aria-sort`, the caption, focus kept), the filters by keyboard with the count in its live region, each address's source, a hostile guest's markup shown as text, a refresh (with the browser's clock run forward) that keeps the rows and the focus, and axe-core at 375 pixels in the dark and light themes without sideways scrolling. Runs in the `pages` project |
+| `passkeys.spec.ts` | passkeys with Chromium's virtual authenticator (DevTools `WebAuthn.addVirtualAuthenticator`, with user verification): adding one by keyboard, signing out and in with it, "Require a passkey" (no password field, axe-core), the explanation at `127.0.0.1`, turning it off and removing the passkey. Runs last, in the `passkeys` project, since requiring a passkey signs out the session the others use |
 | `helpers.ts` | walking a page with Tab (`tabCycle`, `checkKeyboard`), axe-core (`checkAxe`), and posting a form as the app does for the pages the flow doesn't fill in by keyboard |
 
 A failing test leaves a screenshot and a trace in `webui/frontend/test-results/` (CI uploads them as the
