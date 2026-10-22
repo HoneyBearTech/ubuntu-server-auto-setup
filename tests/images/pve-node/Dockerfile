@@ -41,6 +41,8 @@ RUN apt-get update \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/10-test.conf
 # Proxmox's storage tool, faked: the roles ask it which storages allow ISO images and where they keep them.
 COPY --chmod=0755 pvesm /usr/local/bin/pvesm
+# xorriso, wrapped to keep a copy of each seed's user-data for the tests to check.
+COPY --chmod=0755 xorriso /usr/local/bin/xorriso
 # Served over HTTP as the stand-in for releases.ubuntu.com. gpgv isn't installed: the role installs it.
 COPY --from=release /srv/ubuntu /srv/ubuntu
 COPY --from=release /srv/test-signing /srv/test-signing

@@ -161,6 +161,32 @@ play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doe
   playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
 play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
 
+step "provision-vms: a server on DHCP, its address read from the guest agent, then a rerun that reads it again"
+play playbooks/provision-vms.yml --limit srv-dhcp
+play --idempotent playbooks/provision-vms.yml --limit srv-dhcp
+
+step "provision-vms: a VLAN on net0 and two more cards, each matched by its MAC address"
+play playbooks/provision-vms.yml --limit srv-vlan
+play tests/verify-network.yml
+
+step "provision-vms: no DHCP lease, or a guest agent the token may not ask, stops with what to do"
+play_fails 'VM 4065 (srv-nolease) reported no DHCP address on net0' playbooks/provision-vms.yml --limit srv-nolease
+play_fails 'add VM.GuestAgent.Audit (Proxmox VE 9) or VM.Monitor (Proxmox VE 8)' playbooks/provision-vms.yml \
+  --limit srv-forbidden
+
+step "provision-vms: network settings that could add options to a card, or a second default route, are refused"
+play_fails 'pve_bridge must be a bridge name' playbooks/provision-vms.yml --limit srv-vlan -e 'pve_bridge=vmbr0,firewall=0'
+play_fails 'vm_extra_nics item 1 (net1) may have only the keys' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"bridge": "vmbr1", "vlan": "20,mtu=1500"}]}'
+play_fails 'vm_extra_nics item 2 (net2) may have only the keys' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"mode": "none"}, {"mode": "dhcp", "address": "10.20.0.5"}]}'
+play_fails 'needs exactly one default gateway' playbooks/provision-vms.yml --limit srv-vlan \
+  -e '{"vm_extra_nics": [{"address": "10.20.0.5", "prefix": 24, "gateway": "10.20.0.1"}]}'
+play_fails 'needs exactly one default gateway' playbooks/provision-vms.yml --limit srv-dhcp \
+  -e '{"vm_extra_nics": [{"address": "10.20.0.5", "prefix": 24, "gateway": "10.20.0.1"}]}'
+play_fails 'must all differ' playbooks/provision-vms.yml --limit srv-dhcp \
+  -e '{"vm_extra_nics": [{"mode": "none", "mac": "02:00:00:00:40:63"}]}'
+
 step "A node user other than root: prepare-node.yml sets it up, then the builds and a VM need no root"
 # The fake pvesm, like the real one, refuses anyone but root; the ISO folders are root's (with the ISOs the
 # root builds above left there), and so is the work directory.
@@ -195,6 +221,10 @@ step "baseline: first run, second run, checks"
 play playbooks/baseline.yml --limit srv-01
 play --idempotent playbooks/baseline.yml --limit srv-01
 play tests/verify-baseline.yml
+cool_down
+
+step "baseline: a server on DHCP is reached at the address its guest agent reports"
+play --idempotent playbooks/baseline.yml --limit srv-dhcp --tags ssh_keys
 cool_down
 
 step "baseline: check mode on a server that has the baseline reports no changes"

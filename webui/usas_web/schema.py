@@ -27,6 +27,9 @@ NOT_FORM_FORMATS = frozenset({
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
     "pve_iso_dirs_file",
+    # The network card formats of net_mode, net_mac and vm_extra_nics, which the Servers page doesn't edit yet.
+    "provision_vlan_pattern", "provision_prefix_pattern", "provision_mtu_pattern", "provision_mac_pattern",
+    "provision_net_modes", "provision_nic_modes", "provision_nic_models", "provision_nic_keys",
 })
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
@@ -42,7 +45,6 @@ API_USER = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z"
 TOKEN_ID = r"^[A-Za-z][A-Za-z0-9._-]{0,63}\Z"  # noqa: S105 (a format, not a secret)
 TOKEN_SECRET = r"^[A-Za-z0-9-]{1,128}\Z"  # noqa: S105 (a format, not a secret)
 STORAGE_ID = r"^[A-Za-z][A-Za-z0-9._-]{0,63}\Z"
-BRIDGE = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,15}\Z"
 TIMEZONE = r"^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}\Z"
 SSH_PUBLIC_KEY = r"^(ssh-|ecdsa-|sk-)[A-Za-z0-9@.-]+ [A-Za-z0-9+/=]+( [^\r\n{}%]*)?\Z"
 _OCTET = r"(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
@@ -171,7 +173,7 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           help="The Proxmox node the VMs are created on, as Proxmox names it."),
         S("pve_storage", "VM disk storage", "text", "proxmox_vm", ui_pattern=STORAGE_ID),
         S("pve_efidisk_format", "EFI disk format", "choice", "proxmox_vm", ui_choices=("raw", "qcow2")),
-        S("pve_bridge", "Network bridge", "text", "proxmox_vm", ui_pattern=BRIDGE),
+        S("pve_bridge", "Network bridge", "text", "proxmox_vm", pattern_var="provision_bridge_pattern"),
         S("pve_vlan", "VLAN tag", "int", "proxmox_vm", minimum=1, maximum=4094),
         S("pve_iso_storage", "ISO storage", "text", "ubuntu_release", pattern_var="pve_storage_id_pattern",
           advanced=True, help="A Proxmox storage that allows ISO images (Content: ISO image), such as local or an NFS "

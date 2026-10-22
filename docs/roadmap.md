@@ -27,7 +27,9 @@ that run on each pull request.
 **Provisioning**
 - Done: Ubuntu's GPG signature on `SHA256SUMS` is verified, with its CD image signing key pinned by
   fingerprint, before the ISO's checksum is trusted.
-- Optional IPv6 and DHCP network configuration, and more disk layouts (including LUKS encryption).
+- Done: DHCP (the address read from the guest agent) and more network cards with VLANs
+  ([interfaces.md](interfaces.md#networks)).
+- Optional IPv6 network configuration, and more disk layouts (including LUKS encryption).
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 

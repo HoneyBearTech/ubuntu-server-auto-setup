@@ -21,9 +21,10 @@ with atheris.instrument_imports():
 RELEASE = roles.role_vars("ubuntu_release")
 COMMON = roles.role_vars("common")
 ISO_DIR = "roles/ubuntu_release/tasks/iso_dir.yml"
-TASK = "Use the folder recorded for the ISO storage"
-PICK = roles.set_fact_expression(ISO_DIR, "pve_iso_dir", TASK)
-PICK_VARS = roles.set_fact_vars(ISO_DIR, "pve_iso_dir", TASK)
+# The last of the two set_fact tasks for pve_iso_dir: "Use the folder recorded for the ISO storage".
+PICK = roles.set_fact_expression(ISO_DIR, "pve_iso_dir", last=True)
+PICK_VARS = roles.set_fact_vars(ISO_DIR, "pve_iso_dir", last=True)
+assert roles._set_fact_task(ISO_DIR, "pve_iso_dir", last=True)["name"] == "Use the folder recorded for the ISO storage"
 PATH_CHARS = "/az09._- \n\t\x00\x7f:"
 
 

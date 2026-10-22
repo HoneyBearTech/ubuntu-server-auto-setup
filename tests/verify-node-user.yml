@@ -87,8 +87,8 @@
       vars:
         create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
                     | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form')
-                    | selectattr('vmid', 'equalto', '4063') | first }}"
-        vm: "{{ verify_api.json.data.vms['4063'] }}"
+                    | selectattr('vmid', 'equalto', '4067') | first }}"
+        vm: "{{ verify_api.json.data.vms['4067'] }}"
       ansible.builtin.assert:
         that:
           - create.ide2 == 'local:iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,media=cdrom'
