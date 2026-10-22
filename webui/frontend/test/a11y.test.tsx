@@ -5,49 +5,10 @@
 
 import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import axe from "axe-core";
 import { describe, expect, it } from "vitest";
+import { checkAxe, checkStructure } from "./a11y";
 import * as fixtures from "./fixtures";
 import { FakeApi, reply, renderAt } from "./server";
-
-export function checkStructure(root: HTMLElement, path: string): void {
-  const all = [...root.querySelectorAll<HTMLElement>("*")];
-  expect(root.querySelectorAll("h1").length, `${path}: one h1`).toBe(1);
-  for (const tag of ["header", "main", "footer"]) expect(root.querySelector(tag), `${path}: ${tag}`).not.toBeNull();
-  const skip = root.querySelector('a.skip[href="#main"]');
-  expect(skip, `${path}: skip link`).not.toBeNull();
-  const ids = all.map((e) => e.id).filter(Boolean);
-  const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
-  expect(duplicates, `${path}: duplicate ids`).toEqual([]);
-  const known = new Set(ids);
-  for (const el of all) {
-    for (const attr of ["aria-describedby", "aria-labelledby", "aria-controls"]) {
-      for (const ref of (el.getAttribute(attr) ?? "").split(/\s+/).filter(Boolean)) {
-        expect(known.has(ref), `${path}: ${attr}=${ref}`).toBe(true);
-      }
-    }
-    if (el instanceof HTMLLabelElement && el.htmlFor) expect(known.has(el.htmlFor), `${path}: label for=${el.htmlFor}`).toBe(true);
-    if (el instanceof HTMLAnchorElement && el.getAttribute("href")?.startsWith("#")) {
-      expect(known.has(el.getAttribute("href")!.slice(1)), `${path}: link ${el.getAttribute("href")}`).toBe(true);
-    }
-    if (el.matches("input:not([type=hidden]), select, textarea")) {
-      const labelled = (el.id && root.querySelector(`label[for="${el.id}"]`)) || el.closest("label") || el.getAttribute("aria-label");
-      expect(labelled, `${path}: label for ${el.outerHTML.slice(0, 80)}`).toBeTruthy();
-    }
-    if (el instanceof HTMLButtonElement) {
-      expect((el.getAttribute("aria-label") ?? el.textContent ?? "").trim(), `${path}: button name`).not.toBe("");
-    }
-  }
-}
-
-export async function checkAxe(path: string): Promise<void> {
-  const result = await axe.run(document.body, {
-    runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
-    rules: { "color-contrast": { enabled: false } },
-  });
-  const problems = result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-  expect(problems, path).toEqual([]);
-}
 
 async function loaded(): Promise<void> {
   await waitFor(() => expect(document.querySelector(".loading")).toBeNull());
@@ -69,6 +30,7 @@ describe("every page", () => {
   it.each(["/login", "/setup"])("%s", async (path) => {
     new FakeApi();
     renderAt(path);
+    await loaded();
     checkStructure(document.body, path);
     await checkAxe(path);
   });
@@ -104,7 +66,7 @@ describe("pages with errors", () => {
   it("the sign-in page", async () => {
     new FakeApi({ "POST /api/login": () => reply(401, { error: "That password is wrong." }) });
     renderAt("/login");
-    await userEvent.type(screen.getByLabelText("Password"), "nope{Enter}");
+    await userEvent.type(await screen.findByLabelText("Password"), "nope{Enter}");
     await screen.findByText("That password is wrong.");
     expect(document.activeElement?.id).toBe("error-summary");
     checkStructure(document.body, "/login with an error");

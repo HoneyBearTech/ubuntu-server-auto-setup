@@ -219,11 +219,13 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 - **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
   a limit, the same as the [commands](#commands). Exit status and logs are kept in the run history.
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
-  `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS` and `USAS_PORT`
-  ([web-ui.md](web-ui.md#settings)).
+  `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
+  passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
+- **Sign-in**: the password, or passkeys (WebAuthn) added on the account page, with "Require a passkey" to
+  turn the password off ([web-ui.md](web-ui.md#passkeys)).
 - **Files in `/data`**: `inventory/hosts.yml` and `inventory/group_vars/all/vault.yml` are an ordinary
   inventory and Vault (the CLI can use them with `--vault-password-file /data/.vault-pass`); the UI also
-  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json` and `runs/` there
+  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `webui.json` and `runs/` there
   ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
   (`webui_ufw_allow`, `webui_ufw_allow_host`, `webui_authorize_ui_key`).
 - **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.
@@ -242,4 +244,4 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
 | Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |
 | Docker Hub API | the release workflow | HTTPS, an access token held in the `release` environment (version tags only) | Pushing the image and its description. |
-| The browser | the operator | HTTP on `127.0.0.1` (or HTTPS through a proxy), session cookie | The web UI. |
+| The browser | the operator | HTTP on `127.0.0.1` (or HTTPS through a proxy), the password or a passkey (WebAuthn), session cookie | The web UI. |

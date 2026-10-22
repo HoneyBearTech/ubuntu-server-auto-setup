@@ -165,3 +165,39 @@ export interface VmsData {
   cluster: string;
   fetched: number;
 }
+
+// Passkeys (main.py /api/session and /api/account).
+export interface PasskeyInfo {
+  registered: boolean;
+  required: boolean;
+  rp_id: string;
+  public_url: string;
+}
+
+export interface SessionData {
+  configured: boolean;
+  signed_in: boolean;
+  csrf: string;
+  version: string;
+  theme: Theme;
+  passkeys: PasskeyInfo;
+}
+
+export interface Passkey {
+  id: string;
+  name: string;
+  created: number;
+  last_used: number | null;
+  backed_up: boolean;
+}
+
+export interface AccountData {
+  passkeys: Passkey[];
+  require_passkey: boolean;
+  broken: boolean;
+  rp_id: string;
+  public_url: string;
+  max_passkeys: number;
+  max_name: number;
+  current: string; // how this session signed in: "password", or the ID of the passkey it used
+}

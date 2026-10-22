@@ -144,7 +144,7 @@ describe("signing out and in", () => {
   it("signs in and returns to the page asked for, with the new session's token", async () => {
     const api = new FakeApi({ "POST /api/login": () => ({ redirect: "/servers", csrf: "new-token" }) });
     renderAt("/login?next=/servers");
-    await userEvent.type(screen.getByLabelText("Password"), "correct horse battery staple{Enter}");
+    await userEvent.type(await screen.findByLabelText("Password"), "correct horse battery staple{Enter}");
     await waitFor(() => expect(window.location.pathname).toBe("/servers"));
     expect(api.posts("/api/login")[0].body).toEqual({ next: "/servers", password: "correct horse battery staple" });
     expect(csrf()).toBe("new-token");
@@ -154,7 +154,7 @@ describe("signing out and in", () => {
   it("sends a first sign-in to the first-run setup", async () => {
     new FakeApi({ "POST /api/login": () => reply(409, { error: "Set the password first.", redirect: "/setup" }) });
     renderAt("/login");
-    await userEvent.type(screen.getByLabelText("Password"), "x{Enter}");
+    await userEvent.type(await screen.findByLabelText("Password"), "x{Enter}");
     await waitFor(() => expect(location_.assign).toHaveBeenCalledWith("/setup"));
   });
 
@@ -184,7 +184,7 @@ describe("signing out and in", () => {
   it("changes the password", async () => {
     const api = new FakeApi({ "POST /api/account": () => reply(422, { error: "The current password is wrong." }) });
     renderAt("/account");
-    await userEvent.type(screen.getByLabelText("Current password"), "nope");
+    await userEvent.type(screen.getByLabelText("Current password", { selector: "#current" }), "nope");
     await userEvent.type(screen.getByLabelText("New password"), "a new long password");
     await userEvent.type(screen.getByLabelText("New password again"), "a new long password");
     await userEvent.click(screen.getByRole("button", { name: "Change the password" }));
@@ -192,7 +192,7 @@ describe("signing out and in", () => {
     api.on("POST /api/account", () => ({ message: "Password changed. Other sessions were signed out." }));
     await userEvent.click(screen.getByRole("button", { name: "Change the password" }));
     await screen.findByText("Password changed. Other sessions were signed out.");
-    expect((screen.getByLabelText("Current password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Current password", { selector: "#current" }) as HTMLInputElement).value).toBe("");
   });
 });
 

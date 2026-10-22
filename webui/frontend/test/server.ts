@@ -19,6 +19,8 @@ type Handler = (call: Call) => Answer | unknown;
 
 export function defaultRoutes(): Record<string, Handler> {
   return {
+    "GET /api/session": () => fixtures.session,
+    "GET /api/account": () => fixtures.account,
     "GET /api/overview": () => fixtures.overview,
     "GET /api/proxmox": () => fixtures.proxmox,
     "GET /api/defaults": () => fixtures.defaults,

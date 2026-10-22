@@ -9,6 +9,7 @@ The server checks everything it is sent: the app only shows what the server says
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 import zoneinfo
@@ -33,6 +34,7 @@ from fastapi.templating import Jinja2Templates
 from . import __version__, vms
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
+from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
 from .runner import PLAYBOOKS, Run, RunError, Runner
 from .schema import Field, Invalid, Schema, display_value, parse_value
@@ -68,6 +70,8 @@ THEMES = ("dark", "light", "system")  # dark is the default
 THEME_COOKIE = "usas_theme"
 FRONTEND_ENTRY = "src/main.tsx"
 VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
+# Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
+log = logging.getLogger("usas_web")
 
 
 def asset_urls(static_dir: Path) -> dict[str, str]:
@@ -155,6 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     schema = Schema(settings.project_dir)
     store = Store(settings, schema)
     auth = Auth(settings)
+    passkeys = Passkeys(settings)
     runner = Runner(settings)
     keys = Keys(settings)
     lister = VmLister()
@@ -168,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                   openapi_url=None)
     app.state.settings, app.state.auth, app.state.store, app.state.runner = settings, auth, store, runner
     app.state.schema, app.state.keys, app.state.vm_lister = schema, keys, lister
+    app.state.passkeys = passkeys
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(version=__version__, assets=asset_urls(HERE / "static"))
@@ -329,11 +335,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- Session, theme, first run, sign-in -------------------------------------------------------------------
 
+    def passkey_info() -> dict[str, Any]:
+        """What the sign-in page needs to offer passkeys: whether any is registered, whether one is required,
+        and the host name they belong to (the page hides them where the browser can't use them)."""
+        return {"registered": passkeys.count() > 0, "required": passkeys.required(), "rp_id": settings.rp_id,
+                "public_url": settings.public_url}
+
     @app.get("/api/session")
     async def session_info(request: Request):
         session = request.state.session
         return reply(configured=auth.is_configured(), signed_in=session.authenticated, csrf=session.csrf,
-                     version=__version__, theme=theme(request))
+                     version=__version__, theme=theme(request), passkeys=passkey_info())
 
     @app.post("/api/theme")
     async def set_theme(request: Request):
@@ -373,14 +385,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(409, error="Set the password first.", redirect="/setup")
         form = await checked_form(request)
         target = safe_next(str(form.get("next", "/")))
+        if passkeys.required():
+            # The password isn't checked at all, so it can't be guessed here either.
+            log.warning("Password sign-in refused from %s: a passkey is required", client(request))
+            return reply(403, error="Sign in with a passkey: signing in with the password is turned off.")
         wait = auth.wait_seconds(client(request))
         if wait:
             return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
         if not auth.verify_password(str(form.get("password", ""))):
             auth.record_failure(client(request))
+            log.warning("Sign-in with a wrong password from %s", client(request))
             return reply(401, error="That password is wrong.")
         auth.clear_failures(client(request))
         request.state.session = auth.log_in(request.state.session)
+        log.info("Signed in with the password from %s", client(request))
         return reply(redirect=target, csrf=request.state.session.csrf)
 
     @app.post("/api/logout")
@@ -402,6 +420,119 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         auth.set_password(str(form["password"]))
         auth.end_all_except(session)
         return reply(message="Password changed. Other sessions were signed out.")
+
+    # --- Passkeys ----------------------------------------------------------------------------------------
+
+    def passkey_failed(request: Request, what: str, exc: PasskeyError, status: int = 401) -> JSONResponse:
+        log.warning("%s failed from %s: %s", what, client(request), exc.reason)
+        return reply(status, error=exc.message)
+
+    @app.get("/api/account")
+    async def account_info(request: Request):
+        session = require_login(request)
+        return reply(passkeys=passkeys.listing(), require_passkey=passkeys.required(), broken=passkeys.broken(),
+                     rp_id=settings.rp_id, public_url=settings.public_url, max_passkeys=MAX_PASSKEYS,
+                     max_name=MAX_NAME, current=session.signed_in_with)
+
+    @app.post("/api/passkeys/register-options")
+    async def passkey_register_options(request: Request):
+        session = require_login(request)
+        form = await checked_form(request)
+        # Adding a way in needs the password, as changing it does: a session left open isn't enough.
+        wait = auth.wait_seconds(client(request))
+        if wait:
+            return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
+        name = clean_name(str(form.get("passkey_name", "")))
+        errors = {}
+        if not name:
+            errors["passkey_name"] = "Name the passkey, such as the device or password manager it is in."
+        elif len(name) > MAX_NAME:
+            errors["passkey_name"] = f"Use at most {MAX_NAME} characters."
+        if not auth.verify_password(str(form.get("passkey_current", ""))):
+            auth.record_failure(client(request))
+            errors["passkey_current"] = "The current password is wrong."
+        if errors:
+            return reply(422, errors=errors)
+        try:
+            options = passkeys.registration_options(session, name)
+        except PasskeyError as exc:
+            return reply(409, error=exc.message)
+        return reply(options=json.loads(options))
+
+    @app.post("/api/passkeys/register")
+    async def passkey_register(request: Request):
+        session = require_login(request)
+        form = await checked_form(request)
+        try:
+            record = passkeys.register(session, str(form.get("credential", "")))
+        except PasskeyError as exc:
+            return passkey_failed(request, "Adding a passkey", exc, 422)
+        log.info("Passkey \"%s\" added from %s", loggable(record["name"]), client(request))
+        return reply(message=f"Added the passkey “{record['name']}”.")
+
+    @app.post("/api/passkeys/remove")
+    async def passkey_remove(request: Request):
+        session = require_login(request)
+        form = await checked_form(request)
+        credential_id = str(form.get("id", ""))
+        try:
+            name = passkeys.remove(credential_id)
+        except PasskeyError as exc:
+            return reply(409, error=exc.message)
+        # Sessions signed in with it end too (this one stays, so the page can say what happened).
+        ended = auth.end_all_except(session, lambda s: s.signed_in_with == credential_id)
+        log.info("Passkey \"%s\" removed from %s", loggable(name), client(request))
+        signed_out = " Other sessions signed in with it were signed out." if ended else ""
+        return reply(message=f"Removed the passkey “{name}”.{signed_out}")
+
+    @app.post("/api/passkeys/require")
+    async def passkey_require(request: Request):
+        session = require_login(request)
+        form = await checked_form(request)
+        on = form.get("require_passkey") == "on"
+        try:
+            passkeys.set_required(on)
+        except PasskeyError as exc:
+            return reply(409, error=exc.message)
+        log.info("Passkey requirement turned %s from %s", "on" if on else "off", client(request))
+        if not on:
+            return reply(message="Signing in with the password works again.")
+        ended = auth.end_all_except(session, lambda s: s.signed_in_with == "password")
+        signed_out = " Other sessions signed in with the password were signed out." if ended else ""
+        return reply(message=f"A passkey is now required to sign in.{signed_out}")
+
+    @app.post("/api/passkeys/login-options")
+    async def passkey_login_options(request: Request):
+        if not auth.is_configured():
+            return reply(409, error="Set the password first.", redirect="/setup")
+        await checked_form(request)
+        wait = auth.wait_seconds(client(request))
+        if wait:
+            return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
+        try:
+            options = passkeys.authentication_options(request.state.session)
+        except PasskeyError as exc:
+            return reply(409, error=exc.message)
+        return reply(options=json.loads(options))
+
+    @app.post("/api/passkeys/login")
+    async def passkey_login(request: Request):
+        if not auth.is_configured():
+            return reply(409, error="Set the password first.", redirect="/setup")
+        form = await checked_form(request)
+        target = safe_next(str(form.get("next", "/")))
+        wait = auth.wait_seconds(client(request))
+        if wait:
+            return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
+        try:
+            record = passkeys.authenticate(request.state.session, str(form.get("credential", "")))
+        except PasskeyError as exc:
+            auth.record_failure(client(request))
+            return passkey_failed(request, "Sign-in with a passkey", exc)
+        auth.clear_failures(client(request))
+        request.state.session = auth.log_in(request.state.session, via=record["id"])
+        log.info("Signed in with the passkey \"%s\" from %s", loggable(record["name"]), client(request))
+        return reply(redirect=target, csrf=request.state.session.csrf)
 
     # --- Overview ----------------------------------------------------------------------------------------
 

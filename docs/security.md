@@ -87,10 +87,21 @@ and in [web-ui.md](web-ui.md#security).
 
 - Every page and action except the health check needs a sign-in. The password is stored only as an
   argon2id hash; the first one can only be set with a one-time code printed in the container's log; failed
-  attempts are slowed down exponentially (up to 15 minutes between tries).
+  attempts are slowed down exponentially (up to 15 minutes between tries). Every sign-in and failed
+  sign-in is logged with the client's address.
+- **Passkeys** (optional) sign in instead of the password: WebAuthn through py_webauthn, added only by a
+  signed-in session that enters the password again, and kept as public keys in a `0600` file. Each
+  challenge belongs to one session, is used once and expires after 5 minutes; a response counts only from
+  the UI's own origin and host name (`USAS_PUBLIC_URL`, or `localhost`; never taken from the request), with
+  user verification, and with a signature counter that must go up if the authenticator keeps one. Failures
+  count towards the same slow-down as wrong passwords. **Require a passkey** turns password sign-in off
+  (the password isn't even checked) and signs out other sessions that used it; removing a passkey signs
+  out the other sessions that used it. If the passkeys file can't be read, no passkey works and the
+  password is refused, until the file is deleted ([web-ui.md](web-ui.md#passkeys)).
 - Sessions are random, kept in memory, carried in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` over
   HTTPS), renewed at sign-in and ended by sign-out, inactivity (2 hours), age (12 hours), a password
-  change (for other sessions) and a restart.
+  change (for other sessions), removing the passkey or requiring a passkey (for the sessions that used it
+  or the password), and a restart.
 - Every post needs the session's CSRF token in an `X-CSRF-Token` header, and requests that say they come
   from another site (`Origin`, `Sec-Fetch-Site`) are refused; the API answers no cross-origin requests.
   Only the configured host names are served, against DNS rebinding, and names other than `localhost` only
@@ -268,11 +279,17 @@ in the trust store, and how to do the same in the web UI's data volume.
   private keys and the inventory. Anyone who controls it controls your servers. With the container image,
   that includes the Docker host and anyone who can read the data volume or run `docker exec`: the volume
   holds the SSH key and, unless you move it out with `USAS_VAULT_PASSWORD_FILE`, the Vault password.
-- **The web UI's password, and the browser it is used from.** The UI has one password, no accounts and no
-  second factor. Whoever knows it, or controls the browser or a browser extension while a session is
-  open, can do everything the UI can. Published beyond `127.0.0.1`, the UI is exposed to password guessing
-  (slowed down, not stopped) from wherever it can be reached; over plain HTTP its traffic, password
-  included, could be read on the network, which is why it refuses other host names without HTTPS.
+- **The web UI's password, its passkeys, and the browser it is used from.** The UI has one user and no
+  accounts; a passkey replaces the password rather than adding a second factor to it. Whoever knows the
+  password (unless a passkey is required), or holds an unlocked device or password manager with one of its
+  passkeys, or controls the browser or a browser extension while a session is open, can do everything the
+  UI can, including adding a passkey of their own if they know the password. Published beyond `127.0.0.1`
+  without "Require a passkey", the UI is exposed to password guessing (slowed down, not stopped) from
+  wherever it can be reached; over plain HTTP its traffic, password included, could be read on the
+  network, which is why it refuses other host names without HTTPS. The UI asks for no attestation, so it
+  can't tell which kind of authenticator made a passkey: a passkey kept in a synced password manager is
+  as safe as that account. Anyone who can `docker exec` into the container or write the data volume can
+  delete `passkeys.json` and so turn the requirement off; that access is out of scope anyway (above).
 - **A compromised GitHub account.** Whoever controls `github_user` decides which keys can log in to your
   servers at the next provisioning, baseline run or `make keys`. Protect the account with two-factor
   authentication, or use `admin_extra_ssh_keys` and `ssh_keys_exclusive` to depend on it less.
