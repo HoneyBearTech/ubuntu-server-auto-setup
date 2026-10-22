@@ -90,8 +90,9 @@ The overview lists the steps and whether each is done.
 1. **Proxmox**: the API host and port, the token's user, name and secret, and whether to verify the API's
    TLS certificate (keep it on). **Test the connection** calls the API with what you typed, without
    saving the form, and lists the cluster's nodes with their status (and the cluster's name, if the token
-   may read it). From then on the node the VMs are created on is a dropdown of those nodes, such as
-   `hephaestus (online)`; node names are case-sensitive, and a name that isn't in the cluster is refused.
+   may read it). From then on the node the VMs are created on (the default node; a server can name another
+   on the Servers page) is a dropdown of those nodes, such as `hephaestus (online)`; node names are
+   case-sensitive, and a name that isn't in the cluster is refused.
    The **ISO storage** (under More settings) becomes a dropdown of the storages that allow ISO images
    in the same way, if the token may list storages; the playbooks find its folder on the node themselves.
    Test again to refresh the lists (they are kept in `webui.json`). Then the storage, the bridge and an
@@ -104,18 +105,22 @@ The overview lists the steps and whether each is done.
    verification can stay on.
 2. **SSH key**: the UI's own key pair. **Create a key** makes an Ed25519 key in the data volume; or upload
    one (OpenSSH or PEM; a key with a passphrase must be in PEM format, or have the passphrase removed). Add
-   the public key to `/root/.ssh/authorized_keys` on the Proxmox node (the page shows the command). Then
-   enter the node's SSH address, **scan** its host key, compare the fingerprints with what the node shows
+   the public key to `/root/.ssh/authorized_keys` on each Proxmox node (the page shows the command). The
+   page then lists every node in use, the default node first, with the servers on it: for each, enter its
+   SSH address, **scan** its host key, compare the fingerprints with what that node shows
    (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` in the node's shell), and **trust** them. Only then
-   will the UI and the playbooks connect, and only to that key. **Test the SSH login** checks the whole
-   path.
+   will the UI and the playbooks connect, and only to those keys; the overview's step is done when every
+   node in use has an address and a trusted key. **Test the SSH login** checks the whole path. A node no
+   server uses any more keeps its address until you **remove** it.
 3. **Defaults**: the GitHub user whose keys are installed (**Preview the keys** shows what GitHub returns,
    filtered exactly as the roles filter it), extra public keys, whether to authorize the UI's own key on the
    servers (on by default: the baseline logs in with it), the admin user and password, the time zone, the
    gateway, prefix length, DNS servers and search domains, and the installer's disk layout.
 4. **Servers**: one row per VM: its name (also the VM's name in Proxmox), static IPv4 address, VM ID, and
-   optionally cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
-   `5432/tcp from 10.0.0.0/24`, separated by commas). Empty sizes use the role defaults.
+   optionally its node, cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
+   `5432/tcp from 10.0.0.0/24`, separated by commas). The node is a dropdown of the cluster's nodes after a
+   connection test; **Default** uses the node on the Proxmox page. Empty sizes use the role defaults. A
+   server can't be named like a node: both are hosts of the same inventory.
 5. **Hardening**: the SSH port, the users allowed to log in over SSH, root login, passwordless sudo, the
    firewall's SSH sources and rules for every server, and the Fail2Ban settings. Below them, off until you
    turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
@@ -136,8 +141,11 @@ The overview lists the steps and whether each is done.
    on Proxmox VE 8 the page works without them. Selecting VMs and running the baseline against them is
    planned for a later release; for now, add a VM to the Servers page to run playbooks against it.
 7. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
-   only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers or groups,
-   separated by commas). The run's output streams live, with Ansible's status lines coloured (`ok`,
+   only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers, nodes or groups,
+   separated by commas). The page shows where `build-installer` puts the installer ISO: each node the
+   servers use, its ISO storage, and which node builds it (one node for a storage the cluster shares, each
+   node for its own storage), worked out by the playbooks' own code. With a limit, a node builds only if it
+   is in the limit too. The run's output streams live, with Ansible's status lines coloured (`ok`,
    `changed`, `skipping`, `fatal`, the play recap's counts) and numbered. **Follow the output** keeps the
    newest line in view; scrolling up pauses it. **Wrap long lines** wraps instead of scrolling sideways.
    **Stop the run** interrupts it like Ctrl-C. A
@@ -155,14 +163,14 @@ directories):
 
 | Path | What |
 | --- | --- |
-| `inventory/hosts.yml` | The inventory: every setting you saved, the servers, the Proxmox node. |
+| `inventory/hosts.yml` | The inventory: every setting you saved, the servers, the Proxmox nodes with an SSH address. |
 | `inventory/group_vars/all/vault.yml` | The admin password and the API token (and the mail relay password and webhook URL, if set), encrypted with Ansible Vault (AES-256). |
 | `.vault-pass` | The Vault password: 32 random bytes made on the first start (see below). |
 | `ssh/id_ed25519`, `ssh/id_ed25519.pub` | The UI's SSH key pair. |
-| `ssh/known_hosts` | The trusted host keys: the Proxmox node's, and each new VM's (added by provisioning). |
+| `ssh/known_hosts` | The trusted host keys: each Proxmox node's, and each new VM's (added by provisioning). |
 | `pve-ca.pem`, `ca-bundle.pem` | The cluster CA you saved, and that CA together with the public ones. |
 | `auth.json` | The UI password's argon2id hash. |
-| `webui.json` | The cluster's name and nodes from the last connection test, for the node dropdown. |
+| `webui.json` | The cluster's name, nodes and ISO storages from the last connection test, for the node dropdowns and the ISO plan. |
 | `runs/` | The run history: one `.json` and one `.log` per run. |
 
 **The Vault password is in the same volume by default**, so the encryption protects `vault.yml` when it is
@@ -314,8 +322,8 @@ Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms ar
 
 ## Limitations
 
-- One Proxmox node per inventory (the VMs are created on it; the API can be any node of the cluster),
-  IPv4 only, as the playbooks.
+- One Proxmox cluster per inventory (the VMs can go on any of its nodes; the API can be any node of the
+  cluster), one ISO storage for every server, IPv4 only, as the playbooks.
 - One password, no accounts or second factor. Passkeys were considered and are on the
   [roadmap](roadmap.md); they need a stable host name, which a localhost tool doesn't have.
 - One run at a time, and sessions don't survive a restart of the container.

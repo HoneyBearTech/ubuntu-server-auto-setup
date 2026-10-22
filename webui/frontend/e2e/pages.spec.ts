@@ -143,6 +143,18 @@ test.describe("keyboard", () => {
     await expect(page.getByRole("textbox", { name: /, row 1$/ }).first()).toBeFocused();
   });
 
+  test("the servers table: a server's node is picked from the cluster by keyboard", async ({ page }) => {
+    await page.goto("/servers");
+    await settled(page);
+    // The flow's connection test listed the mock cluster's two nodes; empty is the node on the Proxmox page.
+    const node = page.getByRole("combobox", { name: "Node, row 1" });
+    await expect(node.locator("option")).toHaveText(["Default (pve-test)", "pve-test", "pve-test-2"]);
+    await tabTo(page, node);
+    await page.keyboard.type("pve-test-2"); // type-ahead picks the option, on every platform
+    await expect(node).toHaveValue("pve-test-2");
+    await expect(node).toBeFocused();
+  });
+
   test("the theme switch: arrow keys choose, the page follows at once", async ({ page }) => {
     await page.goto("/");
     await settled(page);

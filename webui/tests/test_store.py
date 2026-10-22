@@ -32,7 +32,7 @@ def sample(store) -> Config:
     })
     config.secrets.update({"vault_admin_password": "p {{ w }}", "vault_pve_api_token_id": "automation",
                            "vault_pve_api_token_secret": TOKEN_SECRET})
-    config.node_address = "10.0.0.2"
+    config.node_addresses = {"pve-1": "10.0.0.2"}
     config.servers = [
         {"name": "web-01", "ansible_host": "10.0.0.11", "pve_vmid": 4001, "vm_cores": 4, "vm_memory_mb": None,
          "ufw_ports": [{"port": "443", "proto": "tcp"}]},
@@ -48,7 +48,7 @@ def test_round_trip(store):
     assert loaded.values["pve_api_host"] == "pve.example.lan"
     assert loaded.values["ufw_allow"] == [{"port": "80", "proto": "tcp"}]
     assert loaded.secrets == config.secrets
-    assert loaded.node_address == "10.0.0.2"
+    assert loaded.node_addresses == {"pve-1": "10.0.0.2"}
     assert loaded.servers[0] == {"name": "web-01", "ansible_host": "10.0.0.11", "pve_vmid": 4001, "vm_cores": 4,
                                  "ufw_ports": [{"port": "443", "proto": "tcp"}]}
     assert loaded.servers[1]["ufw_ports"] == []
@@ -138,3 +138,21 @@ def test_yaml_helpers(tmp_path):
     write_private(path, b"two")
     assert path.read_text() == "two" and stat.S_IMODE(path.stat().st_mode) == 0o600
     assert [p.name for p in path.parent.iterdir()] == ["f"]
+
+
+def test_servers_on_several_nodes(store):
+    config = sample(store)
+    config.servers[1]["pve_node"] = "pve-2"
+    config.node_addresses = {"pve-1": "10.0.0.2", "pve-2": "10.0.0.3", "pve-old": "10.0.0.4", "pve-none": ""}
+    store.save(config)
+    inventory = load_yaml(store.settings.inventory_file.read_text())
+    nodes = inventory["all"]["children"]["proxmox_nodes"]["hosts"]
+    assert nodes == {"pve-1": {"ansible_host": "10.0.0.2", "ansible_user": "root"},
+                     "pve-2": {"ansible_host": "10.0.0.3", "ansible_user": "root"},
+                     "pve-old": {"ansible_host": "10.0.0.4", "ansible_user": "root"}}
+    assert "pve_node: !unsafe 'pve-2'" in store.settings.inventory_file.read_text()
+    loaded = store.load()
+    assert loaded.servers[1]["pve_node"] == "pve-2" and "pve_node" not in loaded.servers[0]
+    assert loaded.nodes_in_use() == ["pve-1", "pve-2"]
+    assert loaded.node_names() == ["pve-1", "pve-2", "pve-old"]
+    assert {"pve-1", "pve-2", "pve-old"} <= store.host_names()

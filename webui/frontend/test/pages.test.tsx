@@ -1,7 +1,7 @@
 // The pages: what each shows from the API, what its forms post (the same field names the server-rendered
 // forms had), and how it shows the server's answer.
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { LogView, lineClass, splitLines } from "../src/components/LogView";
@@ -310,6 +310,39 @@ describe("the servers page", () => {
     expect(body["servers-1-name"]).toBe("web-02");
   });
 
+  it("picks each server's node from the cluster, the default node first", async () => {
+    const api = new FakeApi({ "POST /api/servers": () => ({ message: "Saved 2 server(s)." }) });
+    renderAt("/servers");
+    await loaded();
+    const node = (row: number) => screen.getByLabelText(`Node, row ${row}`) as HTMLSelectElement;
+    expect([...node(1).options].map((o) => o.textContent)).toEqual(["Default (hephaestus)", "ares", "hephaestus", "hermes"]);
+    expect(node(1).value).toBe("");
+    expect(node(2).value).toBe("ares");
+    await userEvent.selectOptions(node(1), "hermes");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved 2 server(s).");
+    expect(api.posts("/api/servers")[0].body["servers-0-pve_node"]).toBe("hermes");
+    expect(api.posts("/api/servers")[0].body["servers-1-pve_node"]).toBe("ares");
+  });
+
+  it("takes a typed node before a connection test, and keeps a node the cluster no longer lists", async () => {
+    new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, nodes: [] }) });
+    renderAt("/servers");
+    await loaded();
+    expect(input("Node, row 2").value).toBe("ares");
+    expect(input("Node, row 1").placeholder).toBe("hephaestus");
+    expect(screen.getByText(/test the connection there to pick from the cluster's nodes/)).toBeTruthy();
+  });
+
+  it("keeps a node the cluster no longer lists in the dropdown", async () => {
+    new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, nodes: ["hephaestus"] }) });
+    renderAt("/servers");
+    await loaded();
+    const node = screen.getByLabelText("Node, row 2") as HTMLSelectElement;
+    expect(node.value).toBe("ares");
+    expect([...node.options].map((o) => o.value)).toEqual(["", "hephaestus", "ares"]);
+  });
+
   it("keeps one empty row when the last is removed", async () => {
     new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, rows: [] }) });
     renderAt("/servers");
@@ -351,8 +384,20 @@ describe("the SSH page", () => {
     expect(screen.getByText("SHA256:trusted1")).toBeTruthy();
     expect(screen.getByText("SHA256:offered1")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create a new key" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Scan again" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Forget the host key" })).toBeTruthy();
+    // One part per node: the default node, a server's node, and a node no server uses any more.
+    const parts = screen.getAllByRole("group", { name: /^Node / });
+    expect(parts.map((p) => p.querySelector("h3")?.textContent)).toEqual(["Node hephaestus", "Node ares", "Node hermes"]);
+    expect(within(parts[0]).getByText("The default node, used by web-01.")).toBeTruthy();
+    expect(within(parts[0]).getByRole("button", { name: "Scan again" })).toBeTruthy();
+    expect(within(parts[0]).getByRole("button", { name: "Forget the host key" })).toBeTruthy();
+    expect(within(parts[1]).getByText("Used by db-01.")).toBeTruthy();
+    expect(within(parts[1]).getByText(/The host key of ares isn't trusted yet/)).toBeTruthy();
+    expect(within(parts[1]).getByRole("button", { name: "Scan the host key" })).toBeTruthy();
+    expect(within(parts[1]).queryByRole("button", { name: "Remove this node" })).toBeNull();
+    expect(within(parts[2]).getByText("No server uses it now.")).toBeTruthy();
+    expect(within(parts[2]).getByRole("button", { name: "Remove this node" })).toBeTruthy();
+    // The offered keys show under the node they were scanned for, only.
+    expect(within(parts[1]).queryByText("SHA256:offered1")).toBeNull();
   });
 
   it("posts each action and shows its answer where it was asked", async () => {
@@ -360,9 +405,10 @@ describe("the SSH page", () => {
       "POST /api/ssh": (c) => {
         switch (c.body.action) {
           case "generate": return reply(422, { area: "key", error: "Tick the box to confirm replacing the current key." });
-          case "address": return { message: "Saved the node's SSH address 192.168.1.21." };
-          case "trust": return reply(422, { area: "hostkey", error: "Scan again, compare the fingerprints and tick the box." });
-          case "test": return { message: "Logged in to root@192.168.1.20 with the UI's key." };
+          case "address": return { message: "Saved node hephaestus's SSH address 192.168.1.30.", node: c.body.node };
+          case "trust": return reply(422, { area: "hostkey", node: c.body.node, error: "Scan again, compare the fingerprints and tick the box." });
+          case "test": return { message: "Logged in to root@192.168.1.20 with the UI's key.", node: c.body.node };
+          case "scan": return { node: c.body.node };
           default: return {};
         }
       },
@@ -371,20 +417,23 @@ describe("the SSH page", () => {
     await loaded();
     await userEvent.click(screen.getByRole("button", { name: "Create a new key" }));
     await screen.findByText("Tick the box to confirm replacing the current key.");
-    await userEvent.clear(input("The node's SSH address"));
-    await userEvent.type(input("The node's SSH address"), "192.168.1.21");
-    await userEvent.click(screen.getByRole("button", { name: "Save the address" }));
-    await screen.findByText("Saved the node's SSH address 192.168.1.21.");
-    await userEvent.click(screen.getByLabelText("The fingerprints match what the node shows"));
+    // The parts are drawn again after each answer, so each is looked up again.
+    const part = (i: number) => within(screen.getAllByRole("group", { name: /^Node / })[i]);
+    await userEvent.clear(input("SSH address of hephaestus"));
+    await userEvent.type(input("SSH address of hephaestus"), "192.168.1.30");
+    await userEvent.click(part(0).getByRole("button", { name: "Save the address" }));
+    await waitFor(() => part(0).getByText("Saved node hephaestus's SSH address 192.168.1.30."));
+    await userEvent.click(screen.getByLabelText("The fingerprints match what node hephaestus shows"));
     await userEvent.click(screen.getByRole("button", { name: "Trust these keys" }));
-    await screen.findByText(/compare the fingerprints and tick the box/);
+    await waitFor(() => part(0).getByText(/compare the fingerprints and tick the box/));
     await userEvent.click(screen.getByRole("button", { name: "Test the SSH login" }));
-    await screen.findByText(/Logged in to root/);
-    await userEvent.click(screen.getByRole("button", { name: "Scan again" }));
-    const actions = api.posts("/api/ssh").map((c) => c.body.action);
-    expect(actions).toEqual(["generate", "address", "trust", "test", "scan"]);
-    expect(api.posts("/api/ssh")[1].body.node_address).toBe("192.168.1.21");
-    expect(api.posts("/api/ssh")[2].body.confirm).toBe("on");
+    await waitFor(() => part(0).getByText(/Logged in to root/));
+    await userEvent.click(part(1).getByRole("button", { name: "Scan the host key" }));
+    const posts = api.posts("/api/ssh");
+    expect(posts.map((c) => c.body.action)).toEqual(["generate", "address", "trust", "test", "scan"]);
+    expect(posts.map((c) => c.body.node)).toEqual([undefined, "hephaestus", "hephaestus", "hephaestus", "ares"]);
+    expect(posts[1].body.node_address).toBe("192.168.1.30");
+    expect(posts[2].body.confirm).toBe("on");
   });
 
   it("uploads a key file", async () => {
@@ -404,14 +453,25 @@ describe("the SSH page", () => {
 
   it("starts without a key or an address", async () => {
     new FakeApi({
-      "GET /api/ssh": () => ({ ...fixtures.ssh, public_key: "", key_info: null, node_address: "", trusted: [], pending: null, pve_node: "" }),
+      "GET /api/ssh": () => ({ ...fixtures.ssh, public_key: "", key_info: null, nodes: [], pending: null, pve_node: "" }),
     });
     renderAt("/ssh");
     await loaded();
     expect(screen.getByText(/There is no key yet/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create a key" })).toBeTruthy();
     expect(screen.queryByText("Host key")).toBeNull();
-    expect(screen.getByText("(set the node name on the Proxmox page)")).toBeTruthy();
+    expect(screen.getByText(/There are no nodes yet/)).toBeTruthy();
+  });
+
+  it("asks for a node's address before its host key", async () => {
+    new FakeApi({
+      "GET /api/ssh": () => ({ ...fixtures.ssh, pending: null,
+                               nodes: [{ ...fixtures.ssh.nodes[1], address: "" }] }),
+    });
+    renderAt("/ssh");
+    await loaded();
+    expect(input("SSH address of ares").value).toBe("");
+    expect(screen.queryByText("Host key")).toBeNull();
   });
 });
 
@@ -430,6 +490,34 @@ describe("the run page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Start the run" }));
     await waitFor(() => expect(window.location.pathname).toBe(`/runs/${fixtures.running.id}`));
     expect(api.posts("/api/run")[0].body).toEqual({ playbook: "provision", check: "on", limit: "web-01" });
+  });
+
+  it("shows where build-installer puts the ISO", async () => {
+    new FakeApi();
+    renderAt("/run");
+    await loaded();
+    expect(screen.getByText(/is shared by the cluster: the ISO is built once, on one node/)).toBeTruthy();
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "ares (no SSH address yet)db-01synology-nfs (shared)this node",
+      "hephaestusweb-01synology-nfs (shared)ares",
+    ]);
+  });
+
+  it("explains the ISO plan before a connection test, and without servers", async () => {
+    new FakeApi({
+      "GET /api/run": () => ({ ...fixtures.runPage, iso_plan: { ...fixtures.runPage.iso_plan, known: false,
+                                                                    shared: false, storage: "local" } }),
+    });
+    renderAt("/run");
+    await loaded();
+    expect(screen.getByText(/is each node's own: the ISO is built on one node/)).toBeTruthy();
+    expect(screen.getByText(/to find out whether local is/)).toBeTruthy();
+    cleanup();
+    new FakeApi({ "GET /api/run": () => ({ ...fixtures.runPage, iso_plan: { ...fixtures.runPage.iso_plan, pairs: [], builders: [] } }) });
+    renderAt("/run");
+    await loaded();
+    expect(screen.getByText(/No server has a node yet/)).toBeTruthy();
   });
 
   it("shows a refused run and a run that is going", async () => {

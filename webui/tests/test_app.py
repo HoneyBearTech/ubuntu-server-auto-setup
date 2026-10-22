@@ -13,6 +13,7 @@ from usas_web import main as m
 from usas_web import remote
 from usas_web.remote import PveResult, RemoteProblem
 from usas_web.sshkeys import HostKey, KeyProblem
+from usas_web.store import load_yaml
 
 from .conftest import DEFAULTS, HARDENING, PASSWORD, PROXMOX, TOKEN_SECRET, configure, csrf, make_client, post, sign_up
 
@@ -579,7 +580,7 @@ def test_servers(ui):
     errors = r.json()["errors"]
     assert errors["servers-1-name"] == "Another server already uses this."
     assert "VM ID must be a whole number" in errors["servers-1-pve_vmid"]
-    assert errors["servers-2-name"] == "That is the Proxmox node's name."
+    assert errors["servers-2-name"] == "That is the name of a Proxmox node."
     assert "'443/sctp'" in errors["servers-2-ufw_ports"]
     # Errors keep the row numbers of the form, also after an empty row.
     r = post(ui, "/servers", {"server_count": "2", "servers-1-name": "bad name", "servers-1-ansible_host": "10.0.0.9",
@@ -629,49 +630,155 @@ def test_no_public_key_yet(ui):
     assert ui.get("/ssh/id_ed25519.pub").status_code == 404
 
 
+def cluster_test(ui, monkeypatch, nodes, iso_storages=None):
+    """A connection test that lists these nodes (and ISO storages), so the UI knows the cluster."""
+    monkeypatch.setattr(m, "test_proxmox", lambda *a: PveResult(
+        version="9.1.1", nodes=nodes, status=dict.fromkeys(nodes, "online"), cluster="homelab",
+        iso_storages=iso_storages or {}))
+    assert post(ui, "/proxmox", {"action": "test", **PROXMOX}).status_code == 200
+
+
+def test_servers_pick_their_node_from_the_cluster(ui, monkeypatch):
+    configure(ui, servers=2)
+    cluster_test(ui, monkeypatch, ["pve-1", "pve-2"])
+    data = get(ui, "/api/servers").json()
+    assert data["nodes"] == ["pve-1", "pve-2"] and data["default_node"] == "pve-1"
+    assert [c["name"] for c in data["columns"]][3] == "pve_node" and data["rows"][0]["pve_node"] == ""
+    base = {"server_count": "2", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+            "servers-0-pve_vmid": "4000", "servers-1-name": "web-01", "servers-1-ansible_host": "10.0.0.11",
+            "servers-1-pve_vmid": "4001"}
+    r = post(ui, "/servers", {**base, "servers-0-pve_node": "PVE-2", "servers-1-pve_node": "bad node"})
+    errors = r.json()["errors"]
+    assert "PVE-2 isn't a node in the cluster (pve-1, pve-2)" in errors["servers-0-pve_node"]
+    assert "did you mean pve-2?" in errors["servers-0-pve_node"]
+    assert "accepted format" in errors["servers-1-pve_node"]
+    # A server can't be named like a node, the default one or another server's.
+    r = post(ui, "/servers", {**base, "servers-0-pve_node": "pve-2", "servers-1-name": "pve-2"})
+    assert r.json()["errors"] == {"servers-1-name": "That is the name of a Proxmox node."}
+    r = post(ui, "/servers", {**base, "servers-1-pve_node": "pve-2"})
+    assert r.json()["message"] == "Saved 2 server(s)."
+    config = ui.app_state.store.load()
+    assert "pve_node" not in config.servers[0] and config.servers[1]["pve_node"] == "pve-2"
+    assert config.nodes_in_use() == ["pve-1", "pve-2"]
+    assert get(ui, "/api/servers").json()["rows"][1]["pve_node"] == "pve-2"
+
+
+@pytest.mark.parametrize(("storage", "kind", "expected"), [
+    ("local", "dir", [("pve-1", "local", False, "pve-1"), ("pve-2", "local", False, "pve-2")]),
+    ("synology-nfs", "nfs, shared",
+     [("pve-1", "synology-nfs", True, "pve-1"), ("pve-2", "synology-nfs", True, "pve-1")]),
+])
+def test_run_page_shows_where_the_iso_goes(ui, monkeypatch, storage, kind, expected):
+    configure(ui, servers=2)
+    cluster_test(ui, monkeypatch, ["pve-1", "pve-2"], {storage: kind})
+    post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": storage})
+    post(ui, "/servers", {"server_count": "2", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+                          "servers-0-pve_vmid": "4000", "servers-1-name": "web-01",
+                          "servers-1-ansible_host": "10.0.0.11", "servers-1-pve_vmid": "4001",
+                          "servers-1-pve_node": "pve-2"})
+    plan = get(ui, "/api/run").json()["iso_plan"]
+    assert plan["storage"] == storage and plan["known"] is True and plan["shared"] == ("shared" in kind)
+    assert [(p["node"], p["storage"], p["shared"], p["built_by"]) for p in plan["pairs"]] == expected
+    assert plan["pairs"][1]["servers"] == ["web-01"]
+    assert plan["builders"] == sorted({e[3] for e in expected})
+
+
+def test_run_page_plan_before_a_connection_test(ui):
+    configure(ui)
+    plan = get(ui, "/api/run").json()["iso_plan"]
+    assert plan["known"] is False and plan["pairs"][0]["node"] == "pve-1" and plan["pairs"][0]["servers"] == ["web-00"]
+
+
 def test_node_host_key(ui, monkeypatch):
-    r = post(ui, "/ssh", {"action": "address", "node_address": "10.0.0.2"})
-    assert r.status_code == 422 and "node name on the Proxmox page" in r.json()["error"]
-    assert r.json()["area"] == "address"
+    r = post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.2"})
+    assert r.status_code == 422 and "isn't one of the nodes" in r.json()["error"]
+    assert get(ui, "/api/ssh").json()["nodes"] == []
     post(ui, "/proxmox", {"action": "save", **PROXMOX})
-    r = post(ui, "/ssh", {"action": "address", "node_address": "-oProxyCommand=id"})
-    assert r.status_code == 422 and r.json()["area"] == "address"
-    r = post(ui, "/ssh", {"action": "address", "node_address": "10.0.0.2"})
-    assert "Saved the node's SSH address" in r.json()["message"]
+    r = post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "-oProxyCommand=id"})
+    assert r.status_code == 422 and r.json()["area"] == "address" and r.json()["node"] == "pve-1"
+    r = post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.2"})
+    assert "Saved node pve-1's SSH address" in r.json()["message"]
     keys = ui.app_state.keys
     offered = [HostKey("10.0.0.2", "ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIOMq")]
     monkeypatch.setattr(keys, "scan", lambda host: offered)
-    r = post(ui, "/ssh", {"action": "scan"})
+    r = post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
     assert r.status_code == 200
     data = get(ui, "/api/ssh").json()
-    assert data["pending"] == [{"keytype": "ssh-ed25519", "fingerprint": offered[0].fingerprint}]
-    assert data["node_address"] == "10.0.0.2" and data["trusted"] == []
-    r = post(ui, "/ssh", {"action": "trust"})
+    assert data["pending"] == {"node": "pve-1",
+                               "keys": [{"keytype": "ssh-ed25519", "fingerprint": offered[0].fingerprint}]}
+    assert data["nodes"] == [{"name": "pve-1", "address": "10.0.0.2", "default": True, "in_use": True,
+                              "servers": [], "trusted": []}]
+    r = post(ui, "/ssh", {"action": "trust", "node": "pve-1"})
     assert r.status_code == 422 and "tick the box" in r.json()["error"] and r.json()["area"] == "hostkey"
-    post(ui, "/ssh", {"action": "scan"})
-    r = post(ui, "/ssh", {"action": "trust", "confirm": "on"})
+    post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
+    r = post(ui, "/ssh", {"action": "trust", "node": "pve-1", "confirm": "on"})
     assert "Trusted 10.0.0.2" in r.json()["message"] and keys.trusted("10.0.0.2") == offered
-    assert get(ui, "/api/ssh").json()["trusted"][0]["fingerprint"] == offered[0].fingerprint
+    assert get(ui, "/api/ssh").json()["nodes"][0]["trusted"][0]["fingerprint"] == offered[0].fingerprint
     monkeypatch.setattr(keys, "test_login", lambda host: "Logged in to root@10.0.0.2 with the UI's key.")
-    assert "Logged in" in post(ui, "/ssh", {"action": "test"}).json()["message"]
+    assert "Logged in" in post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
 
     def failing(host):
         raise KeyProblem("SSH to root@10.0.0.2 failed: Permission denied")
 
     monkeypatch.setattr(keys, "test_login", failing)
-    r = post(ui, "/ssh", {"action": "test"})
+    r = post(ui, "/ssh", {"action": "test", "node": "pve-1"})
     assert r.status_code == 422 and "Permission denied" in r.json()["error"] and r.json()["area"] == "hostkey"
-    r = post(ui, "/ssh", {"action": "forget"})
+    r = post(ui, "/ssh", {"action": "forget", "node": "pve-1"})
     assert "Forgot" in r.json()["message"] and keys.trusted("10.0.0.2") == []
     # A new address drops host keys scanned for the old one.
-    post(ui, "/ssh", {"action": "scan"})
-    post(ui, "/ssh", {"action": "address", "node_address": "10.0.0.3"})
+    post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
+    post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.3"})
     assert get(ui, "/api/ssh").json()["pending"] is None
 
 
 def test_scan_needs_an_address(ui):
-    r = post(ui, "/ssh", {"action": "scan"})
-    assert r.status_code == 422 and "Save the node's SSH address first" in r.json()["error"]
+    post(ui, "/proxmox", {"action": "save", **PROXMOX})
+    r = post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
+    assert r.status_code == 422 and "Save node pve-1's SSH address first" in r.json()["error"]
+
+
+def test_each_node_in_use_gets_its_own_address_and_host_key(ui, monkeypatch):
+    configure(ui, servers=3)
+    cluster_test(ui, monkeypatch, ["pve-1", "pve-2", "pve-3"])
+    rows = {"server_count": "3", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+            "servers-0-pve_vmid": "4000", "servers-1-name": "web-01", "servers-1-ansible_host": "10.0.0.11",
+            "servers-1-pve_vmid": "4001", "servers-1-pve_node": "pve-2", "servers-2-name": "web-02",
+            "servers-2-ansible_host": "10.0.0.12", "servers-2-pve_vmid": "4002", "servers-2-pve_node": "pve-2"}
+    assert post(ui, "/servers", rows).status_code == 200
+    data = get(ui, "/api/ssh").json()
+    assert [(n["name"], n["default"], n["servers"]) for n in data["nodes"]] == [
+        ("pve-1", True, ["web-00"]), ("pve-2", False, ["web-01", "web-02"])]
+    keys = ui.app_state.keys
+    monkeypatch.setattr(keys, "scan", lambda host: [HostKey(host, "ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIOMq")])
+    for node, address in (("pve-1", "10.0.0.2"), ("pve-2", "10.0.0.3")):
+        assert post(ui, "/ssh", {"action": "address", "node": node, "node_address": address}).status_code == 200
+    # Keys scanned for one node can't be trusted for another.
+    post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
+    r = post(ui, "/ssh", {"action": "trust", "node": "pve-2", "confirm": "on"})
+    assert r.status_code == 422 and keys.trusted("10.0.0.3") == []
+    post(ui, "/ssh", {"action": "scan", "node": "pve-1"})
+    post(ui, "/ssh", {"action": "trust", "node": "pve-1", "confirm": "on"})
+    steps = {s["label"]: s["done"] for s in get(ui, "/api/overview").json()["steps"]}
+    assert steps["Each Proxmox node's SSH address and trusted host key"] is False  # pve-2 isn't trusted yet
+    post(ui, "/ssh", {"action": "scan", "node": "pve-2"})
+    post(ui, "/ssh", {"action": "trust", "node": "pve-2", "confirm": "on"})
+    steps = {s["label"]: s["done"] for s in get(ui, "/api/overview").json()["steps"]}
+    assert steps["Each Proxmox node's SSH address and trusted host key"] is True
+    inventory = ui.app_state.settings.inventory_file.read_text()
+    hosts = load_yaml(inventory)["all"]["children"]["proxmox_nodes"]["hosts"]
+    assert {name: host["ansible_host"] for name, host in hosts.items()} == {"pve-1": "10.0.0.2", "pve-2": "10.0.0.3"}
+    assert "ansible_host: !unsafe '10.0.0.3'" in inventory and "pve_node: !unsafe 'pve-2'" in inventory
+    assert {"pve-1", "pve-2"} <= ui.app_state.store.host_names()
+    # A node no server uses any more keeps its address until it is removed; one in use can't be removed.
+    r = post(ui, "/ssh", {"action": "remove", "node": "pve-2"})
+    assert r.status_code == 422 and "Servers still use pve-2" in r.json()["error"]
+    rows.pop("servers-1-pve_node")
+    rows.pop("servers-2-pve_node")
+    post(ui, "/servers", rows)
+    data = get(ui, "/api/ssh").json()
+    assert [(n["name"], n["in_use"]) for n in data["nodes"]] == [("pve-1", True), ("pve-2", False)]
+    assert "Removed node pve-2's" in post(ui, "/ssh", {"action": "remove", "node": "pve-2"}).json()["message"]
+    assert [n["name"] for n in get(ui, "/api/ssh").json()["nodes"]] == ["pve-1"]
 
 
 # --- Runs ------------------------------------------------------------------------------------------------------

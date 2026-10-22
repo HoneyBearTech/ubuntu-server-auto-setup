@@ -1,0 +1,91 @@
+---
+# Works out where the installer ISO must be built, for the first play of playbooks/build-installer.yml (over
+# ubuntu_servers and proxmox_nodes). Each server in the run needs it in the ISO storage (pve_iso_storage) of its
+# node (pve_node); with no server in the run, each node in the run needs it in its own pve_iso_storage. A storage
+# the cluster shares, such as NFS, gets it once, from one node that uses it; a node-local storage gets it on
+# every node that uses it. The nodes that build join the group pve_iso_build, each with its storages in
+# installer_iso_storages. Nothing here connects to a host: the API answers for every node.
+- name: Check that the Proxmox API is set
+  ansible.builtin.assert:
+    that:
+      - pve_api_host | length > 0
+      - pve_api_token_id | length > 0
+      - pve_api_token_secret | length > 0
+    fail_msg: >-
+      build-installer asks the Proxmox API which nodes and ISO storages the servers use: set pve_api_host and the
+      API token.
+    quiet: true
+  run_once: true
+
+- name: Build the API auth header
+  ansible.builtin.set_fact:
+    pve_api_headers:
+      Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+  no_log: "{{ pve_hide_secrets }}"
+
+- name: Note where this host needs the installer ISO
+  vars:
+    pve_is_server: "{{ inventory_hostname in groups['ubuntu_servers'] | default([]) }}"
+  ansible.builtin.set_fact:
+    pve_placement:
+      host: "{{ inventory_hostname }}"
+      node: "{{ pve_node if pve_is_server else inventory_hostname }}"
+      ssh_host: "{{ pve_ssh_host if pve_is_server else inventory_hostname }}"
+      storage: "{{ pve_iso_storage }}"
+
+- name: Gather the placements of the run
+  vars:
+    pve_plan_servers: "{{ ansible_play_hosts | select('in', groups['ubuntu_servers'] | default([])) | list }}"
+  ansible.builtin.set_fact:
+    pve_plan_placements: "{{ (pve_plan_servers or ansible_play_hosts) | map('extract', hostvars, 'pve_placement') | list }}"
+  run_once: true
+
+- name: Check the formats of the nodes and storages
+  vars:
+    pve_bad: "{{ pve_plan_placements | rejectattr('node', 'match', provision_hostname_pattern)
+                 | list + pve_plan_placements | rejectattr('storage', 'match', pve_storage_id_pattern) | list }}"
+  ansible.builtin.assert:
+    that: pve_bad | length == 0
+    fail_msg: >-
+      {% for b in pve_bad %}{{ b.host }}: pve_node '{{ b.node }}' must be a Proxmox node name (letters, digits,
+      hyphens) and pve_iso_storage '{{ b.storage }}' a storage ID. {% endfor %}Nothing was built.
+    quiet: true
+  run_once: true
+
+- name: Check the nodes and ISO storages against the cluster
+  ansible.builtin.import_tasks: cluster.yml
+  vars:
+    pve_placements: "{{ pve_plan_placements }}"
+
+- name: Check that every node is reached through a host in proxmox_nodes
+  vars:
+    pve_bad: "{{ pve_plan_placements | rejectattr('ssh_host', 'in', groups['proxmox_nodes'] | default([])) | list }}"
+  ansible.builtin.assert:
+    that: pve_bad | length == 0
+    fail_msg: >-
+      {% for b in pve_bad %}{{ b.host }}: node {{ b.node }} is reached through '{{ b.ssh_host }}' (pve_ssh_host),
+      which isn't a host in proxmox_nodes. {% endfor %}Add each node to proxmox_nodes, named like the node in
+      Proxmox, with its SSH address.
+    quiet: true
+  run_once: true
+
+- name: Work out which nodes build the ISO
+  ansible.builtin.set_fact:
+    pve_iso_plan: "{{ pve_plan_placements | pve_iso_builds(pve_node_storages, ansible_play_hosts_all) }}"
+  run_once: true
+
+- name: Report where the installer ISO goes
+  ansible.builtin.debug:
+    msg: "{{ pve_iso_plan.report }}"
+  run_once: true
+
+- name: Add the nodes that build it to the run
+  ansible.builtin.add_host:
+    name: "{{ item.host }}"
+    groups: pve_iso_build
+    installer_iso_storages: "{{ item.storages }}"
+  loop: "{{ pve_iso_plan.builds }}"
+  loop_control:
+    label: "{{ item.node }}: {{ item.storages | join(', ') }}"
+  changed_when: false
+  run_once: true

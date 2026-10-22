@@ -80,11 +80,30 @@ export interface Playbook {
   extra: string[];
 }
 
+// Where build-installer puts the installer ISO: one row per (node, ISO storage) the servers need.
+export interface IsoPair {
+  node: string;
+  storage: string;
+  shared: boolean;
+  built_by: string; // the node that builds it
+  servers: string[];
+  address: string;
+}
+
+export interface IsoPlan {
+  storage: string;
+  shared: boolean;
+  known: boolean; // false until a connection test has listed the cluster's ISO storages
+  pairs: IsoPair[];
+  builders: string[];
+}
+
 export interface RunPageData {
   playbooks: Playbook[];
   names: string[];
   steps: Step[];
   current_run: Run | null;
+  iso_plan: IsoPlan;
 }
 
 export interface RunDetailData {
@@ -104,18 +123,28 @@ export interface KeyInfo {
   comment: string;
 }
 
+export interface SshNode {
+  name: string;
+  address: string;
+  default: boolean; // the node on the Proxmox page
+  in_use: boolean; // the default node, or a server's
+  servers: string[];
+  trusted: HostKey[];
+}
+
 export interface SshData {
   public_key: string;
   key_info: KeyInfo | null;
-  node_address: string;
-  trusted: HostKey[];
-  pending: HostKey[] | null;
+  nodes: SshNode[];
+  pending: { node: string; keys: HostKey[] } | null;
   pve_node: string;
 }
 
 export interface ServersData {
   columns: FieldMeta[];
   rows: Record<string, string>[];
+  nodes: string[]; // the cluster's nodes, from the last connection test
+  default_node: string;
 }
 
 export interface Notice {

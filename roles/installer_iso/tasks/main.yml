@@ -18,10 +18,10 @@
     fail_msg: installer_signing_fingerprint must be the signing key's full 40-digit hexadecimal fingerprint.
     quiet: true
 
-- name: Find the ISO storage's folder
-  ansible.builtin.include_role:
-    name: ubuntu_release
-    tasks_from: iso_dir
+# Each storage's folder is looked up in storage.yml; a pve_iso_dir set in the inventory overrides every lookup.
+- name: Keep the ISO folder set in the inventory, if any
+  ansible.builtin.set_fact:
+    installer_iso_dir_override: "{{ pve_iso_dir | default('') }}"
 
 - name: Install ISO and signature tooling
   ansible.builtin.apt:
@@ -123,103 +123,9 @@
       has probably replaced it: set ubuntu_point_release, or point ubuntu_iso_base_url at old-releases.ubuntu.com.
     quiet: true
 
-- name: Download the Ubuntu Server ISO (checksum from the signed SHA256SUMS)
-  ansible.builtin.get_url:
-    url: "{{ ubuntu_iso_base_url }}/{{ ubuntu_iso_name }}"
-    dest: "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
-    checksum: "sha256:{{ installer_iso_sha256 }}"
-    mode: "0644"
-    timeout: 120
-
-- name: Check for an existing autoinstall ISO
-  ansible.builtin.stat:
-    path: "{{ pve_iso_dir }}/{{ installer_iso_name }}"
-    get_checksum: false
-  register: installer_iso_stat
-
-- name: Remaster the ISO for hands-off install
-  when: not installer_iso_stat.stat.exists or installer_iso_rebuild | bool
-  block:
-    - name: Remove stale grub.cfg
-      ansible.builtin.file:
-        path: "{{ installer_work_dir }}/grub.cfg"
-        state: absent
-
-    - name: Extract grub.cfg from the ISO
-      ansible.builtin.command:
-        argv:
-          - xorriso
-          - -osirrox
-          - "on"
-          - -indev
-          - "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
-          - -extract
-          - /boot/grub/grub.cfg
-          - "{{ installer_work_dir }}/grub.cfg"
-      changed_when: true
-
-    - name: Make grub.cfg writable
-      ansible.builtin.file:
-        path: "{{ installer_work_dir }}/grub.cfg"
-        mode: "0600"
-
-    # Subiquity asks before wiping disks unless "autoinstall" is on the kernel command line.
-    - name: Add the autoinstall kernel argument
-      ansible.builtin.replace:
-        path: "{{ installer_work_dir }}/grub.cfg"
-        regexp: '^(\s*linux\s+/casper/\S*vmlinuz)(?!.*\bautoinstall\b)'
-        replace: '\1 autoinstall'
-
-    - name: Shorten the GRUB timeout
-      ansible.builtin.replace:
-        path: "{{ installer_work_dir }}/grub.cfg"
-        regexp: '^set timeout=.*$'
-        replace: "set timeout={{ installer_grub_timeout }}"
-
-    - name: Read back grub.cfg
-      ansible.builtin.slurp:
-        src: "{{ installer_work_dir }}/grub.cfg"
-      register: installer_grub_cfg
-
-    - name: Fail if the autoinstall argument wasn't added
-      ansible.builtin.assert:
-        # Double backslashes: Jinja would turn a single \b into a backspace character.
-        that: (installer_grub_cfg.content | b64decode) is search('/casper/\\S*vmlinuz\\s.*\\bautoinstall\\b')
-        fail_msg: The ISO's grub.cfg has no /casper/vmlinuz line to patch; its layout has changed.
-        quiet: true
-
-    - name: Remove a partial build
-      ansible.builtin.file:
-        path: "{{ installer_work_dir }}/{{ installer_iso_name }}"
-        state: absent
-
-    # -boot_image any replay keeps the original El Torito, MBR and GPT boot records.
-    - name: Build the remastered ISO
-      ansible.builtin.command:
-        argv:
-          - xorriso
-          - -indev
-          - "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
-          - -outdev
-          - "{{ installer_work_dir }}/{{ installer_iso_name }}"
-          - -map
-          - "{{ installer_work_dir }}/grub.cfg"
-          - /boot/grub/grub.cfg
-          - -boot_image
-          - any
-          - replay
-      changed_when: true
-
-    - name: Move the ISO into Proxmox ISO storage
-      ansible.builtin.command:
-        argv:
-          - mv
-          - -f
-          - "{{ installer_work_dir }}/{{ installer_iso_name }}"
-          - "{{ pve_iso_dir }}/{{ installer_iso_name }}"
-      changed_when: true
-
-    - name: Set ISO permissions
-      ansible.builtin.file:
-        path: "{{ pve_iso_dir }}/{{ installer_iso_name }}"
-        mode: "0644"
+# Once per ISO storage this node builds for: build-installer.yml's plan lists them in installer_iso_storages.
+- name: Put the installer ISO in each ISO storage
+  ansible.builtin.include_tasks: storage.yml
+  loop: "{{ installer_iso_storages or [pve_iso_storage] }}"
+  loop_control:
+    loop_var: installer_iso_storage

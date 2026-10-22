@@ -167,7 +167,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("pve_validate_certs", "Verify the API's TLS certificate", "bool", "proxmox_vm",
           help="Leave this on. For the node's self-signed certificate, add the cluster CA below instead."),
         S("pve_node", "Node name", "text", "proxmox_vm", pattern_var="provision_hostname_pattern", required=True,
-          help="The Proxmox node the VMs are created on, as Proxmox names it."),
+          help="The Proxmox node the VMs are created on, as Proxmox names it, unless a server names its own node "
+               "on the Servers page."),
         S("pve_storage", "VM disk storage", "text", "proxmox_vm", ui_pattern=STORAGE_ID),
         S("pve_efidisk_format", "EFI disk format", "choice", "proxmox_vm", ui_choices=("raw", "qcow2")),
         S("pve_bridge", "Network bridge", "text", "proxmox_vm", ui_pattern=BRIDGE),
@@ -264,6 +265,8 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
       default=""),
     S("ansible_host", "IP address", "text", pattern_var="provision_ipv4_pattern", required=True, default=""),
     S("pve_vmid", "VM ID", "int", "proxmox_vm", minimum=100, maximum=999999999, required=True),
+    S("pve_node", "Node", "text", "proxmox_vm", pattern_var="provision_hostname_pattern",
+      help="The Proxmox node of this server's VM; empty uses the node on the Proxmox page."),
     S("vm_cores", "Cores", "int", "proxmox_vm", minimum=1, maximum=512),
     S("vm_memory_mb", "Memory (MB)", "int", "proxmox_vm", minimum=512, maximum=16777216),
     S("vm_disk_gb", "Disk (GB)", "int", "proxmox_vm", minimum=8, maximum=131072),

@@ -46,6 +46,7 @@ class Session:
     authenticated: bool = False
     # Host keys scanned but not trusted yet: the ones the user compared are the ones that get trusted.
     pending_hostkeys: list | None = None
+    pending_node: str = ""  # the Proxmox node whose host keys those are
 
 
 class Auth:

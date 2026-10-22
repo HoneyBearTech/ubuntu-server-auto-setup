@@ -43,7 +43,8 @@ that run on each pull request.
   out the options, writes the inventory and the Vault, and runs the playbooks with a live log, so the
   project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
 - Passkeys as an optional second way to sign in, for setups served under a fixed host name over HTTPS.
-- Several Proxmox nodes per inventory (choosing the node per server).
+- Done: several Proxmox nodes per inventory: a node per server, picked from the cluster in the web UI,
+  with the installer ISO built once per shared storage and on each node for node-local storage.
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
 - Done: an automated keyboard and axe-core check of every page in a real browser in CI (Playwright,

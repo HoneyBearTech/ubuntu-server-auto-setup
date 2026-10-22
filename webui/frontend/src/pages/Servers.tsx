@@ -17,7 +17,7 @@ function ServersForm({ data, reload, status, setStatus }: {
   status: NoticeT | null;
   setStatus: (n: NoticeT | null) => void;
 }) {
-  const { columns } = data;
+  const { columns, nodes } = data;
   const blank = () => Object.fromEntries(columns.map((c) => [c.name, ""]));
   const [rows, setRows] = useState<Row[]>(() =>
     (data.rows.length ? data.rows : [blank()]).map((values, key) => ({ key, values })));
@@ -87,14 +87,31 @@ function ServersForm({ data, reload, status, setStatus }: {
                   {columns.map((c) => {
                     const id = `servers-${i}-${c.name}`;
                     const error = errors[id];
+                    const value = row.values[c.name] ?? "";
+                    const common = {
+                      id, name: id, defaultValue: value, "aria-label": `${c.label}, row ${i + 1}`,
+                      "aria-invalid": error ? true : undefined,
+                      "aria-describedby": error ? `${id}-error` : undefined,
+                    };
                     return (
                       <td key={c.name}>
-                        <input type="text" id={id} name={id} defaultValue={row.values[c.name] ?? ""}
-                               aria-label={`${c.label}, row ${i + 1}`}
-                               inputMode={c.kind === "int" ? "numeric" : undefined}
-                               placeholder={c.kind === "int" && c.default ? c.default : undefined}
-                               spellCheck={false} autoComplete="off" aria-invalid={error ? true : undefined}
-                               aria-describedby={error ? `${id}-error` : undefined} />
+                        {c.name === "pve_node" && nodes.length ? (
+                          // The cluster's nodes from the last connection test; empty is the default node.
+                          <div className="select">
+                            <select {...common}>
+                              <option value="">Default{data.default_node ? ` (${data.default_node})` : ""}</option>
+                              {(value && !nodes.includes(value) ? [...nodes, value] : nodes).map((n) => (
+                                <option key={n} value={n}>{n}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <input type="text" {...common}
+                                 inputMode={c.kind === "int" ? "numeric" : undefined}
+                                 placeholder={c.kind === "int" && c.default ? c.default
+                                   : c.name === "pve_node" ? data.default_node || undefined : undefined}
+                                 spellCheck={false} autoComplete="off" />
+                        )}
                         {error ? (
                           <p className="error" id={`${id}-error`}>
                             <span className="visually-hidden">Error: </span>{error}
@@ -117,7 +134,9 @@ function ServersForm({ data, reload, status, setStatus }: {
         <div className="card-body">
           <p className="help">
             Name: a host name (letters, digits, hyphens), also the VM's name in Proxmox. IP address: the static IPv4
-            address the installer configures. Extra firewall rules: {lastHelp}
+            address the installer configures. Node: the Proxmox node the VM is created on; the default is the node
+            on the Proxmox page{nodes.length ? "" : " (test the connection there to pick from the cluster's nodes)"}.
+            Extra firewall rules: {lastHelp}
           </p>
           <div aria-live="polite">{status ? <Notice notice={status} /> : null}</div>
         </div>

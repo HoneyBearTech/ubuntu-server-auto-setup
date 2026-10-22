@@ -28,6 +28,8 @@ VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_
 OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "fail2ban_webhook_url": "vault_fail2ban_webhook_url"}
 SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb")
+# Host variables that hold text the user typed (written as !unsafe).
+SERVER_TEXT_VARS = ("pve_node",)
 
 
 class Unsafe(str):
@@ -87,11 +89,29 @@ class Config:
     values: dict[str, Any] = field(default_factory=dict)  # variables set in the inventory
     secrets: dict[str, str] = field(default_factory=dict)  # Vault values
     servers: list[dict[str, Any]] = field(default_factory=list)
-    node_address: str = ""
+    node_addresses: dict[str, str] = field(default_factory=dict)  # Proxmox node name -> its SSH address
     authorize_ui_key: bool = True
 
     def secret_is_set(self, vault_name: str) -> bool:
         return bool(self.secrets.get(vault_name))
+
+    @property
+    def default_node(self) -> str:
+        return str(self.values.get("pve_node") or "")
+
+    def server_node(self, server: dict[str, Any]) -> str:
+        """The node a server's VM goes on: its own pve_node, or the default one."""
+        return str(server.get("pve_node") or self.default_node)
+
+    def nodes_in_use(self) -> list[str]:
+        """The default node first, then the other nodes the servers name."""
+        nodes = [self.default_node] if self.default_node else []
+        return nodes + sorted({self.server_node(s) for s in self.servers} - {"", *nodes})
+
+    def node_names(self) -> list[str]:
+        """The nodes in use, then the others that have an SSH address saved."""
+        used = self.nodes_in_use()
+        return used + sorted(set(self.node_addresses) - set(used))
 
 
 class Store:
@@ -179,13 +199,13 @@ class Store:
             keys = [k for k in keys if k.strip() != ui_key]
         config.values["admin_extra_ssh_keys"] = keys
         nodes = ((children.get("proxmox_nodes") or {}).get("hosts") or {})
-        for node in nodes.values():
-            config.node_address = str((node or {}).get("ansible_host", ""))
+        for name, node in nodes.items():
+            config.node_addresses[str(name)] = str((node or {}).get("ansible_host", ""))
         hosts = ((children.get("ubuntu_servers") or {}).get("hosts") or {})
         for name, host in hosts.items():
             host = host or {}
             server = {"name": str(name), "ansible_host": str(host.get("ansible_host", ""))}
-            for var in SERVER_HOST_VARS:
+            for var in SERVER_HOST_VARS + SERVER_TEXT_VARS:
                 if var in host:
                     server[var] = host[var]
             server["ufw_ports"] = host.get("webui_ufw_allow_host", [])
@@ -243,16 +263,20 @@ class Store:
             for var in SERVER_HOST_VARS:
                 if srv.get(var) is not None:
                     host[var] = srv[var]
+            for var in SERVER_TEXT_VARS:
+                if srv.get(var):
+                    host[var] = Unsafe(str(srv[var]))
             if srv.get("ufw_ports"):
                 host["webui_ufw_allow_host"] = _mark(list(srv["ufw_ports"]))
             hosts[str(srv["name"])] = host  # a host name (checked against the roles' pattern)
 
         children: dict[str, Any] = {}
-        node = config.values.get("pve_node")
-        if node and config.node_address:
-            children["proxmox_nodes"] = {
-                "hosts": {str(node): {"ansible_host": Unsafe(config.node_address), "ansible_user": "root"}}
-            }
+        # One host per node with an SSH address, named like the node (a host name, checked against the roles'
+        # pattern): build-installer and provisioning reach each node the servers use through it.
+        nodes = {name: {"ansible_host": Unsafe(address), "ansible_user": "root"}
+                 for name, address in sorted(config.node_addresses.items()) if address}
+        if nodes:
+            children["proxmox_nodes"] = {"hosts": nodes}
         children["ubuntu_servers"] = {
             "vars": {
                 "ansible_user": "{{ admin_user }}",
@@ -274,6 +298,5 @@ class Store:
         config = self.load()
         names = {"all", "ubuntu_servers", "proxmox_nodes", "ungrouped"}
         names.update(s["name"] for s in config.servers)
-        if config.values.get("pve_node"):
-            names.add(str(config.values["pve_node"]))
+        names.update(name for name, address in config.node_addresses.items() if address)
         return names

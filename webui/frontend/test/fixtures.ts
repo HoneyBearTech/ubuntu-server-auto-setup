@@ -30,7 +30,7 @@ export const overview: OverviewData = {
   steps: [
     { label: "Proxmox API host, token and node", done: true, href: "/proxmox" },
     { label: "SSH key", done: true, href: "/ssh" },
-    { label: "Proxmox node's SSH address and trusted host key", done: false, href: "/ssh" },
+    { label: "Each Proxmox node's SSH address and trusted host key", done: false, href: "/ssh" },
     { label: "Admin password, gateway and SSH keys for the servers", done: true, href: "/defaults" },
     { label: "At least one server", done: true, href: "/servers" },
   ],
@@ -51,14 +51,26 @@ export const runPage: RunPageData = {
   names: ["all", "db-01", "ubuntu_servers", "web-01"],
   steps: overview.steps,
   current_run: null,
+  iso_plan: {
+    storage: "synology-nfs", shared: true, known: true, builders: ["ares"],
+    pairs: [
+      { node: "ares", storage: "synology-nfs", shared: true, built_by: "ares", servers: ["db-01"], address: "" },
+      { node: "hephaestus", storage: "synology-nfs", shared: true, built_by: "ares", servers: ["web-01"],
+        address: "192.168.1.20" },
+    ],
+  },
 };
 
 export const ssh: SshData = {
   public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl ubuntu-server-auto-setup",
   key_info: { type: "ssh-ed25519", fingerprint: "SHA256:q9Vx1y2z3fQk", comment: "ubuntu-server-auto-setup" },
-  node_address: "192.168.1.20",
-  trusted: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:trusted1" }],
-  pending: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:offered1" }],
+  nodes: [
+    { name: "hephaestus", address: "192.168.1.20", default: true, in_use: true, servers: ["web-01"],
+      trusted: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:trusted1" }] },
+    { name: "ares", address: "192.168.1.21", default: false, in_use: true, servers: ["db-01"], trusted: [] },
+    { name: "hermes", address: "192.168.1.22", default: false, in_use: false, servers: [], trusted: [] },
+  ],
+  pending: { node: "hephaestus", keys: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:offered1" }] },
   pve_node: "hephaestus",
 };
 

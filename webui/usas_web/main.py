@@ -30,7 +30,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, vms
+from . import __version__, nodes, vms
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
@@ -158,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     runner = Runner(settings)
     keys = Keys(settings)
     lister = VmLister()
+    plan = nodes.load_plan(settings.project_dir)
     store.vault_password()  # creates it on the first run
     try:
         timezones = sorted(zoneinfo.available_timezones())
@@ -405,16 +406,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- Overview ----------------------------------------------------------------------------------------
 
+    def nodes_ready(config: Config) -> bool:
+        """Every node the servers use has an SSH address with a trusted host key."""
+        used = config.nodes_in_use()
+        return bool(used) and all(config.node_addresses.get(n) and keys.trusted(config.node_addresses[n])
+                                  for n in used)
+
     def readiness(config: Config) -> list[dict[str, Any]]:
         v = config.values
-        node = config.node_address
         steps = [
             ("Proxmox API host, token and node", bool(v.get("pve_api_host") and v.get("pve_node")
                                                       and config.secret_is_set("vault_pve_api_token_id")
                                                       and config.secret_is_set("vault_pve_api_token_secret")),
              "/proxmox"),
             ("SSH key", bool(keys.public_key()), "/ssh"),
-            ("Proxmox node's SSH address and trusted host key", bool(node and keys.trusted(node)), "/ssh"),
+            ("Each Proxmox node's SSH address and trusted host key", nodes_ready(config), "/ssh"),
             ("Admin password, gateway and SSH keys for the servers",
              bool(config.secret_is_set("vault_admin_password") and v.get("net_gateway")
                   and (v.get("github_user") or v.get("admin_extra_ssh_keys") or config.authorize_ui_key)),
@@ -499,7 +505,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if action == "remove-ca":
                     remove_ca(settings)
                     return reply(message="The CA certificate was removed.")
-                pem = str(form.get("ca_pem", "")) if action == "save-ca" else keys.fetch_ca(config.node_address)
+                pem = (str(form.get("ca_pem", "")) if action == "save-ca"
+                       else keys.fetch_ca(config.node_addresses.get(config.default_node, "")))
                 certs = save_ca(settings, pem)
                 return reply(message="Saved the CA certificate " + ", ".join(c["subject"] for c in certs) + ".")
             except KeyProblem as exc:
@@ -629,7 +636,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             row["_index"] = i
             rows.append(row)
         seen: dict[str, dict[Any, int]] = {"name": {}, "ansible_host": {}, "pve_vmid": {}}
-        node = config.values.get("pve_node")
+        # Servers and nodes are hosts of the same inventory, so their names can't be the same.
+        node_names = {*(store.cluster().get("nodes") or {}), *config.node_names(),
+                      *(r["pve_node"] for r in rows if r.get("pve_node"))}
         for row in rows:
             i = row["_index"]
             for key in seen:
@@ -639,8 +648,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if value in seen[key]:
                     errors[f"servers-{i}-{key}"] = "Another server already uses this."
                 seen[key][value] = i
-            if row.get("name") and row.get("name") == node:
-                errors[f"servers-{i}-name"] = "That is the Proxmox node's name."
+            if row.get("name") and row.get("name") in node_names:
+                errors[f"servers-{i}-name"] = "That is the name of a Proxmox node."
+            problem = node_problem(str(row.get("pve_node") or ""))
+            if problem and f"servers-{i}-pve_node" not in errors:
+                errors[f"servers-{i}-pve_node"] = problem
         return rows, errors
 
     def server_rows(config: Config) -> list[dict[str, str]]:
@@ -657,7 +669,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def servers_data(request: Request):
         require_login(request)
         config = store.load()
-        return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config))
+        return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config),
+                     nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node)
 
     @app.post("/api/servers")
     async def servers(request: Request):
@@ -673,17 +686,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- SSH key, host key -------------------------------------------------------------------------------
 
+    def hostkey(k) -> dict[str, str]:
+        return {"keytype": k.keytype, "fingerprint": k.fingerprint}
+
+    def node_json(config: Config, name: str) -> dict[str, Any]:
+        address = config.node_addresses.get(name, "")
+        return {"name": name, "address": address, "default": name == config.default_node,
+                "in_use": name in config.nodes_in_use(),
+                "servers": sorted(s["name"] for s in config.servers if config.server_node(s) == name),
+                "trusted": [hostkey(k) for k in (keys.trusted(address) if address else [])]}
+
     @app.get("/api/ssh")
     async def ssh_data(request: Request):
         session = require_login(request)
         config = store.load()
-        node = config.node_address
         pub = keys.public_key()
-        hostkey = lambda k: {"keytype": k.keytype, "fingerprint": k.fingerprint}  # noqa: E731
+        pending = session.pending_hostkeys
         return reply(public_key=pub or "", key_info=describe_public_key(pub) if pub else None,
-                     node_address=node or "", trusted=[hostkey(k) for k in (keys.trusted(node) if node else [])],
-                     pending=[hostkey(k) for k in session.pending_hostkeys] if session.pending_hostkeys else None,
-                     pve_node=config.values.get("pve_node") or "")
+                     nodes=[node_json(config, n) for n in config.node_names()],
+                     pending={"node": session.pending_node, "keys": [hostkey(k) for k in pending]} if pending else None,
+                     pve_node=config.default_node)
+
+    NODE_ACTIONS = ("address", "scan", "trust", "forget", "test", "remove")
 
     @app.post("/api/ssh")
     async def ssh_post(request: Request):
@@ -691,6 +715,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         form = await checked_form(request)
         action = str(form.get("action", ""))
         config = store.load()
+        node = str(form.get("node", ""))
+        if action in NODE_ACTIONS and node not in config.node_names():
+            return reply(422, area="key", error="That isn't one of the nodes. Reload the page.")
+        address = config.node_addresses.get(node, "")
         try:
             if action == "generate":
                 if keys.public_key() and form.get("replace") is None:
@@ -698,7 +726,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 keys.generate()
                 store.save(config)  # puts the new public key into admin_extra_ssh_keys
                 return reply(message="Created a new Ed25519 key. Add its public key to root's authorized_keys on "
-                                     "the node.")
+                                     "each node.")
             if action == "upload":
                 upload = form.get("key_file")
                 data = await upload.read(MAX_PART) if upload is not None and hasattr(upload, "read") else b""
@@ -708,33 +736,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 store.save(config)
                 return reply(message="Saved the uploaded key.")
             if action == "address":
-                address = check_host(str(form.get("node_address", "")))
-                if address != config.node_address:
-                    session.pending_hostkeys = None
-                config.node_address = address
-                if not config.values.get("pve_node"):
-                    return reply(422, area="address", error="Set the node name on the Proxmox page first.")
+                new = check_host(str(form.get("node_address", "")))
+                if new != address or session.pending_node != node:
+                    session.pending_hostkeys, session.pending_node = None, ""
+                config.node_addresses[node] = new
                 store.save(config)
-                return reply(message=f"Saved the node's SSH address {address}.")
+                return reply(message=f"Saved node {node}'s SSH address {new}.", node=node)
+            if action == "remove":
+                if node in config.nodes_in_use():
+                    return reply(422, area="address", node=node, error=f"Servers still use {node}.")
+                config.node_addresses.pop(node, None)
+                store.save(config)
+                return reply(message=f"Removed node {node}'s SSH address.", node=node)
+            if action in ("scan", "trust", "forget", "test") and not address:
+                return reply(422, area="address", node=node, error=f"Save node {node}'s SSH address first.")
             if action == "scan":
-                if not config.node_address:
-                    return reply(422, area="address", error="Save the node's SSH address first.")
-                session.pending_hostkeys = keys.scan(config.node_address)
-                return reply()
+                session.pending_hostkeys, session.pending_node = keys.scan(address), node
+                return reply(node=node)
             if action == "trust":
                 pending, session.pending_hostkeys = session.pending_hostkeys, None
-                if not pending or pending[0].host != config.node_address or form.get("confirm") is None:
-                    return reply(422, area="hostkey", error="Scan again, compare the fingerprints and tick the box.")
-                keys.trust(config.node_address, pending)
-                return reply(message=f"Trusted {config.node_address}'s host keys.")
+                if (not pending or session.pending_node != node or pending[0].host != address
+                        or form.get("confirm") is None):
+                    return reply(422, area="hostkey", node=node,
+                                 error="Scan again, compare the fingerprints and tick the box.")
+                keys.trust(address, pending)
+                return reply(message=f"Trusted {address}'s host keys (node {node}).", node=node)
             if action == "forget":
-                keys.forget(config.node_address)
-                return reply(message=f"Forgot {config.node_address}'s host keys.")
+                keys.forget(address)
+                return reply(message=f"Forgot {address}'s host keys (node {node}).", node=node)
             if action == "test":
-                return reply(message=keys.test_login(config.node_address))
+                return reply(message=keys.test_login(address), node=node)
         except KeyProblem as exc:
             area = {"generate": "key", "upload": "key", "address": "address"}.get(action, "hostkey")
-            return reply(422, area=area, error=exc.message)
+            return reply(422, area=area, node=node, error=exc.message)
         raise Forbidden()
 
     @app.get("/ssh/id_ed25519.pub")
@@ -813,7 +847,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return reply(playbooks=[{"key": k, "playbook": p, "description": d, "extra": list(x)}
                                 for k, (p, d, x) in PLAYBOOKS.items()],
                      names=sorted(store.host_names()), steps=readiness(config),
-                     current_run=run_json(runner.current()))
+                     current_run=run_json(runner.current()),
+                     iso_plan=nodes.iso_plan(plan, config, str(setting(config, "pve_iso_storage")), store.cluster()))
 
     @app.post("/api/run")
     async def run(request: Request):
