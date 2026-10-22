@@ -8,6 +8,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
+  container image examples.
+
 ## [0.4.0] - 2026-10-21
 
 The first baseline run on Ubuntu 26.04 completes again (sudo-rs), and provisioning no longer detaches the
