@@ -27,7 +27,7 @@ VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_
 # Secrets a server may go without: the inventory refers to them only once they are saved.
 OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "fail2ban_webhook_url": "vault_fail2ban_webhook_url"}
-SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb")
+SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics")
 # Host variables that hold text the user typed (written as !unsafe).
 SERVER_TEXT_VARS = ("pve_node",)
 
@@ -259,13 +259,17 @@ class Store:
 
         hosts: dict[str, Any] = {}
         for srv in config.servers:
-            host: dict[str, Any] = {"ansible_host": Unsafe(srv["ansible_host"])}
+            # A server on DHCP may have no address here: then the playbooks ask its guest agent.
+            host: dict[str, Any] = {"ansible_host": Unsafe(srv["ansible_host"])} if srv.get("ansible_host") else {}
             for var in SERVER_HOST_VARS:
-                if srv.get(var) is not None:
-                    host[var] = srv[var]
+                if srv.get(var) not in (None, "", []) and not (var == "net_mode" and srv[var] == "static"):
+                    host[var] = _mark(srv[var])
             for var in SERVER_TEXT_VARS:
                 if srv.get(var):
                     host[var] = Unsafe(str(srv[var]))
+            # An extra card with the default route replaces the group's gateway on net0.
+            if any(nic.get("gateway") for nic in srv.get("vm_extra_nics") or []):
+                host["net_gateway"] = ""
             if srv.get("ufw_ports"):
                 host["webui_ufw_allow_host"] = _mark(list(srv["ufw_ports"]))
             hosts[str(srv["name"])] = host  # a host name (checked against the roles' pattern)

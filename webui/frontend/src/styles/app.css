@@ -1099,6 +1099,15 @@ td a {
   font-size: var(--text-sm);
 }
 
+.servers select {
+  min-width: 7rem;
+}
+
+/* The network cards of a server read as a short sentence each. */
+.servers input[name$="-vm_extra_nics"] {
+  min-width: 18rem;
+}
+
 .servers .error {
   margin-top: var(--space-1);
   max-width: 14rem;

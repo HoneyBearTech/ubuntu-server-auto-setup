@@ -28,11 +28,15 @@ NOT_FORM_FORMATS = frozenset({
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
     "pve_iso_dirs_file",
-    # The network card formats of net_mode, net_mac and vm_extra_nics, which the Servers page doesn't edit yet.
-    "provision_vlan_pattern", "provision_prefix_pattern", "provision_mtu_pattern", "provision_mac_pattern",
-    "provision_net_modes", "provision_nic_modes", "provision_nic_models", "provision_nic_keys",
+    # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
+    "provision_nic_keys",
     "provision_disk_passphrase_pattern", "provision_installer_config_copies",
 })
+
+# The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
+NIC_FORMATS = ("provision_bridge_pattern", "provision_vlan_pattern", "provision_ipv4_pattern",
+               "provision_prefix_pattern", "provision_mtu_pattern", "provision_mac_pattern", "provision_nic_models",
+               "provision_nic_modes")
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
 # roles/*/tasks/main.yml; tests/test_schema.py reads those tasks to check).
@@ -85,6 +89,7 @@ class Field:
     pattern: str | None
     choices: tuple[str, ...] | None
     patterns: tuple[str, ...] = ()  # every pattern the value must match (roles that read it may differ)
+    formats: dict[str, Any] = field(default_factory=dict)  # NIC_FORMATS, for the network cards column
 
     def __getattr__(self, item):
         return getattr(self.spec, item)
@@ -203,7 +208,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_password", "Admin password", "secret", required=True, vault="vault_admin_password", default="",
           help="For the console and sudo; SSH stays key-only. Hashed (SHA-512) before it reaches the installer."),
         S("timezone", "Time zone", "text", "common", ui_pattern=TIMEZONE),
-        S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern", required=True),
+        S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern",
+          help="Needed for servers with a static address (unless an extra network card has the default route)."),
         S("net_prefix", "Network prefix length", "int", "proxmox_vm", minimum=PREFIX_RANGE[0],
           maximum=PREFIX_RANGE[1]),
         S("net_dns", "DNS servers", "list", "proxmox_vm", pattern_var="provision_ipv4_pattern"),
@@ -270,13 +276,18 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
 SERVER_COLUMNS: tuple[Spec, ...] = (
     S("name", "Name", "text", pattern_var=("provision_hostname_pattern", "common_hostname_pattern"), required=True,
       default=""),
-    S("ansible_host", "IP address", "text", pattern_var="provision_ipv4_pattern", required=True, default=""),
+    S("ansible_host", "IP address", "text", pattern_var="provision_ipv4_pattern", default=""),
+    S("net_mode", "Address", "choice", "proxmox_vm", choices_var="provision_net_modes"),
+    S("net_mac", "MAC address", "text", "proxmox_vm", pattern_var="provision_mac_pattern"),
     S("pve_vmid", "VM ID", "int", "proxmox_vm", minimum=100, maximum=999999999, required=True),
     S("pve_node", "Node", "text", "proxmox_vm", pattern_var="provision_hostname_pattern",
       help="The Proxmox node of this server's VM; empty uses the node on the Proxmox page."),
     S("vm_cores", "Cores", "int", "proxmox_vm", minimum=1, maximum=512),
     S("vm_memory_mb", "Memory (MB)", "int", "proxmox_vm", minimum=512, maximum=16777216),
     S("vm_disk_gb", "Disk (GB)", "int", "proxmox_vm", minimum=8, maximum=131072),
+    S("vm_extra_nics", "Extra network cards", "list", "proxmox_vm", ui_pattern="network_cards",
+      help="Comma-separated, each a bridge, then vlan and a tag, then dhcp, none or an address/prefix (optionally "
+           "via a gateway), optionally mtu, model and mac. Example: vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 dhcp."),
     S("ufw_ports", "Extra firewall rules", "list", ui_pattern="ufw_rule", default=[],
       help="Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24."),
 )
@@ -301,9 +312,11 @@ class Schema:
         pattern = patterns[0] if patterns else None
         choices = tuple(str(c) for c in self.roles.var(spec.choices_var)) if spec.choices_var else spec.ui_choices
         for p in patterns:
-            if p != "ufw_rule":
+            if p not in ("ufw_rule", "network_cards"):
                 re.compile(p)
-        return Field(spec=spec, default=default, help=help_text, pattern=pattern, choices=choices, patterns=patterns)
+        formats = {name: self.roles.var(name) for name in NIC_FORMATS} if spec.ui_pattern == "network_cards" else {}
+        return Field(spec=spec, default=default, help=help_text, pattern=pattern, choices=choices, patterns=patterns,
+                     formats=formats)
 
     def pattern_vars_used(self) -> set[str]:
         specs = [s for specs in SECTIONS.values() for s in specs] + list(SERVER_COLUMNS)
@@ -312,6 +325,8 @@ class Schema:
             used.update((s.pattern_var,) if isinstance(s.pattern_var, str) else (s.pattern_var or ()))
             if s.choices_var:
                 used.add(s.choices_var)
+            if s.ui_pattern == "network_cards":
+                used.update(NIC_FORMATS)
         return used
 
 
@@ -334,6 +349,8 @@ def _check(patterns: tuple[str, ...], value: str, what: str) -> None:
     for pattern in patterns:
         if pattern == "ufw_rule":
             parse_ufw_rule(value)
+        elif pattern == "network_cards":
+            pass  # parsed with the role's formats by parse_value
         elif not re.match(pattern, value):
             raise Invalid(f"{what} isn't in the accepted format.")
 
@@ -356,6 +373,69 @@ def parse_ufw_rule(text: str) -> dict[str, str]:
             raise Invalid(f"'{text}': 'from' takes an IPv4 address or network, or any.")
         rule["from"] = parts[2]
     return rule
+
+
+def parse_nic(text: str, formats: dict[str, Any]) -> dict[str, Any]:
+    """'vmbr1 vlan 20 10.20.0.5/24 via 10.20.0.1 mtu 9000 model virtio mac BC:24:11:00:00:01', 'vmbr1 dhcp' or
+    'vmbr2 none' -> a proxmox_vm vm_extra_nics entry, each value checked against the role's own formats."""
+    words = text.split()
+    if not words or not re.match(formats["provision_bridge_pattern"], words[0]):
+        raise Invalid(f"'{text}': start with the bridge, such as vmbr1 (letters, digits, '.', '_' or '-').")
+    nic: dict[str, Any] = {"bridge": words[0]}
+    rest = words[1:]
+    while rest:
+        word = rest.pop(0)
+        if word in formats["provision_nic_modes"] or "/" in word:
+            if "mode" in nic:
+                raise Invalid(f"'{text}': give dhcp, none or one address/prefix, once.")
+            if "/" not in word:  # dhcp or none ("static" needs its address, so it is written as one)
+                if word == "static":
+                    raise Invalid(f"'{text}': write the static address as address/prefix, like 10.20.0.5/24.")
+                nic["mode"] = word
+                continue
+            address, _, prefix = word.partition("/")
+            if not (re.match(formats["provision_ipv4_pattern"], address)
+                    and re.match(formats["provision_prefix_pattern"], prefix)):
+                raise Invalid(f"'{text}': {word} must be an IPv4 address and a prefix length 1-32, like 10.20.0.5/24.")
+            nic.update(mode="static", address=address, prefix=int(prefix))
+            continue
+        keys = {"vlan": "vlan", "via": "gateway", "mtu": "mtu", "model": "model", "mac": "mac"}
+        if word not in keys or not rest or keys[word] in nic:
+            raise Invalid(f"'{text}': '{word}' isn't understood here; use vlan, via, mtu, model and mac once each, "
+                          "each followed by its value.")
+        nic[keys[word]] = rest.pop(0)
+    if "mode" not in nic:
+        raise Invalid(f"'{text}': add dhcp, none or an address/prefix.")
+    checks = {"vlan": ("provision_vlan_pattern", "vlan takes a VLAN tag 1-4094"),
+              "gateway": ("provision_ipv4_pattern", "via takes the gateway's IPv4 address"),
+              "mtu": ("provision_mtu_pattern", "mtu takes 576-9216"),
+              "mac": ("provision_mac_pattern", "mac takes a unicast MAC address, like BC:24:11:12:34:56")}
+    for key, (pattern, message) in checks.items():
+        if key in nic and not re.match(formats[pattern], nic[key]):
+            raise Invalid(f"'{text}': {message}.")
+    if "model" in nic and nic["model"] not in formats["provision_nic_models"]:
+        raise Invalid(f"'{text}': model is one of {', '.join(formats['provision_nic_models'])}.")
+    if "mtu" in nic and nic.get("model", "virtio") != "virtio":
+        raise Invalid(f"'{text}': mtu can be set on virtio cards only.")
+    if "gateway" in nic and nic["mode"] != "static":
+        raise Invalid(f"'{text}': via (a gateway) needs a static address.")
+    for key in ("vlan", "mtu"):
+        if key in nic:
+            nic[key] = int(nic[key])
+    order = ("mode", "bridge", "vlan", "address", "prefix", "gateway", "mtu", "model", "mac")
+    return {key: nic[key] for key in order if key in nic}
+
+
+def format_nic(nic: dict[str, Any]) -> str:
+    words = [str(nic.get("bridge", ""))]
+    if nic.get("vlan") not in (None, ""):
+        words += ["vlan", str(nic["vlan"])]
+    mode = nic.get("mode", "static")
+    words.append(f"{nic.get('address')}/{nic.get('prefix')}" if mode == "static" else str(mode))
+    for key, word in (("gateway", "via"), ("mtu", "mtu"), ("model", "model"), ("mac", "mac")):
+        if nic.get(key) not in (None, ""):
+            words += [word, str(nic[key])]
+    return " ".join(words)
 
 
 def format_ufw_rule(rule: dict[str, Any]) -> str:
@@ -386,6 +466,8 @@ def parse_value(f: Field, raw: Any) -> Any:
                 _check(f.patterns, item, f"'{item}'")
         if f.pattern == "ufw_rule":
             return [parse_ufw_rule(item) for item in items]
+        if f.pattern == "network_cards":
+            return [parse_nic(item, f.formats) for item in items]
         return items
     if f.kind == "secret":
         # Kept as typed (a password may start or end with a space), but no control characters.
@@ -425,5 +507,7 @@ def display_value(f: Field, value: Any) -> Any:
     if f.kind == "list":
         if f.pattern == "ufw_rule":
             return "\n".join(format_ufw_rule(r) for r in value or [])
+        if f.pattern == "network_cards":
+            return "\n".join(format_nic(n) for n in value or [] if isinstance(n, dict))
         return "\n".join(str(v) for v in value or [])
     return value

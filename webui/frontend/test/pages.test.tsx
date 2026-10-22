@@ -343,6 +343,25 @@ describe("the servers page", () => {
     expect([...node.options].map((o) => o.value)).toEqual(["", "hephaestus", "ares"]);
   });
 
+  it("chooses DHCP from a labelled list and sends the network cards as typed", async () => {
+    const api = new FakeApi({ "POST /api/servers": () => ({ message: "Saved 2 server(s)." }) });
+    renderAt("/servers");
+    await loaded();
+    const mode = screen.getByRole("combobox", { name: "Address, row 1" }) as HTMLSelectElement;
+    expect(mode.value).toBe("static");
+    expect([...mode.options].map((o) => o.value)).toEqual(["static", "dhcp"]);
+    await userEvent.selectOptions(mode, "dhcp");
+    await userEvent.clear(input("IP address, row 1"));
+    await userEvent.type(input("Extra network cards, row 1"), "vmbr1 vlan 20 dhcp");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved 2 server(s).");
+    const body = api.posts("/api/servers")[0].body;
+    expect(body["servers-0-net_mode"]).toBe("dhcp");
+    expect(body["servers-0-ansible_host"]).toBe("");
+    expect(body["servers-0-vm_extra_nics"]).toBe("vmbr1 vlan 20 dhcp");
+    expect(body["servers-1-net_mode"]).toBe("static");
+  });
+
   it("keeps one empty row when the last is removed", async () => {
     new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, rows: [] }) });
     renderAt("/servers");

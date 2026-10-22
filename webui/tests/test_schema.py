@@ -151,8 +151,68 @@ def test_display_values(sch):
 
 def test_server_columns(sch):
     names = [c.name for c in sch.server_columns]
-    assert names[:3] == ["name", "ansible_host", "pve_vmid"]
+    assert names[:5] == ["name", "ansible_host", "net_mode", "net_mac", "pve_vmid"]
+    assert next(c for c in sch.server_columns if c.name == "net_mode").choices == ("static", "dhcp")
     vmid = next(c for c in sch.server_columns if c.name == "pve_vmid")
     with pytest.raises(Invalid):
         parse_value(vmid, "")
     assert re.match(next(c for c in sch.server_columns if c.name == "name").pattern, "web-01")
+
+
+def nic_field(sch):
+    return next(c for c in sch.server_columns if c.name == "vm_extra_nics")
+
+
+@pytest.mark.parametrize(("text", "nic"), [
+    ("vmbr1 dhcp", {"mode": "dhcp", "bridge": "vmbr1"}),
+    ("vmbr2 none", {"mode": "none", "bridge": "vmbr2"}),
+    ("vmbr1 vlan 20 10.20.0.5/24", {"mode": "static", "bridge": "vmbr1", "vlan": 20, "address": "10.20.0.5",
+                                    "prefix": 24}),
+    ("vmbr1 10.20.0.5/24 via 10.20.0.1 mtu 9000 model virtio mac bc:24:11:00:00:01",
+     {"mode": "static", "bridge": "vmbr1", "address": "10.20.0.5", "prefix": 24, "gateway": "10.20.0.1", "mtu": 9000,
+      "model": "virtio", "mac": "bc:24:11:00:00:01"}),
+    ("vmbr1.30 model e1000 dhcp", {"mode": "dhcp", "bridge": "vmbr1.30", "model": "e1000"}),
+])
+def test_network_cards_are_parsed_with_the_role_formats(sch, text, nic):
+    assert s.parse_nic(text, nic_field(sch).formats) == nic
+    again = s.format_nic(nic)
+    assert s.parse_nic(again, nic_field(sch).formats) == nic
+    assert set(nic) <= set(sch.roles.var("provision_nic_keys"))
+
+
+@pytest.mark.parametrize(("text", "says"), [
+    ("", "start with the bridge"),
+    ("vmbr1,tag=5 dhcp", "start with the bridge"),
+    ("vmbr1", "add dhcp, none or an address"),
+    ("vmbr1 static", "address/prefix"),
+    ("vmbr1 dhcp none", "once"),
+    ("vmbr1 dhcp vlan", "isn't understood"),
+    ("vmbr1 dhcp vlan 1 vlan 2", "isn't understood"),
+    ("vmbr1 dhcp tag 5", "isn't understood"),
+    ("vmbr1 dhcp vlan 4095", "VLAN tag 1-4094"),
+    ("vmbr1 dhcp vlan 20,mtu=1", "VLAN tag 1-4094"),
+    ("vmbr1 10.0.0.300/24", "IPv4 address and a prefix"),
+    ("vmbr1 10.0.0.3/33", "IPv4 address and a prefix"),
+    ("vmbr1 10.0.0.3/24 via 10.0.0", "gateway's IPv4"),
+    ("vmbr1 dhcp via 10.0.0.1", "needs a static address"),
+    ("vmbr1 dhcp mtu 100", "576-9216"),
+    ("vmbr1 dhcp mtu 9000 model e1000", "virtio cards only"),
+    ("vmbr1 dhcp model ne2k", "model is one of"),
+    ("vmbr1 dhcp mac 01:00:5e:00:00:01", "unicast MAC"),
+])
+def test_network_cards_the_role_would_refuse_are_refused(sch, text, says):
+    with pytest.raises(Invalid) as exc:
+        s.parse_nic(text, nic_field(sch).formats)
+    assert says in exc.value.message
+    if "," not in text and text:  # the form splits the cards at commas, so a comma can't reach a card
+        with pytest.raises(Invalid):
+            parse_value(nic_field(sch), text)
+
+
+def test_network_cards_display(sch):
+    nics = [{"mode": "dhcp", "bridge": "vmbr1", "vlan": 30},
+            {"mode": "static", "bridge": "vmbr2", "address": "10.0.0.5", "prefix": 24}, "not a card"]
+    assert s.display_value(nic_field(sch), nics) == "vmbr1 vlan 30 dhcp\nvmbr2 10.0.0.5/24"
+    assert parse_value(nic_field(sch), "vmbr1 dhcp, vmbr2 none") == [{"mode": "dhcp", "bridge": "vmbr1"},
+                                                                       {"mode": "none", "bridge": "vmbr2"}]
+    assert set(sch.roles.var("provision_nic_modes")) == {"static", "dhcp", "none"}

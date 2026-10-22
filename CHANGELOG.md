@@ -86,6 +86,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   VM created again keeps it) and the installed system matches cards by MAC address, not by interface name.
   Exactly one card may have the default route; every network value is checked before anything is created.
   The firewall's rules apply to every card (docs/interfaces.md, Networks).
+- The web UI's **Servers** page edits both: an **Address** column (`static` or `dhcp`; with `dhcp` the IP
+  address may stay empty), a **MAC address** column, and **Extra network cards** written like
+  `vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 vlan 30 dhcp`, checked against the provisioning role's formats
+  and its one-default-route rule. The Defaults page's gateway is needed only for servers with a static
+  address, and the overview counts it as set when every server has its default route.
 - **Passkeys** in the web UI. Once signed in with the password, add passkeys on the account page (a name
   and the current password), see when each was added and last used, and remove them; the sign-in page
   offers **Sign in with a passkey** next to the password. **Require a passkey** turns password sign-in off;

@@ -155,6 +155,23 @@ test.describe("keyboard", () => {
     await expect(node).toBeFocused();
   });
 
+  test("the servers table: DHCP by keyboard, and a network card the role would refuse is explained", async ({ page }) => {
+    await page.goto("/servers");
+    await settled(page);
+    const mode = page.getByRole("combobox", { name: "Address, row 1" });
+    await tabTo(page, mode);
+    await page.keyboard.press("d");  // type-to-select: the same in every browser and platform
+    await expect(mode).toHaveValue("dhcp");
+    await tabTo(page, page.getByRole("textbox", { name: "Extra network cards, row 1" }));
+    await retype(page, "vmbr1 vlan 9999 dhcp");
+    await page.keyboard.press("Enter");
+    // The summary takes focus and links to the field; nothing was saved.
+    const summary = page.getByRole("alert").filter({ hasText: "vlan takes a VLAN tag 1-4094" });
+    await expect(summary).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Extra network cards, row 1" })).toHaveAttribute("aria-invalid", "true");
+    await checkAxe(page, "/servers with a network card error");
+  });
+
   test("the theme switch: arrow keys choose, the page follows at once", async ({ page }) => {
     await page.goto("/");
     await settled(page);
