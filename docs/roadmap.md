@@ -30,7 +30,8 @@ that run on each pull request.
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
 - Optional IPv6 network configuration, and more disk layouts (including LUKS encryption).
-- Running the ISO build as a non-root user on the Proxmox node.
+- Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
+  (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 
 **Baseline**
 - Done: optional extra hardening, each off by default and documented: kernel and network `sysctl`

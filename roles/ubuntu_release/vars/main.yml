@@ -2,3 +2,11 @@
 # A Proxmox storage ID (Datacenter -> Storage): it is used in pvesm commands and in the VM's CD-ROM
 # settings, so nothing else is accepted. The web UI checks its field against this pattern too.
 pve_storage_id_pattern: '^[A-Za-z][A-Za-z0-9._-]{0,63}\Z'
+# The node's SSH user: a Linux user name, as common_username_pattern (tests/fuzz/ checks they stay the same).
+# It ends up in the SSH login, a home directory and an ACL entry.
+pve_ssh_user_pattern: '^[a-z_][a-z0-9_-]{0,31}\Z'
+# A folder the roles write the ISOs to: an absolute path, no line breaks or other control characters.
+pve_iso_dir_pattern: '^/[^\x00-\x1f\x7f]*\Z'
+# For a pve_ssh_user other than root, playbooks/prepare-node.yml records here (as root) the folder of each ISO
+# storage the user may write to, as a JSON object: {"local": "/var/lib/vz/template/iso", ...}.
+pve_iso_dirs_file: /etc/ubuntu-server-auto-setup/iso-dirs.json

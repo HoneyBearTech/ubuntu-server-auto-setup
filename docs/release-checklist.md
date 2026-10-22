@@ -109,6 +109,49 @@ be tagged; replace them with yours.
   ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
   ```
 
+## A node user other than root
+
+The optional `prepare-node.yml` ([installing.md](installing.md#6-optional-a-node-user-other-than-root)),
+then the ISO build and another test VM (`test-03`, VM ID `9003`, address `192.0.2.12`) as that user.
+`<node>` is the node's address.
+
+- [ ] `prepare-node.yml` with `pve_ssh_user: usas-build`, the control node's public key in
+  `proxmox_node_user_ssh_keys` and `proxmox_node_user_iso_storages: [local, <iso-storage>]` ends with
+  `failed=0`, and a second run reports `changed=0`. If `<iso-storage>` is NFS or CIFS and the ACL doesn't
+  take, the run says so; note what the file server needed.
+- [ ] On the node, as root: the user has no groups but its own, no password and no sudo; each ISO folder has
+  the ACL entry and is still root's; the recorded folders are the ones `pvesm path` gives:
+
+  ```bash
+  id usas-build; getent shadow usas-build | cut -d: -f2     # groups=...(usas-build) only; *
+  ls /etc/sudoers.d/; command -v sudo && sudo -l -U usas-build
+  getfacl "$(dirname "$(pvesm path local:iso/x.iso)")" "$(dirname "$(pvesm path <iso-storage>:iso/x.iso)")"
+  cat /etc/ubuntu-server-auto-setup/iso-dirs.json
+  ```
+
+- [ ] As the user, Proxmox's configuration stays out of reach:
+
+  ```bash
+  ssh usas-build@<node> pvesm status            # please run as root
+  ssh usas-build@<node> cat /etc/pve/storage.cfg  # Permission denied
+  ```
+
+- [ ] `build-installer.yml` with `pve_ssh_user: usas-build` and `-e installer_iso_rebuild=true` ends with
+  `failed=0`; the new ISO is `usas-build`'s and every node still sees it; a second run (without the rebuild)
+  reports `changed=0`:
+
+  ```bash
+  ls -l "$(dirname "$(pvesm path <iso-storage>:iso/x.iso)")"/*autoinstall.iso
+  pvesm list <iso-storage> --content iso | grep autoinstall    # on each node
+  ```
+
+- [ ] `provision-vms.yml --limit test-03` with `pve_ssh_user: usas-build` installs the VM, and no seed ISO or
+  seed folder is left (as in [provision-vms](#provision-vms)).
+- [ ] In the web UI, **Node SSH user** `usas-build` (Proxmox page, More settings): the SSH page shows the
+  user's `authorized_keys` command, **Test the SSH login** answers `Logged in to usas-build@...`, and a
+  **build-installer** run from the UI succeeds. **Fetch** the CA certificate over SSH fails with the
+  message to paste it instead.
+
 ## baseline
 
 - [ ] The run ends with `failed=0`, and a second run reports `changed=0`.
@@ -225,6 +268,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 
   ```bash
   qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
+  qm stop 9003; qm destroy 9003 --purge
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01
   ```
@@ -237,6 +281,8 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   ssh-keygen -R 192.0.2.10 && ssh-keygen -R '[192.0.2.10]:2222'
   ```
 
+- [ ] Keep the node user, or remove it: `userdel -r usas-build`, `setfacl -x u:usas-build <folder>` on each
+  ISO folder and `rm -r /etc/ubuntu-server-auto-setup`, then set `pve_ssh_user` back to `root`.
 - [ ] Remove the test container and its volume (it holds the API token and an SSH key):
 
   ```bash

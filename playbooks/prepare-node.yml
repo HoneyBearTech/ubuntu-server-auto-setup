@@ -1,0 +1,11 @@
+---
+# Optional, run once per node before the playbooks log in to it as a user other than root: creates
+# pve_ssh_user with only the access the ISO builds and the seed files need. It logs in as root itself (or as
+# prepare_node_login_user, with --become). See docs/installing.md.
+- name: Set up a user other than root on the Proxmox nodes for the ISO builds
+  hosts: proxmox_nodes
+  gather_facts: false
+  vars:
+    ansible_user: "{{ prepare_node_login_user | default('root') }}"
+  roles:
+    - proxmox_node_user

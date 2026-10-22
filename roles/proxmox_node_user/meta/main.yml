@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: HoneyBearTech
+  description: Set up a user other than root on a Proxmox node for the ISO builds and the seed files
+  license: MIT
+  min_ansible_version: "2.20"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies:
+  - role: ubuntu_release

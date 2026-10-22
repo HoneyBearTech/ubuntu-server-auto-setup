@@ -1,8 +1,12 @@
 #!/bin/sh
 # A stand-in for Proxmox VE's pvesm in the test "node" container: two storages allow ISO images, "local"
 # (a directory) and "synology-nfs" (NFS, shared by the cluster); "backup-nfs" exists but holds backups only.
-# Only the two calls the roles make are implemented.
+# Only the two calls the roles make are implemented, and, like the real one, only for root.
 set -eu
+if [ "$(id -u)" -ne 0 ]; then
+  echo "please run as root" >&2
+  exit 255
+fi
 case "${1:-} ${2:-} ${3:-}" in
   "status --content iso")
     printf '%-14s %-6s %-8s %14s %14s %14s %8s\n' Name Type Status Total Used Available %

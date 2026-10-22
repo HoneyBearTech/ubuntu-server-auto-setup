@@ -1,5 +1,6 @@
 # Stands in for a Proxmox VE node in the integration tests: Debian (which Proxmox VE is built on) with
-# root SSH, Python for Ansible and xorriso. The tests use it to build the installer ISO and the seed ISOs.
+# root SSH, Python for Ansible and xorriso. The tests use it to build the installer ISO and the seed ISOs,
+# as root and as a user that playbooks/prepare-node.yml creates.
 
 # A small stand-in for the Ubuntu live-server ISO, with a SHA256SUMS file in Ubuntu's format, signed like
 # Ubuntu signs it (SHA256SUMS.gpg) with a test key made here. The private key stays in this build stage;

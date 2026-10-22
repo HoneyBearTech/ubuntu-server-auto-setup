@@ -24,7 +24,7 @@ API for other programs. What should be reachable from where is described in the
 
 | Group | Members | Connection |
 | --- | --- | --- |
-| `proxmox_nodes` | each Proxmox VE node; the inventory host name must equal the Proxmox node name | SSH as `root` (`ansible_user: root`) |
+| `proxmox_nodes` | each Proxmox VE node; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
 
 ### Inventory variables
@@ -32,7 +32,7 @@ API for other programs. What should be reachable from where is described in the
 The variables below are the project's interface: names and meanings change only in a minor release before
 1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
 full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
-`roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/common`, `roles/firewall`,
+`roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
 `roles/ssh_hardening`, `roles/fail2ban` and `roles/hardening`. Where a role's default and the example inventory differ, the
 example shows a typical value.
 
@@ -55,12 +55,22 @@ example shows a typical value.
 | `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
 | `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from. A mirror must publish all three. |
 | `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image); a storage shared by the cluster, such as NFS, works for every node. |
-| `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
-| `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). |
+| `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`, or for a user other than root the answer `prepare-node.yml` recorded), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
+| `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). It must be a folder of `pve_ssh_user`'s, mode `0700`. |
+| `pve_ssh_user` | `root` | The user the playbooks log in to the Proxmox nodes as (a lowercase Linux user name); the `proxmox_nodes`' `ansible_user` must match, which the roles check. Any other user than `root` needs `prepare-node.yml` first; the roles then read the ISO storage's folder from `/etc/ubuntu-server-auto-setup/iso-dirs.json` (`pvesm` runs for root only), check they can write to it, and check that `xorriso` and `gpgv` are installed instead of installing them. |
 | `installer_grub_timeout` | `3` | Seconds the installer's GRUB menu waits. |
 | `installer_iso_rebuild` | `false` | Rebuild the remastered ISO even if it exists. |
 | `installer_signing_keyring` | `ubuntu-cdimage-keyring.gpg` | The binary OpenPGP keyring `SHA256SUMS.gpg` is checked against, on the control node: a file in `roles/installer_iso/files/` or an absolute path. The default holds only Ubuntu's CD image signing key. |
 | `installer_signing_fingerprint` | `843938DF228D22F7B3742BC0D94AA3F0EFE21092` | The full fingerprint of the key that must have signed `SHA256SUMS` (Ubuntu CD Image Automatic Signing Key (2012), as published at [ubuntu.com](https://ubuntu.com/tutorials/how-to-verify-ubuntu)). Change it, with the keyring, only for a mirror that signs its own `SHA256SUMS`. |
+
+**The node user** (`proxmox_node_user`, used by `playbooks/prepare-node.yml` only)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `proxmox_node_user_ssh_keys` | `[]` | Public keys that may log in as `pve_ssh_user`, one `authorized_keys` line each; they replace whatever was there. Required. |
+| `proxmox_node_user_iso_storages` | `["{{ pve_iso_storage }}"]` | The ISO storages the user may write to; each gets an ACL entry on its ISO folder, and is recorded in `/etc/ubuntu-server-auto-setup/iso-dirs.json`. |
+| `proxmox_node_user_home` | `/var/lib/<pve_ssh_user>` | The user's home directory. |
+| `prepare_node_login_user` | `root` | Who `prepare-node.yml` logs in as (with `--become` if not root). |
 
 **Proxmox API and VMs** (`proxmox_vm`)
 
@@ -230,6 +240,7 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 
 | Command | Playbook | Hosts | Effect |
 | --- | --- | --- | --- |
+| `make prepare-node` | `playbooks/prepare-node.yml` | `proxmox_nodes` | Optional, once, as root: create `pve_ssh_user` (no password, no sudo, its `authorized_keys`), install `xorriso`, `gpgv` and `acl`, hand it the work directory, add an ACL entry for it on each ISO storage's folder, and record those folders in `/etc/ubuntu-server-auto-setup/iso-dirs.json`. |
 | `make build-installer` | `playbooks/build-installer.yml` | `proxmox_nodes` | Download, verify and remaster the Ubuntu ISO. Changes only the node's ISO storage and `xorriso`. |
 | `make provision` | `playbooks/provision-vms.yml` | `ubuntu_servers` | Create and install each VM whose `pve_vmid` doesn't exist. Erases the new VM's disk only. |
 | `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
@@ -277,7 +288,7 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 | --- | --- | --- | --- |
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List VMs, create, configure, start and watch them; for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
-| Proxmox VE nodes | control node | SSH as root, key, host key checked | Install `xorriso` and `gpgv`, build ISOs and seed ISOs, delete seed files. |
+| Proxmox VE nodes | control node | SSH as `pve_ssh_user` (root by default), key, host key checked | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |

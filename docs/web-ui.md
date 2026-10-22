@@ -141,12 +141,17 @@ The overview lists the steps and whether each is done.
    [installing.md](installing.md#2-create-the-proxmox-api-token).
 
    Proxmox nodes use certificates from the cluster's own CA. Paste `/etc/pve/pve-root-ca.pem` from the
-   node into **Cluster CA certificate**, or fetch it over SSH once the next step is done. The UI then
+   node into **Cluster CA certificate**, or fetch it over SSH once the next step is done (as root only:
+   another node user can't read `/etc/pve`). The UI then
    trusts that CA (with the usual public ones) for the connection test and every playbook run, so
    verification can stay on.
 2. **SSH key**: the UI's own key pair. **Create a key** makes an Ed25519 key in the data volume; or upload
    one (OpenSSH or PEM; a key with a passphrase must be in PEM format, or have the passphrase removed). Add
-   the public key to `/root/.ssh/authorized_keys` on the Proxmox node (the page shows the command). Then
+   the public key to the authorized keys of the user the UI logs in to the node as, `/root/.ssh/authorized_keys`
+   by default (the page shows the command). To use a user without root's privileges instead, set up the
+   node with `playbooks/prepare-node.yml` from a checkout, giving it this public key
+   ([installing.md](installing.md#6-optional-a-node-user-other-than-root)), and set **Node SSH user** under
+   More settings on the Proxmox page. Then
    enter the node's SSH address, **scan** its host key, compare the fingerprints with what the node shows
    (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` in the node's shell), and **trust** them. Only then
    will the UI and the playbooks connect, and only to that key. **Test the SSH login** checks the whole
@@ -237,7 +242,8 @@ docker start usas
 ```
 
 The archive holds the SSH key and, unless you moved it out, the Vault password: keep it as safe as the
-Proxmox node's root password.
+Proxmox node's root password (or, with a node user other than root, as everything that user and the admin
+users on the servers can do).
 
 ### Upgrading
 
@@ -263,8 +269,9 @@ The container reads these environment variables; the defaults suit the documente
 ## Security
 
 The UI can create VMs, wipe their disks and change SSH and firewall settings on every server in the
-inventory, and the data volume holds a root SSH key and the Proxmox API token. Treat access to it like
-root access to the Proxmox node.
+inventory, and the data volume holds the SSH key that logs in to the Proxmox node (as root, unless a node user
+was set up with `prepare-node.yml`) and the Proxmox API token. Treat access to it like root access to the
+Proxmox node.
 
 What it does to protect them:
 
