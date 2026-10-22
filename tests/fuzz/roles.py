@@ -9,6 +9,7 @@ import jinja2
 import jinja2.nativetypes
 import yaml
 from ansible.plugins.filter.core import FilterModule
+from ansible.plugins.filter.mathstuff import FilterModule as MathFilterModule
 from ansible.plugins.test.core import TestModule
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -16,6 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 def _setup(env):
     env.filters.update(FilterModule().filters())
+    env.filters.update(MathFilterModule().filters())
     env.tests.update(TestModule().tests())
     return env
 
@@ -57,10 +59,20 @@ def role_vars(role):
 
 def set_fact_expression(path, var):
     """The Jinja expression a set_fact task in a role assigns to var."""
+    return NATIVE.from_string(_set_fact_task(path, var)["ansible.builtin.set_fact"][var].strip())
+
+
+def set_fact_vars(path, var):
+    """The Jinja expressions of the task vars of the set_fact task that assigns var, by name."""
+    task_vars = _set_fact_task(path, var).get("vars") or {}
+    return {name: NATIVE.from_string(str(value).strip()) for name, value in task_vars.items()}
+
+
+def _set_fact_task(path, var):
     for task in _walk(yaml.safe_load((ROOT / path).read_text())):
         facts = task.get("ansible.builtin.set_fact") or {}
         if var in facts:
-            return NATIVE.from_string(facts[var].strip())
+            return task
     raise KeyError(f"no set_fact for {var} in {path}")
 
 

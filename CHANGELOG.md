@@ -84,6 +84,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- A key both published on GitHub and listed in `admin_extra_ssh_keys` (for example a personal key uploaded
+  as the web UI's key) was installed twice by the installer, and every baseline run then reported
+  "Install the authorized keys" as changed. Each key is now installed once, by its type and key material,
+  keeping the extra key's comment.
 - The first baseline run stopped on Ubuntu 26.04 (since 0.3.0) right after it removed passwordless sudo:
   26.04's `sudo` is sudo-rs, which wraps the password prompt Ansible waits for, so the next task timed out
   "waiting for privilege escalation prompt" before SSH, the firewall and Fail2Ban were set up. The baseline
