@@ -47,7 +47,7 @@ jobs:
         run: ansible-lint
 
       - name: Syntax-check every playbook
-        run: ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml
+        run: ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml
 
       - name: Lint workflows (actionlint, with shellcheck)
         run: >-

@@ -1,0 +1,189 @@
+---
+- name: Check the user and the ISO storages
+  ansible.builtin.assert:
+    that:
+      - pve_ssh_user is match(pve_ssh_user_pattern)
+      - pve_ssh_user != 'root'
+      - proxmox_node_user_iso_storages | length > 0
+      - proxmox_node_user_iso_storages | reject('match', pve_storage_id_pattern) | list | length == 0
+    fail_msg: >-
+      Set pve_ssh_user to the lowercase Linux user name to create (root already has every privilege; this playbook
+      is for running the builds as someone else), and proxmox_node_user_iso_storages to one or more Proxmox
+      storage IDs.
+    quiet: true
+
+- name: Collect the user's authorized keys
+  ansible.builtin.set_fact:
+    # Each key once, by its type and key material, the later entry winning (as the common role does).
+    proxmox_node_user_keys: "{{ dict(proxmox_node_user_keys_listed | map('split') | map('batch', 2) | map('first')
+      | map('join', ' ') | zip(proxmox_node_user_keys_listed)).values() | list }}"
+  vars:
+    # One key per line: every entry is split on line breaks, so none can carry a second line into authorized_keys.
+    proxmox_node_user_keys_listed: "{{ (proxmox_node_user_ssh_keys | join('\n')).splitlines()
+      | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}"
+
+- name: Fail if there are no keys to log in with
+  ansible.builtin.assert:
+    that: proxmox_node_user_keys | length > 0
+    fail_msg: >-
+      proxmox_node_user_ssh_keys holds no public keys, so nobody could log in as {{ pve_ssh_user }}. Add the public
+      key the playbooks (or the web UI) use.
+    quiet: true
+
+- name: Install ISO, signature and ACL tooling
+  ansible.builtin.apt:
+    name: [xorriso, gpgv, acl]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# No password ("*" can't match one, and unlike "!" doesn't count as locked), so only the keys can log in;
+# no groups, so no sudo and nothing of www-data's /etc/pve.
+- name: Create {{ pve_ssh_user }}
+  ansible.builtin.user:
+    name: "{{ pve_ssh_user }}"
+    comment: ubuntu-server-auto-setup ISO builds
+    system: true
+    home: "{{ proxmox_node_user_home }}"
+    create_home: true
+    shell: /bin/sh
+    password: "*"
+  register: proxmox_node_user_account
+
+# In check mode a user this run would create doesn't exist yet: nothing can be given to it.
+- name: Note whether the user exists
+  ansible.builtin.set_fact:
+    proxmox_node_user_exists: "{{ not (ansible_check_mode and proxmox_node_user_account is changed) }}"
+
+- name: Install the authorized keys of {{ pve_ssh_user }}
+  ansible.posix.authorized_key:
+    user: "{{ pve_ssh_user }}"
+    key: "{{ proxmox_node_user_keys | join('\n') }}"
+    exclusive: true
+    state: present
+  when: proxmox_node_user_exists
+
+# The work directory is under /var/tmp, where anyone can create files: hand over only a real folder that a
+# root build left (or the user already has), never a link to somewhere else.
+- name: Look at the work directory
+  ansible.builtin.stat:
+    path: "{{ installer_work_dir }}"
+    follow: false
+    get_checksum: false
+  register: proxmox_node_user_work_dir
+
+- name: Fail if the work directory is a link or someone else's
+  ansible.builtin.assert:
+    that: >-
+      not proxmox_node_user_work_dir.stat.exists
+      or (proxmox_node_user_work_dir.stat.isdir and not proxmox_node_user_work_dir.stat.islnk
+          and proxmox_node_user_work_dir.stat.pw_name in ['root', pve_ssh_user])
+    fail_msg: >-
+      {{ installer_work_dir }} exists, but isn't a folder that root or {{ pve_ssh_user }} owns. Look at what it is,
+      remove it, and run this playbook again.
+    quiet: true
+
+- name: Create the work directory for {{ pve_ssh_user }}
+  ansible.builtin.file:
+    path: "{{ installer_work_dir }}"
+    state: directory
+    follow: false
+    owner: "{{ pve_ssh_user }}"
+    group: "{{ pve_ssh_user }}"
+    mode: "0700"
+  when: proxmox_node_user_exists
+
+- name: Hand over what earlier builds left in it
+  ansible.builtin.file:
+    path: "{{ installer_work_dir }}"
+    state: directory
+    follow: false
+    recurse: true
+    owner: "{{ pve_ssh_user }}"
+    group: "{{ pve_ssh_user }}"
+  when: proxmox_node_user_exists
+
+- name: List the storages that allow ISO images
+  ansible.builtin.command:
+    argv: [pvesm, status, --content, iso]
+  register: proxmox_node_user_storages
+  changed_when: false
+  check_mode: false
+
+- name: Fail if an ISO storage doesn't exist or doesn't allow ISO images
+  vars:
+    proxmox_node_user_active: "{{ proxmox_node_user_storages.stdout_lines[1:] | map('split') | selectattr('2', 'defined')
+                                  | selectattr('2', 'equalto', 'active') | map('first') | list }}"
+  ansible.builtin.assert:
+    that: proxmox_node_user_iso_storages | difference(proxmox_node_user_active) | length == 0
+    fail_msg: >-
+      These storages don't exist on {{ inventory_hostname }}, aren't active, or don't allow ISO images:
+      {{ proxmox_node_user_iso_storages | difference(proxmox_node_user_active) | join(', ') }}. Storages that do:
+      {{ proxmox_node_user_active | join(', ') or 'none' }}.
+    quiet: true
+
+- name: Ask Proxmox where each storage keeps ISO images
+  ansible.builtin.command:
+    argv: [pvesm, path, "{{ item }}:iso/{{ ubuntu_iso_name }}"]
+  loop: "{{ proxmox_node_user_iso_storages }}"
+  register: proxmox_node_user_paths
+  changed_when: false
+  check_mode: false
+
+- name: Note the folders
+  ansible.builtin.set_fact:
+    proxmox_node_user_iso_dirs: >-
+      {{ dict(proxmox_node_user_paths.results | map(attribute='item')
+              | zip(proxmox_node_user_paths.results | map(attribute='stdout') | map('trim') | map('dirname'))) }}
+
+- name: Fail if Proxmox named an unusable folder
+  ansible.builtin.assert:
+    that: proxmox_node_user_iso_dirs.values() | reject('match', pve_iso_dir_pattern) | list | length == 0
+    fail_msg: "pvesm path gave a folder that isn't an absolute path: {{ proxmox_node_user_iso_dirs }}"
+    quiet: true
+
+# An ACL entry for the user on each folder, rather than a group or new owner: Proxmox keeps owning them.
+- name: Let the user write to the ISO folders
+  ansible.posix.acl:
+    path: "{{ item.value }}"
+    entity: "{{ pve_ssh_user }}"
+    etype: user
+    permissions: rwx
+    state: present
+  loop: "{{ proxmox_node_user_iso_dirs | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}: {{ item.value }}"
+  register: proxmox_node_user_acls
+  failed_when: false
+  when: proxmox_node_user_exists
+
+- name: Fail if a folder doesn't take the ACL entry
+  vars:
+    proxmox_node_user_failed: "{{ proxmox_node_user_acls.results | default([]) | selectattr('failed', 'defined')
+                                  | selectattr('failed') | list }}"
+  ansible.builtin.assert:
+    that: proxmox_node_user_failed | length == 0
+    fail_msg: >-
+      {{ pve_ssh_user }} couldn't be given write access to
+      {{ proxmox_node_user_failed | map(attribute='item') | map(attribute='value') | join(', ') }}
+      ({{ proxmox_node_user_failed | map(attribute='msg') | first | default('') }}). An NFS or CIFS storage's
+      permissions are set on the file server: give the user's UID write access there (or mount it so it has),
+      or leave that storage out of proxmox_node_user_iso_storages.
+    quiet: true
+
+- name: Create the configuration folder
+  ansible.builtin.file:
+    path: "{{ pve_iso_dirs_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# The roles read this instead of asking pvesm, which runs for root only. Only root can change it.
+- name: Record the ISO folders for the roles
+  ansible.builtin.copy:
+    content: "{{ proxmox_node_user_iso_dirs | to_nice_json(sort_keys=true) }}\n"
+    dest: "{{ pve_iso_dirs_file }}"
+    owner: root
+    group: root
+    mode: "0644"

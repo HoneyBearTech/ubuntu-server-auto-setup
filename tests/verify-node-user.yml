@@ -1,0 +1,97 @@
+---
+# After tests/run.sh ran prepare-node.yml, then build-installer.yml and provision-vms.yml (srv-user) logging in
+# to the node as usas-build. Logs in as root itself, to look at what the user can't.
+- name: Verify the node user's access and what it built
+  hosts: proxmox_nodes
+  gather_facts: false
+  vars:
+    iso_dir: /var/lib/vz/template/iso
+  tasks:
+    - name: Read the user's account, groups and password field
+      ansible.builtin.command:
+        argv: [sh, -c, 'id -nG usas-build; getent shadow usas-build | cut -d: -f2; getent passwd usas-build | cut -d: -f6,7']
+      register: verify_account
+      changed_when: false
+
+    - name: Check it has no groups but its own and no password
+      ansible.builtin.assert:
+        that: verify_account.stdout_lines == ['usas-build', '*', '/var/lib/usas-build:/bin/sh']
+        fail_msg: "{{ verify_account.stdout_lines }}"
+
+    - name: Read the ISO folders' ACLs
+      ansible.builtin.command:
+        argv: [getfacl, --omit-header, --absolute-names, "{{ iso_dir }}", /mnt/pve/synology-nfs/template/iso]
+      register: verify_acls
+      changed_when: false
+
+    - name: Check the user may write there and the folders are still root's
+      ansible.builtin.assert:
+        that:
+          - verify_acls.stdout_lines | select('equalto', 'user:usas-build:rwx') | list | length == 2
+          - verify_acls.stdout_lines | select('equalto', 'user::rwx') | list | length == 2
+
+    - name: Look at the ISOs, the work directory and the recorded folders
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+      loop:
+        - "{{ iso_dir }}/ubuntu-26.04.1-live-server-amd64-autoinstall.iso"
+        - /mnt/pve/synology-nfs/template/iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso
+        - /var/tmp/ubuntu-server-auto-setup
+        - /etc/ubuntu-server-auto-setup/iso-dirs.json
+      register: verify_files
+
+    - name: Check who owns them
+      vars:
+        owners: "{{ verify_files.results | map(attribute='stat') | map(attribute='pw_name') | list }}"
+        modes: "{{ verify_files.results | map(attribute='stat') | map(attribute='mode') | list }}"
+      ansible.builtin.assert:
+        that:
+          - owners == ['usas-build', 'root', 'usas-build', 'root']
+          - modes == ['0644', '0644', '0700', '0644']
+        fail_msg: "owners {{ owners }}, modes {{ modes }}"
+
+    - name: Read the recorded folders
+      ansible.builtin.slurp:
+        src: /etc/ubuntu-server-auto-setup/iso-dirs.json
+      register: verify_dirs
+
+    - name: Check they are the storages' ISO folders
+      ansible.builtin.assert:
+        that: >-
+          (verify_dirs.content | b64decode | from_json)
+          == {'local': iso_dir, 'synology-nfs': '/mnt/pve/synology-nfs/template/iso'}
+
+    - name: Look for seed ISOs and seed directories
+      ansible.builtin.find:
+        paths: ["{{ iso_dir }}", /var/tmp/ubuntu-server-auto-setup]
+        patterns: ["seed-*"]
+        file_type: any
+      register: verify_seeds
+
+    - name: Check none are left
+      ansible.builtin.assert:
+        that: verify_seeds.matched == 0
+
+- name: Verify the VM installed from the ISOs the user built
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the create request and the install
+      vars:
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form')
+                    | selectattr('vmid', 'equalto', '4063') | first }}"
+        vm: "{{ verify_api.json.data.vms['4063'] }}"
+      ansible.builtin.assert:
+        that:
+          - create.ide2 == 'local:iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,media=cdrom'
+          - create.ide3 == 'local:iso/seed-srv-user.iso,media=cdrom'
+          - vm.installed
+          - vm.starts == 2

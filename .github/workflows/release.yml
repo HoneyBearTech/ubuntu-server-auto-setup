@@ -48,7 +48,7 @@ jobs:
         run: |
           yamllint --format github .
           ansible-lint
-          ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml
+          ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml
           ruff check --output-format github
 
       - name: Web UI unit tests

@@ -28,7 +28,8 @@ that run on each pull request.
 - Done: Ubuntu's GPG signature on `SHA256SUMS` is verified, with its CD image signing key pinned by
   fingerprint, before the ISO's checksum is trusted.
 - Optional IPv6 and DHCP network configuration, and more disk layouts (including LUKS encryption).
-- Running the ISO build as a non-root user on the Proxmox node.
+- Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
+  (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 
 **Baseline**
 - Done: optional extra hardening, each off by default and documented: kernel and network `sysctl`

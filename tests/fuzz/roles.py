@@ -57,21 +57,21 @@ def role_vars(role):
     return yaml.safe_load((ROOT / "roles" / role / "vars" / "main.yml").read_text())
 
 
-def set_fact_expression(path, var):
-    """The Jinja expression a set_fact task in a role assigns to var."""
-    return NATIVE.from_string(_set_fact_task(path, var)["ansible.builtin.set_fact"][var].strip())
+def set_fact_expression(path, var, name=None):
+    """The Jinja expression a set_fact task in a role assigns to var (the task called name, if given)."""
+    return NATIVE.from_string(_set_fact_task(path, var, name)["ansible.builtin.set_fact"][var].strip())
 
 
-def set_fact_vars(path, var):
+def set_fact_vars(path, var, name=None):
     """The Jinja expressions of the task vars of the set_fact task that assigns var, by name."""
-    task_vars = _set_fact_task(path, var).get("vars") or {}
+    task_vars = _set_fact_task(path, var, name).get("vars") or {}
     return {name: NATIVE.from_string(str(value).strip()) for name, value in task_vars.items()}
 
 
-def _set_fact_task(path, var):
+def _set_fact_task(path, var, name=None):
     for task in _walk(yaml.safe_load((ROOT / path).read_text())):
         facts = task.get("ansible.builtin.set_fact") or {}
-        if var in facts:
+        if var in facts and name in (None, task.get("name")):
             return task
     raise KeyError(f"no set_fact for {var} in {path}")
 

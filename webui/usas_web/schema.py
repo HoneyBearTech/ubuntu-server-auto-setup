@@ -25,7 +25,8 @@ ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", 
 NOT_FORM_FORMATS = frozenset({
     "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
-    "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file",
+    "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
+    "pve_iso_dirs_file",
 })
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
@@ -177,6 +178,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           "share for the whole cluster. Its folder on the node is found automatically."),
         S("pve_api_timeout", "API request timeout (seconds)", "int", "proxmox_vm", minimum=5, maximum=600,
           advanced=True, help="How long one Proxmox API request may take. Allocating disks can keep the API busy."),
+        S("pve_ssh_user", "Node SSH user", "text", "ubuntu_release", pattern_var="pve_ssh_user_pattern",
+          advanced=True, help="The UI and the playbooks log in to the node over SSH as this user."),
         # The ISO file name is built from it, and installer_iso checks that name against this pattern.
         S("ubuntu_point_release", "Ubuntu point release", "text", "ubuntu_release",
           pattern_var="installer_iso_name_pattern", advanced=True,

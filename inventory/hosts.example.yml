@@ -15,15 +15,19 @@ all:
     pve_api_token_id: "{{ vault_pve_api_token_id }}"
     pve_api_token_secret: "{{ vault_pve_api_token_secret }}"
     pve_validate_certs: true
+    # The user Ansible logs in to the Proxmox nodes as, over SSH, to build the ISOs. root works as it is; for
+    # a user without root's privileges (for example usas-build), run playbooks/prepare-node.yml once first
+    # (see docs/installing.md).
+    pve_ssh_user: root
 
   children:
-    # Proxmox nodes: Ansible connects to them as root over SSH to build the ISOs.
-    # Each inventory hostname must match the Proxmox node name.
+    # Proxmox nodes. Each inventory hostname must match the Proxmox node name.
     proxmox_nodes:
+      vars:
+        ansible_user: "{{ pve_ssh_user }}"
       hosts:
         pve-1:
           ansible_host: 10.10.10.10
-          ansible_user: root
 
     ubuntu_servers:
       vars:

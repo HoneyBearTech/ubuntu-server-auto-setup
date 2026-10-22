@@ -1,7 +1,8 @@
 """The UI's SSH key, the Proxmox node's host key, and the Proxmox CA certificate.
 
-One key pair reaches the Proxmox node (as root, for the ISO build and the seed files) and the servers (as the
-admin user; its public key is added to admin_extra_ssh_keys). The node's host key is trusted only after the
+One key pair reaches the Proxmox node (as pve_ssh_user, root unless prepare-node.yml set up another user, for
+the ISO build and the seed files) and the servers (as the admin user; its public key is added to
+admin_extra_ssh_keys). The node's host key is trusted only after the
 user has compared its fingerprint with the one the node shows, and is then checked on every connection.
 """
 
@@ -26,6 +27,8 @@ KEY_COMMENT = "ubuntu-server-auto-setup-webui"
 SCAN_TYPES = "ed25519,ecdsa,rsa"
 TIMEOUT = 15
 PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
+# A Linux user name, as roles/ubuntu_release/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
+NODE_USER = r"^[a-z_][a-z0-9_-]{0,31}\Z"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
 
 
@@ -71,6 +74,12 @@ def describe_public_key(line: str) -> dict[str, str] | None:
     except ValueError:
         return None
     return {"type": parts[0], "fingerprint": fp, "comment": parts[2] if len(parts) > 2 else ""}
+
+
+def check_user(user: str) -> str:
+    if not re.match(NODE_USER, user):
+        raise KeyProblem("The node's SSH user must be a lowercase Linux user name (Proxmox page).")
+    return user
 
 
 def check_host(host: str) -> str:
@@ -175,8 +184,8 @@ class Keys:
 
     # --- Using the key ---------------------------------------------------------------------------------
 
-    def _ssh(self, host: str, *command: str) -> subprocess.CompletedProcess:
-        host = check_host(host)
+    def _ssh(self, host: str, user: str, *command: str) -> subprocess.CompletedProcess:
+        host, user = check_host(host), check_user(user)
         if not self.settings.ssh_key.exists():
             raise KeyProblem("Create or upload the SSH key first.")
         if not self.trusted(host):
@@ -184,24 +193,26 @@ class Keys:
         argv = [
             "ssh", "-i", str(self.settings.ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
             "-o", f"UserKnownHostsFile={self.settings.known_hosts}", "-o", "StrictHostKeyChecking=yes",
-            "-o", "ConnectTimeout=10", "-l", "root", "--", host, *command,
+            "-o", "ConnectTimeout=10", "-l", user, "--", host, *command,
         ]
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, check=False)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise KeyProblem(f"SSH to {host} failed: {_why(exc)}.") from None
 
-    def test_login(self, host: str) -> str:
-        result = self._ssh(host, "true")
+    def test_login(self, host: str, user: str) -> str:
+        result = self._ssh(host, user, "true")
         if result.returncode != 0:
-            raise KeyProblem(f"SSH to root@{host} failed: {result.stderr.strip()[-300:] or result.returncode}")
-        return f"Logged in to root@{host} with the UI's key."
+            raise KeyProblem(f"SSH to {user}@{host} failed: {result.stderr.strip()[-300:] or result.returncode}")
+        return f"Logged in to {user}@{host} with the UI's key."
 
-    def fetch_ca(self, host: str) -> str:
+    def fetch_ca(self, host: str, user: str) -> str:
         """The cluster CA certificate from the node, read over the verified SSH connection."""
-        result = self._ssh(host, "cat", PVE_CA_PATH)
+        result = self._ssh(host, user, "cat", PVE_CA_PATH)
         if result.returncode != 0:
-            raise KeyProblem(f"Couldn't read {PVE_CA_PATH} on {host}: {result.stderr.strip()[-300:]}")
+            # Only root (and Proxmox's own www-data group) can read /etc/pve.
+            hint = "" if user == "root" else f" {user} isn't allowed to read it: paste the certificate instead."
+            raise KeyProblem(f"Couldn't read {PVE_CA_PATH} on {host}: {result.stderr.strip()[-300:]}{hint}")
         return result.stdout
 
 

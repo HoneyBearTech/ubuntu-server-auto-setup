@@ -161,6 +161,28 @@ play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doe
   playbooks/build-installer.yml -e pve_iso_storage=backup-nfs
 play_fails 'pve_iso_storage must be a Proxmox storage ID' playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
 
+step "A node user other than root: prepare-node.yml sets it up, then the builds and a VM need no root"
+# The fake pvesm, like the real one, refuses anyone but root; the ISO folders are root's (with the ISOs the
+# root builds above left there), and so is the work directory.
+build_user="$TEST_TMP/build-user.json"
+printf '{"pve_ssh_user": "usas-build", "proxmox_node_user_ssh_keys": ["%s"],
+  "proxmox_node_user_iso_storages": ["local", "synology-nfs"]}\n' "$(cat "$TEST_TMP/id_ed25519.pub")" >"$build_user"
+play_fails 'Set pve_ssh_user to the lowercase Linux user name to create' playbooks/prepare-node.yml
+play_fails "These storages don't exist on pve-test, aren't active, or don't allow ISO images: backup-nfs" \
+  playbooks/prepare-node.yml -e "@$build_user" -e '{"proxmox_node_user_iso_storages": ["local", "backup-nfs"]}'
+play playbooks/prepare-node.yml -e "@$build_user"
+play --idempotent playbooks/prepare-node.yml -e "@$build_user"
+play_fails 'logs in to pve-test as root, but pve_ssh_user is usas-build' playbooks/build-installer.yml \
+  -e pve_ssh_user=usas-build -e ansible_user=root
+play_fails 'pve_ssh_user a lowercase Linux user name' playbooks/build-installer.yml -e 'pve_ssh_user=x;id'
+play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e installer_iso_rebuild=true
+play --idempotent playbooks/build-installer.yml -e pve_ssh_user=usas-build
+play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs
+play playbooks/provision-vms.yml --limit srv-user -e pve_ssh_user=usas-build
+play tests/verify-node-user.yml
+play_fails "doesn't name a folder for storage 'backup-nfs'" playbooks/build-installer.yml -e pve_ssh_user=usas-build \
+  -e pve_iso_storage=backup-nfs
+
 step "baseline: check mode on the fresh server fails nothing and changes nothing"
 # Before the first run UFW and Fail2Ban aren't installed and nothing limits SSH connections.
 play playbooks/baseline.yml --limit srv-01 --check --diff

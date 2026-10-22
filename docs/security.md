@@ -9,11 +9,11 @@ countered) is in the [assurance case](assurance-case.md). To report a vulnerabil
 
 The playbooks are meant to be run by an administrator, from a control node they trust, against Proxmox VE
 nodes and Ubuntu servers they own, on a private network. The control node holds the inventory, the Vault
-and the SSH keys that reach every server and the Proxmox nodes as root, so it is as sensitive as those
-systems. With the container image, the control node is the container: its web UI is meant for one
-administrator on the same machine (`127.0.0.1`), and its data volume holds the same secrets. The rest of
-this page assumes that use, with the defaults and the advice in the README's "Running it securely" section
-and in [web-ui.md](web-ui.md#security).
+and the SSH keys that reach every server and the Proxmox nodes (as root, unless you set up a [node user of
+its own](#the-proxmox-node-user-optional)), so it is as sensitive as those systems. With the container
+image, the control node is the container: its web UI is meant for one administrator on the same machine
+(`127.0.0.1`), and its data volume holds the same secrets. The rest of this page assumes that use, with the
+defaults and the advice in the README's "Running it securely" section and in [web-ui.md](web-ui.md#security).
 
 ## What the project is designed to guarantee
 
@@ -23,8 +23,9 @@ and in [web-ui.md](web-ui.md#security).
   never written to the repository. Tasks that handle the token or the password hash hide their arguments
   and results from the output (`no_log`).
 - The admin password leaves the control node only as a salted SHA-512 crypt hash. On the Proxmox node the
-  hash exists only in the per-host seed files (directory `0700`, files `0600`, root-owned) for the duration
-  of provisioning; the seed ISO and its directory are deleted once the installer has finished.
+  hash exists only in the per-host seed files (directory `0700`, files `0600`, owned by the user the
+  playbooks log in as: root, or the node user) for the duration of provisioning; the seed ISO and its
+  directory are deleted once the installer has finished.
 - The API token is sent only to the Proxmox API, over HTTPS with certificate verification on by default
   (`pve_validate_certs: true`).
 
@@ -53,6 +54,23 @@ and in [web-ui.md](web-ui.md#security).
 - The Proxmox API token needs only the privileges listed in [installing.md](installing.md#2-create-the-proxmox-api-token)
   (no `Sys.*`, no user or permission management, no `VM.Console`), on a dedicated user with privilege
   separation.
+
+<a id="the-proxmox-node-user-optional"></a>
+**The Proxmox node user (optional)**
+
+With `pve_ssh_user` set to a user that `playbooks/prepare-node.yml` created, the playbooks never log in to a
+Proxmox node as root after that one setup run, and nothing they do there runs as root:
+
+- The user has no password (`*`, so only its authorized keys log in), no groups (so no sudo, and no
+  `www-data` access to `/etc/pve`), and no sudo rule. Its `authorized_keys` holds exactly
+  `proxmox_node_user_ssh_keys`.
+- It can write to its own work directory (`0700`) and to the ISO folder of each storage listed in
+  `proxmox_node_user_iso_storages`, through one ACL entry per folder; it can't change the folders' owner or
+  anything else of Proxmox's. Proxmox's `pvesm` refuses to run for it, so the folders are looked up once,
+  as root, and recorded in a root-owned file it can read but not change.
+- Every run checks that the user it logs in as is `pve_ssh_user`, that the work directory is that user's
+  own folder (not a link, mode `0700`) and that it can write to the ISO folder, before it downloads
+  anything. It doesn't install packages; it checks that `xorriso` and `gpgv` are there.
 
 **Baseline** (on every server in `ubuntu_servers`, whether this project installed it or not)
 
@@ -192,11 +210,16 @@ in the trust store, and how to do the same in the web UI's data volume.
   where each address came from; check them before you act on them.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
   installed, read and change VM disks, and run commands inside the VMs through `qemu-guest-agent`.
+- **A stolen key of the node user.** A node user takes root on the node out of the SSH key's reach, but not
+  the ISO storage: whoever has its key can replace the installer ISO that new VMs boot (on a storage shared
+  by the cluster, for every node), read a seed ISO during an install, and fill the storage. Guard that key
+  like the API token, and keep the user's storages to the ones it needs.
 - **Trust on first use of a new VM's host key.** The control node accepts the host key it scans when a new
   VM first boots. An attacker who can impersonate the VM's IP address on your network at that moment could
   get their key trusted. Provision on a network you control.
 - **Leftovers of a killed run.** A failed provisioning run deletes the seed ISO in a `rescue` step. A run
-  killed outright (Ctrl-C, control node lost) can still leave the seed ISO (with the password hash, root-only)
+  killed outright (Ctrl-C, control node lost) can still leave the seed ISO (with the password hash, readable
+  only by root and the user the playbooks log in as)
   in the node's ISO storage until you delete it ([installing.md](installing.md#troubleshooting)).
 - **The installer's own log.** Ubuntu's installer keeps a root-only copy of its configuration, including
   the password hash, in `/var/log/installer/autoinstall-user-data`. The baseline's `common` role deletes it;

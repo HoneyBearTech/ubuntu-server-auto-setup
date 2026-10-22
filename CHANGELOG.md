@@ -8,6 +8,21 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- **A Proxmox node user other than root (optional).** `playbooks/prepare-node.yml` (`make prepare-node`),
+  run once as root, creates `pve_ssh_user` (for example `usas-build`) on each node: no password, no groups,
+  no sudo, only the keys in `proxmox_node_user_ssh_keys`, its own work directory, and write access to the ISO
+  folders of `proxmox_node_user_iso_storages` through an ACL entry each. Since `pvesm` runs for root only, it
+  records those folders in `/etc/ubuntu-server-auto-setup/iso-dirs.json`. With `pve_ssh_user` set, the ISO
+  builds and the seed files need no root: the roles check that they log in as that user, that the work
+  directory is its own and the ISO folder writable, and that `xorriso` and `gpgv` are installed. The default
+  stays `root`, so nothing changes until you opt in ([docs/installing.md](docs/installing.md#6-optional-a-node-user-other-than-root)).
+- The web UI's **Node SSH user** (Proxmox page, More settings) sets that user for the inventory, the SSH
+  page's `authorized_keys` command and **Test the SSH login**.
+- The example inventory logs in to the nodes as `"{{ pve_ssh_user }}"` instead of `root`; an inventory
+  that sets `ansible_user: root` keeps working as before.
+
 ### Fixed
 
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Fuzz target: turning the GitHub keys file and admin_extra_ssh_keys into the list of authorized keys.
+"""Fuzz target: turning the GitHub keys file and admin_extra_ssh_keys into the list of authorized keys, and
+proxmox_node_user_ssh_keys into the node user's.
 
-Property: for any keys file and extra keys, both roles produce the same list, every entry is a single,
+Property: for any keys file and extra keys, all three roles produce the same list, every entry is a single,
 trimmed line that starts with a public-key type, every entry is a line of the input, no key (type and key
 material) is in the list twice, and no key of the input is left out.
 """
@@ -18,6 +19,9 @@ PROVISION_VARS = roles.set_fact_vars("roles/proxmox_vm/tasks/provision.yml", "pr
 PROVISION_LISTED = PROVISION_VARS["provision_ssh_keys_listed"]
 COMMON = roles.set_fact_expression("roles/common/tasks/ssh_keys.yml", "common_ssh_keys")
 COMMON_LISTED = roles.set_fact_vars("roles/common/tasks/ssh_keys.yml", "common_ssh_keys")["common_ssh_keys_listed"]
+NODE = roles.set_fact_expression("roles/proxmox_node_user/tasks/main.yml", "proxmox_node_user_keys")
+NODE_LISTED = roles.set_fact_vars("roles/proxmox_node_user/tasks/main.yml",
+                                  "proxmox_node_user_keys")["proxmox_node_user_keys_listed"]
 PREFIXES = ("ssh-", "ecdsa-", "sk-")
 
 
@@ -30,6 +34,8 @@ def one_input(data):
     keys = PROVISION.render(provision_ssh_keys_listed=listed)
     common_listed = COMMON_LISTED.render(common_github_keys={"content": content}, admin_extra_ssh_keys=extras)
     assert keys == COMMON.render(common_ssh_keys_listed=common_listed)
+    node_listed = NODE_LISTED.render(proxmox_node_user_ssh_keys=[content, *extras])
+    assert keys == NODE.render(proxmox_node_user_keys_listed=node_listed)
     assert isinstance(keys, list), keys
     lines = {line.strip() for line in (content + "\n" + "\n".join(extras)).splitlines()}
     for key in keys:

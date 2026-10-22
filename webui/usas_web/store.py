@@ -251,7 +251,8 @@ class Store:
         node = config.values.get("pve_node")
         if node and config.node_address:
             children["proxmox_nodes"] = {
-                "hosts": {str(node): {"ansible_host": Unsafe(config.node_address), "ansible_user": "root"}}
+                "hosts": {str(node): {"ansible_host": Unsafe(config.node_address),
+                                      "ansible_user": Unsafe(self.node_user(config))}}
             }
         children["ubuntu_servers"] = {
             "vars": {
@@ -268,6 +269,10 @@ class Store:
         )
         write_private(s.inventory_file, header + dump_yaml(inventory))
         self.write_secrets(config.secrets)
+
+    def node_user(self, config: Config) -> str:
+        """The user the playbooks and the UI log in to the Proxmox node as (pve_ssh_user, root by default)."""
+        return str(config.values.get("pve_ssh_user") or self.schema.by_name["pve_ssh_user"].default)
 
     def host_names(self) -> set[str]:
         """Every host and group name, for checking --limit."""
