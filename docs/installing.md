@@ -1,8 +1,10 @@
 # Installing
 
 "Installing" ubuntu-server-auto-setup means setting up a control node to run the playbooks, and giving it
-access to your Proxmox VE nodes. Nothing is installed on the Proxmox nodes except the `xorriso` package
-and the ISO files the playbooks create. For a shorter walk-through, see the [quick start](quick-start.md).
+access to your Proxmox VE nodes. Nothing is installed on the Proxmox nodes except the `xorriso` and `gpgv`
+packages and the ISO files the playbooks create (and, if you choose the [optional hardening
+step](#6-optional-a-node-user-other-than-root), a user of its own for the ISO builds). For a shorter
+walk-through, see the [quick start](quick-start.md).
 
 ## What you need
 
@@ -10,7 +12,9 @@ and the ISO files the playbooks create. For a shorter walk-through, see the [qui
   (`ssh-keyscan` included). This is where your inventory, your Vault and your SSH private key live, so
   use a machine you trust.
 - **Proxmox VE 8 or 9**, with SSH access as `root` using a key (`ssh root@<node>` must work without a
-  password prompt), and its API reachable over HTTPS (port 8006) from the control node.
+  password prompt; after the [optional step 6](#6-optional-a-node-user-other-than-root) the playbooks log in
+  as a user without root's privileges instead), and its API reachable over HTTPS (port 8006) from the
+  control node.
 - **Storage**: about 6 GB in the node's ISO storage (`local`, `/var/lib/vz/template/iso`) for the
   Ubuntu ISO and its remastered copy, and room on the VM storage (`local-lvm` by default) for each disk.
   Every new VM also gets a 4 MB EFI disk on that storage (its Secure Boot keys and boot entries); a VM with
@@ -104,8 +108,9 @@ the web UI as it. The `token add` command prints the secret once: put it in the 
 You can narrow the ACLs from `/` to `/vms`, `/storage/<id>` and `/sdn/zones/<zone>` if your cluster has other
 tenants.
 
-The playbooks also log in to each node over SSH as `root` to download and build the ISOs (the API can't
-run commands). If you'd rather not use root, that is on the [roadmap](roadmap.md).
+The playbooks also log in to each node over SSH, as `root` by default, to download and build the ISOs and
+write the seed files (the API can't run commands). [Step 6](#6-optional-a-node-user-other-than-root) replaces
+root with a user that can only write to the ISO storage.
 
 If the node uses Proxmox's self-signed certificate, add the cluster CA to the control node's trust store so
 the API's certificate can be verified (keep `pve_validate_certs: true`). Copy `/etc/pve/pve-root-ca.pem`
@@ -125,8 +130,8 @@ cp inventory/hosts.example.yml inventory/hosts.yml
 
 `inventory/hosts.yml` is gitignored. It has two groups:
 
-- `proxmox_nodes`: one host per Proxmox node, named exactly like the node in Proxmox, with `ansible_host`
-  and `ansible_user: root`;
+- `proxmox_nodes`: one host per Proxmox node, named exactly like the node in Proxmox, with `ansible_host`;
+  the group's `ansible_user` is `"{{ pve_ssh_user }}"`, and `pve_ssh_user` is `root` (step 6 changes it);
 - `ubuntu_servers`: one host per server. For a new VM: `ansible_host` (its static IP), `pve_vmid`,
   `pve_node`, and the network and size variables. Group-wide values such as `net_gateway`, `net_dns`
   and `fail2ban_ignoreip` go under the group's `vars`. A server that gets its address from DHCP has
@@ -170,6 +175,74 @@ make baseline LIMIT=<host> ARGS=--ask-vault-pass
 Check that you can still log in, and that password and root logins are refused (see the
 [quick start](quick-start.md#5-harden-it)). Then `make site ARGS=--ask-vault-pass` handles every host.
 
+## 6. Optional: a node user other than root
+
+By default the playbooks log in to each Proxmox node as root. Root isn't needed for the work they do there,
+so you can give them a user of their own (`usas-build` below) that has no password, no sudo and no groups,
+and can write to the ISO storage's folder and its own work directory only:
+
+| Step on the node | What the user needs | How it gets it |
+| --- | --- | --- |
+| Download `SHA256SUMS` and the ISO, check the signature (`gpgv`) | a work directory | `/var/tmp/ubuntu-server-auto-setup`, its own, mode `0700` |
+| Remaster the ISO (`xorriso`), build the seed ISOs | the same work directory | as above |
+| Put the ISOs in the ISO storage, delete the seed afterwards | write access to that folder only | an ACL entry (`user:usas-build:rwx`) on `<storage>/template/iso`; Proxmox keeps owning the folder |
+| Find the ISO storage's folder | `pvesm` runs for root only (it reads `/etc/pve`) | `prepare-node.yml` asks it once, as root, and writes the answer to `/etc/ubuntu-server-auto-setup/iso-dirs.json` (root's, readable by all) |
+| Install `xorriso` and `gpgv` | root | `prepare-node.yml` installs them; later runs only check they are there |
+
+No sudo rule is needed. Run `playbooks/prepare-node.yml` once per node; it logs in as root (`ssh root@<node>`
+must still work for this one run). Give it the user's name, its public keys and the ISO storages it may
+use, for example in `inventory/hosts.yml`:
+
+```yaml
+all:
+  vars:
+    pve_ssh_user: usas-build
+    # The key the playbooks (or the web UI) log in with: the user's authorized_keys gets exactly these.
+    proxmox_node_user_ssh_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@laptop
+    # Every ISO storage the user may write to (default: pve_iso_storage only).
+    proxmox_node_user_iso_storages: [local]
+```
+
+```sh
+make prepare-node ARGS=--ask-vault-pass
+```
+
+The playbook is idempotent, so run it again after adding a storage or changing the keys. With the group's
+`ansible_user: "{{ pve_ssh_user }}"` (as in `inventory/hosts.example.yml`), every later run logs in as
+`usas-build`; the roles stop if the user they find on the node isn't `pve_ssh_user`. If root can only log
+in with sudo from another account, run `make prepare-node ARGS="-e prepare_node_login_user=<you> --become"`.
+Once it works, the control node no longer needs root's key on the node: remove it from root's
+`authorized_keys` (rerunning `prepare-node.yml` then needs the `--become` form). Leave sshd's
+`PermitRootLogin` alone on a cluster, whose nodes reach each other as root over SSH.
+
+**Network storage.** On an NFS or CIFS storage the ACL may not take, because the file server decides who may
+write: the playbook stops and says so. Give the user's UID write access on the file server (or mount the
+share so that it has it), or keep that storage out of `proxmox_node_user_iso_storages`.
+
+**By hand.** The same, as root on the node, for the `local` storage:
+
+```sh
+apt install xorriso gpgv acl
+useradd --system --home-dir /var/lib/usas-build --create-home --shell /bin/sh --password '*' usas-build
+install -d -m 700 -o usas-build -g usas-build /var/lib/usas-build/.ssh
+echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@laptop' > /var/lib/usas-build/.ssh/authorized_keys
+chown usas-build: /var/lib/usas-build/.ssh/authorized_keys
+chmod 600 /var/lib/usas-build/.ssh/authorized_keys
+install -d -m 700 -o usas-build -g usas-build /var/tmp/ubuntu-server-auto-setup
+chown -R usas-build: /var/tmp/ubuntu-server-auto-setup   # what earlier root builds left
+dir="$(dirname "$(pvesm path local:iso/x.iso)")"
+setfacl -m u:usas-build:rwx "$dir"
+install -d -m 755 /etc/ubuntu-server-auto-setup
+printf '{"local": "%s"}\n' "$dir" > /etc/ubuntu-server-auto-setup/iso-dirs.json
+```
+
+Then set `pve_ssh_user: usas-build` in the inventory. Before `chown -R`, check that
+`/var/tmp/ubuntu-server-auto-setup` is a folder (not a link) that root owns.
+
+To go back to root, set `pve_ssh_user: root` again. To remove the user: `userdel -r usas-build`,
+`setfacl -x u:usas-build <folder>` on each ISO folder, and `rm -r /etc/ubuntu-server-auto-setup`.
+
 ## Troubleshooting
 
 - **"... is not listed in SHA256SUMS"**: Ubuntu has published a newer point release and moved the old one.
@@ -187,6 +260,14 @@ Check that you can still log in, and that password and root logins are refused (
   exists now, so a rerun would skip it: delete it in Proxmox (`qm destroy <vmid>`) and run again. If the
   run was killed outright (Ctrl-C), also delete `seed-<host>.iso` from the ISO storage and
   `/var/tmp/ubuntu-server-auto-setup/seed-<host>` on the node yourself (they hold the password hash).
+- **"Ansible logs in to <node> as root, but pve_ssh_user is usas-build"**: the inventory still logs in as
+  someone else. Set the `proxmox_nodes` group's `ansible_user` to `"{{ pve_ssh_user }}"` (or to the same
+  name), and remove any `ansible_user: root` on the node's own entry.
+- **"... iso-dirs.json on <node> doesn't name a folder for storage ..."** or **"... isn't writable by
+  usas-build"**: run `make prepare-node` with that storage in `proxmox_node_user_iso_storages`; for an NFS
+  or CIFS storage, see [step 6](#6-optional-a-node-user-other-than-root).
+- **"... can't install packages, and xorriso or gpgv isn't installed"**: run `make prepare-node`, or
+  `apt install xorriso gpgv` as root on the node.
 - **Locked out after the baseline**: log in on the Proxmox console as the admin user with the Vault
   password, fix `/etc/ssh/sshd_config.d/00-hardening.conf` or `ufw`, then correct the inventory.
 
@@ -196,7 +277,7 @@ Nothing runs permanently: to stop using the project, delete the checkout. To rem
 
 - on each Proxmox node, the ISOs in `/var/lib/vz/template/iso` (`ubuntu-26.04.1-live-server-amd64.iso`
   and `...-autoinstall.iso`) and the work directory `/var/tmp/ubuntu-server-auto-setup`; `xorriso` can be
-  removed with `apt remove xorriso`;
+  removed with `apt remove xorriso`; the node user from step 6, if you made one (see the end of that step);
 - the API token and user: `pveum user token remove ansible@pve automation`, `pveum user delete ansible@pve`,
   `pveum role delete UbuntuAutoSetup`;
 - the VMs, if you want them gone (`qm destroy <vmid>`). Servers keep their baseline settings; they are

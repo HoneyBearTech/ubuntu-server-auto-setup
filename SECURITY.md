@@ -31,7 +31,7 @@ Fixed vulnerabilities in ubuntu-server-auto-setup are published as [GitHub secur
 
 ## Scope
 
-These playbooks hold a Proxmox API token, log in to Proxmox nodes as root, install operating systems (wiping the target VM's disk) and change SSH and firewall settings on real servers. Treat the control node you run them from, its inventory and its Vault password as sensitive.
+These playbooks hold a Proxmox API token, log in to Proxmox nodes as root (or as a user that may only write ISO images, if you set one up), install operating systems (wiping the target VM's disk) and change SSH and firewall settings on real servers. Treat the control node you run them from, its inventory and its Vault password as sensitive.
 
 What the project does and doesn't protect against is described in [docs/security.md](docs/security.md) (its security requirements), and the reasoning behind it in [docs/assurance-case.md](docs/assurance-case.md) (threat model, trust boundaries and the defences against common weaknesses). Read them before you run it or report.
 

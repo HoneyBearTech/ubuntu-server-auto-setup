@@ -24,7 +24,9 @@ OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.ms.fd}"
 SSH_PORT=2299
 # The installer matches the network card by its MAC address (provision_nics, as tasks/main.yml builds it).
 VM_MAC=BC:24:11:00:00:99
-INSTALL_TIMEOUT="${INSTALL_TIMEOUT:-3000}"
+INSTALL_TIMEOUT="${INSTALL_TIMEOUT:-1800}"
+UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
+UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu}"
 qemu_pid=""
 swtpm_pid=""
 
@@ -129,13 +131,20 @@ ANSIBLE_CONFIG="$ROOT/ansible.cfg" ansible-playbook -i localhost, -c local "$W/r
   | sed -n '/PLAY RECAP/,$p'
 # For the test only: the installer also records PCR 7 as it measured it, to compare with the installed
 # system's (the install changes Secure Boot variables, which is why the role binds the slot after the first
-# boot). Everything else is the role's seed as rendered.
-python3 - "$W/seed/user-data" <<'EOF'
+# boot), and uses Ubuntu's main archive with retries instead of a mirror picked by geolocation, which has
+# failed apt-get update from the CI runners. Everything else is the role's seed as rendered.
+python3 - "$W/seed/user-data" "$UBUNTU_MIRROR" "$UBUNTU_SECURITY_MIRROR" <<'EOF'
 import sys, yaml
 with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
 doc["autoinstall"]["late-commands"].append(
     "curtin in-target -- tpm2_pcrread sha256:7 > /target/var/log/usas-test-installer-pcr7.txt 2>&1 || true")
+doc["autoinstall"]["apt"] = {
+    "geoip": False,
+    "primary": [{"arches": ["default"], "uri": sys.argv[2]}],
+    "security": [{"arches": ["default"], "uri": sys.argv[3]}],
+    "conf": 'Acquire::Retries "10";\n',
+}
 with open(sys.argv[1], "w") as f:
     f.write("#cloud-config\n" + yaml.safe_dump(doc, width=4096))
 EOF

@@ -30,6 +30,23 @@
     update_cache: true
     cache_valid_time: 3600
   register: installer_tools
+  when: pve_ssh_user == 'root'
+
+# Any other user can't install packages: prepare-node.yml did, as root.
+- name: List the node's packages
+  ansible.builtin.package_facts:
+  when: pve_ssh_user != 'root'
+
+- name: Fail if xorriso or gpgv is missing
+  ansible.builtin.assert:
+    that:
+      - "'xorriso' in ansible_facts.packages"
+      - "'gpgv' in ansible_facts.packages"
+    fail_msg: >-
+      {{ pve_ssh_user }} can't install packages, and xorriso or gpgv isn't installed on {{ inventory_hostname }}.
+      Run playbooks/prepare-node.yml, or as root on the node: apt install xorriso gpgv
+    quiet: true
+  when: pve_ssh_user != 'root'
 
 # Check mode runs the next four tasks too: they only write to the role's own work directory, and the
 # signature and checksum checks after them need their files.
@@ -39,6 +56,26 @@
     state: directory
     mode: "0700"
   check_mode: false
+
+# It is under /var/tmp, where anyone could have made it first, or put a link there to somewhere else.
+- name: Look at the work directory
+  ansible.builtin.stat:
+    path: "{{ installer_work_dir }}"
+    follow: false
+    get_checksum: false
+  register: installer_work_dir_stat
+
+- name: Fail unless the work directory belongs to the node user
+  ansible.builtin.assert:
+    that:
+      - installer_work_dir_stat.stat.isdir | default(false)
+      - not installer_work_dir_stat.stat.islnk | default(true)
+      - installer_work_dir_stat.stat.pw_name | default('') == pve_ssh_user
+      - installer_work_dir_stat.stat.mode | default('') == '0700'
+    fail_msg: >-
+      {{ installer_work_dir }} on {{ inventory_hostname }} must be a folder (not a link) that only {{ pve_ssh_user }}
+      can use (mode 0700). Remove it, or run playbooks/prepare-node.yml again to hand it to {{ pve_ssh_user }}.
+    quiet: true
 
 - name: Copy the keyring with Ubuntu's CD image signing key
   ansible.builtin.copy:

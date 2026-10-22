@@ -402,6 +402,24 @@ describe("the SSH page", () => {
     expect(body).toHaveProperty("key_file");
   });
 
+  it("tells root's key from another node user's", async () => {
+    new FakeApi();
+    renderAt("/ssh");
+    await loaded();
+    expect(screen.getByText(/>> \/root\/\.ssh\/authorized_keys$/)).toBeTruthy();
+    expect(screen.queryByText(/prepare-node\.yml/)).toBeNull();
+  });
+
+  it("gives the key to the node user it logs in as", async () => {
+    new FakeApi({ "GET /api/ssh": () => ({ ...fixtures.ssh, node_user: "usas-build" }) });
+    renderAt("/ssh");
+    await loaded();
+    expect(screen.getByText(/>> ~usas-build\/\.ssh\/authorized_keys$/)).toBeTruthy();
+    expect(screen.getAllByText("usas-build").length).toBeGreaterThan(1);
+    expect(screen.getByText("playbooks/prepare-node.yml")).toBeTruthy();
+    expect(screen.queryByText(/\/root\/\.ssh/)).toBeNull();
+  });
+
   it("starts without a key or an address", async () => {
     new FakeApi({
       "GET /api/ssh": () => ({ ...fixtures.ssh, public_key: "", key_info: null, node_address: "", trusted: [], pending: null, pve_node: "" }),

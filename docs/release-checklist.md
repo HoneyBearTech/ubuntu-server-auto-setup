@@ -114,7 +114,7 @@ be tagged; replace them with yours.
 
 CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
 VMs, but not on Proxmox itself. Here the test VM (Secure Boot is the default) and a second disposable VM
-with disk encryption, `test-03` (VM ID `9003`, address `192.0.2.12`), with `vm_disk_encryption: true`
+with disk encryption, `test-04` (VM ID `9004`, address `192.0.2.13`), with `vm_disk_encryption: true`
 and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real cluster.
 
 - [ ] Both VMs have an EFI disk with pre-enrolled keys, and only the encrypted one has a TPM state volume,
@@ -122,30 +122,30 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
 
   ```bash
   qm config 9001 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
-  qm config 9003 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
+  qm config 9004 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
   ```
 
 - [ ] Both report Secure Boot on:
 
   ```bash
   ssh sysadmin@192.0.2.10 mokutil --sb-state      # SecureBoot enabled
-  ssh sysadmin@192.0.2.12 mokutil --sb-state
+  ssh sysadmin@192.0.2.13 mokutil --sb-state
   ```
 
-- [ ] `test-03`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
+- [ ] `test-04`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
   passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto`:
 
   ```bash
-  ssh sysadmin@192.0.2.12 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
-  ssh sysadmin@192.0.2.12 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
-  ssh sysadmin@192.0.2.12 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
+  ssh sysadmin@192.0.2.13 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
+  ssh sysadmin@192.0.2.13 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
+  ssh sysadmin@192.0.2.13 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
   ```
 
 - [ ] A reboot unlocks without anyone typing: watch the console in Proxmox (no passphrase prompt) and wait
   for SSH:
 
   ```bash
-  ssh sysadmin@192.0.2.12 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.12 uptime
+  ssh sysadmin@192.0.2.13 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.13 uptime
   ```
 
 - [ ] The recovery passphrase works: it opens the LUKS volume, and after the TPM slot is wiped the VM stops
@@ -154,21 +154,64 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
   unattended again:
 
   ```bash
-  ssh -t sysadmin@192.0.2.12 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
-  ssh -t sysadmin@192.0.2.12 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.12 sudo systemctl reboot   # type the passphrase on the console, then:
-  ssh -t sysadmin@192.0.2.12 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.12 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.12 uptime
+  ssh -t sysadmin@192.0.2.13 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
+  ssh -t sysadmin@192.0.2.13 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.13 sudo systemctl reboot   # type the passphrase on the console, then:
+  ssh -t sysadmin@192.0.2.13 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.13 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.13 uptime
   ```
 
-- [ ] The installer's copy of its configuration is gone from `test-03`, and no seed is left on the node:
+- [ ] The installer's copy of its configuration is gone from `test-04`, and no seed is left on the node:
 
   ```bash
-  ssh sysadmin@192.0.2.12 'sudo ls /var/log/installer/'    # no autoinstall-user-data
+  ssh sysadmin@192.0.2.13 'sudo ls /var/log/installer/'    # no autoinstall-user-data
   ```
 
-- [ ] A Proxmox backup of `test-03` restores to a VM that boots unattended (the backup carries the TPM
+- [ ] A Proxmox backup of `test-04` restores to a VM that boots unattended (the backup carries the TPM
   state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
+
+## A node user other than root
+
+The optional `prepare-node.yml` ([installing.md](installing.md#6-optional-a-node-user-other-than-root)),
+then the ISO build and another test VM (`test-03`, VM ID `9003`, address `192.0.2.12`) as that user.
+`<node>` is the node's address.
+
+- [ ] `prepare-node.yml` with `pve_ssh_user: usas-build`, the control node's public key in
+  `proxmox_node_user_ssh_keys` and `proxmox_node_user_iso_storages: [local, <iso-storage>]` ends with
+  `failed=0`, and a second run reports `changed=0`. If `<iso-storage>` is NFS or CIFS and the ACL doesn't
+  take, the run says so; note what the file server needed.
+- [ ] On the node, as root: the user has no groups but its own, no password and no sudo; each ISO folder has
+  the ACL entry and is still root's; the recorded folders are the ones `pvesm path` gives:
+
+  ```bash
+  id usas-build; getent shadow usas-build | cut -d: -f2     # groups=...(usas-build) only; *
+  ls /etc/sudoers.d/; command -v sudo && sudo -l -U usas-build
+  getfacl "$(dirname "$(pvesm path local:iso/x.iso)")" "$(dirname "$(pvesm path <iso-storage>:iso/x.iso)")"
+  cat /etc/ubuntu-server-auto-setup/iso-dirs.json
+  ```
+
+- [ ] As the user, Proxmox's configuration stays out of reach:
+
+  ```bash
+  ssh usas-build@<node> pvesm status            # please run as root
+  ssh usas-build@<node> cat /etc/pve/storage.cfg  # Permission denied
+  ```
+
+- [ ] `build-installer.yml` with `pve_ssh_user: usas-build` and `-e installer_iso_rebuild=true` ends with
+  `failed=0`; the new ISO is `usas-build`'s and every node still sees it; a second run (without the rebuild)
+  reports `changed=0`:
+
+  ```bash
+  ls -l "$(dirname "$(pvesm path <iso-storage>:iso/x.iso)")"/*autoinstall.iso
+  pvesm list <iso-storage> --content iso | grep autoinstall    # on each node
+  ```
+
+- [ ] `provision-vms.yml --limit test-03` with `pve_ssh_user: usas-build` installs the VM, and no seed ISO or
+  seed folder is left (as in [provision-vms](#provision-vms)).
+- [ ] In the web UI, **Node SSH user** `usas-build` (Proxmox page, More settings): the SSH page shows the
+  user's `authorized_keys` command, **Test the SSH login** answers `Logged in to usas-build@...`, and a
+  **build-installer** run from the UI succeeds. **Fetch** the CA certificate over SSH fails with the
+  message to paste it instead.
 
 ## baseline
 
@@ -286,7 +329,8 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 
   ```bash
   qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
-  qm stop 9003; qm destroy 9003 --purge     # the encrypted test VM (its TPM state volume goes too)
+  qm stop 9003; qm destroy 9003 --purge
+  qm stop 9004; qm destroy 9004 --purge     # the encrypted test VM (its TPM state volume goes too)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01
   ```
@@ -299,6 +343,8 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   ssh-keygen -R 192.0.2.10 && ssh-keygen -R '[192.0.2.10]:2222'
   ```
 
+- [ ] Keep the node user, or remove it: `userdel -r usas-build`, `setfacl -x u:usas-build <folder>` on each
+  ISO folder and `rm -r /etc/ubuntu-server-auto-setup`, then set `pve_ssh_user` back to `root`.
 - [ ] Remove the test container and its volume (it holds the API token and an SSH key):
 
   ```bash

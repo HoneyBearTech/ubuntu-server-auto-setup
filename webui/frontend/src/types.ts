@@ -111,6 +111,7 @@ export interface SshData {
   trusted: HostKey[];
   pending: HostKey[] | null;
   pve_node: string;
+  node_user: string;
 }
 
 export interface ServersData {

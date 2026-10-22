@@ -62,6 +62,7 @@ export const ssh: SshData = {
   trusted: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:trusted1" }],
   pending: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:offered1" }],
   pve_node: "hephaestus",
+  node_user: "root",
 };
 
 export const log = [

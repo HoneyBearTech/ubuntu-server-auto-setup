@@ -62,9 +62,9 @@ def set_fact_expression(path, var, last=False):
     return NATIVE.from_string(_set_fact_task(path, var, last)["ansible.builtin.set_fact"][var].strip())
 
 
-def set_fact_vars(path, var):
+def set_fact_vars(path, var, last=False):
     """The Jinja expressions of the task vars of the set_fact task that assigns var, by name."""
-    task_vars = _set_fact_task(path, var).get("vars") or {}
+    task_vars = _set_fact_task(path, var, last).get("vars") or {}
     return {name: NATIVE.from_string(str(value).strip()) for name, value in task_vars.items()}
 
 

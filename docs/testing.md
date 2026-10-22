@@ -23,7 +23,7 @@ leaves the machine except the container image builds:
 
 | Real system | Stand-in |
 | --- | --- |
-| A Proxmox VE node (SSH as root, ISO storage) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`); its `xorriso` keeps a copy of each seed's user-data for the network checks |
+| A Proxmox VE node (SSH as root and as the node user `prepare-node.yml` creates, ISO storage, a fake `pvesm` that runs for root only) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`); its `xorriso` keeps a copy of each seed's user-data for the network checks |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
 | The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. Once an installed VM runs, its guest agent lists one interface per network card with the card's MAC address; VM 4063's `net0` has a DHCP lease, the others only link-local addresses, and VM 4066's agent may not be asked. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
@@ -62,21 +62,28 @@ run; your own `~/.ssh` is never touched. The steps:
    enrollment script itself then runs in a container with stubbed `blkid`, `systemd-cryptenroll` and
    `dracut`: it must add `tpm2-device=auto` to the root disk's crypttab line only, write the dracut drop-in,
    and change nothing on a second run.
-4. **baseline** in check mode (`--check --diff`) on the fresh `srv-01`, also with a new SSH port and with an
+4. **A node user other than root**: `prepare-node.yml` must refuse `root` and a storage that doesn't allow
+   ISO images, then create `usas-build` (twice: the second run changes nothing). As that user,
+   **build-installer** (a rebuild, then a run that changes nothing, then the NFS storage) and
+   **provision-vms** for `srv-user`; `tests/verify-node-user.yml` checks the account (no groups, no
+   password), the ACL entries on both ISO folders, who owns the ISOs, the work directory and the recorded
+   folders, and that no seed is left. A login user that isn't `pve_ssh_user`, a malformed user name and a
+   storage `prepare-node.yml` didn't set up must be refused.
+5. **baseline** in check mode (`--check --diff`) on the fresh `srv-01`, also with a new SSH port and with an
    admin user that doesn't exist yet: nothing may fail and nothing may change. Then the baseline twice,
    then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW rules and policies, the Fail2Ban jail,
    the sudoers file, the timezone, automatic updates, the removed installer answers file, exactly the
    published key and the extra key in `authorized_keys`, and password and root logins refused. A check run
    on the finished server must report no changes.
-5. **Key sync**: the baseline reaches `srv-dhcp` at the address its guest agent reports, without changes; a
+6. **Key sync**: the baseline reaches `srv-dhcp` at the address its guest agent reports, without changes; a
    key that is no longer published is removed; an empty key list is refused rather than
    emptying `authorized_keys`.
-6. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,
+7. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,
    Fail2Ban follows, and a rerun on the new port changes nothing.
-7. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
+8. **Password-required sudo**: the passwordless sudoers file is removed and Ansible carries on with the
    become password. The server's `sudo` is sudo-rs, as on Ubuntu Server 26.04, so this goes through the
    classic sudo (`/usr/bin/sudo.ws`); with that hidden, the baseline must stop before changing anything.
-8. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
+9. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
    that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
    expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
    AppArmor is enabled, apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
@@ -89,7 +96,7 @@ run; your own `~/.ssh` is never touched. The steps:
    Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
    leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
    (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
-9. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
+10. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
    the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
@@ -134,7 +141,8 @@ filters and tests, and checks a property for every input the role would accept:
 | Target | What it renders | Property |
 | --- | --- | --- |
 | `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words; with disk encryption, the passphrase is exactly the layout's password and the key file's content and nowhere else, the enrollment script is the same for every input, and every passphrase the role accepts is 12 to 512 printable ASCII characters without braces |
-| `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm` and `common` | both roles agree; every entry is one trimmed line of the input that starts with a key type |
+| `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm`, `common` and `proxmox_node_user` | all three roles agree; every entry is one trimmed line of the input that starts with a key type |
+| `fuzz_node_user.py` | `pve_ssh_user_pattern`, and the expression in `ubuntu_release` that reads the ISO folder from the file `prepare-node.yml` writes | the user pattern accepts exactly what `common_username_pattern` does; the folder taken is the storage's entry, an absolute path without control characters, or nothing |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
