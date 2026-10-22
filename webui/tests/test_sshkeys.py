@@ -130,37 +130,54 @@ def test_scan_trust_forget(keys, settings, monkeypatch):
 
 def test_ssh_login_and_ca_fetch(keys, settings, monkeypatch):
     with pytest.raises(KeyProblem, match="Create or upload"):
-        keys.test_login("pve")
+        keys.test_login("pve", "root")
     keys.generate()
     with pytest.raises(KeyProblem, match="Trust"):
-        keys.test_login("pve")
+        keys.test_login("pve", "root")
     keys.trust("pve", [HostKey("pve", "ssh-ed25519", "AAAA")])
     seen = []
     monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: seen.append(argv) or completed("PEM"))
-    assert "Logged in" in keys.test_login("pve")
+    assert keys.test_login("pve", "root") == "Logged in to root@pve with the UI's key."
     argv = seen[0]
     assert "StrictHostKeyChecking=yes" in argv and f"UserKnownHostsFile={settings.known_hosts}" in argv
-    assert argv[argv.index("--") + 1:] == ["pve", "true"]
-    assert keys.fetch_ca("pve") == "PEM"
+    assert argv[argv.index("--") + 1:] == ["pve", "true"] and argv[argv.index("-l") + 1] == "root"
+    assert keys.fetch_ca("pve", "root") == "PEM"
+    assert keys.test_login("pve", "usas-build") == "Logged in to usas-build@pve with the UI's key."
+    assert seen[-1][seen[-1].index("-l") + 1] == "usas-build"
+    for user in ("-oProxyCommand=id", "Root", "usas build", "a" * 33, ""):
+        with pytest.raises(KeyProblem, match="lowercase Linux user name"):
+            keys.test_login("pve", user)
     monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: completed("", 255, "Permission denied"))
     with pytest.raises(KeyProblem, match="Permission denied"):
-        keys.test_login("pve")
-    with pytest.raises(KeyProblem, match="Couldn't read"):
-        keys.fetch_ca("pve")
+        keys.test_login("pve", "root")
+    with pytest.raises(KeyProblem, match=r"Couldn't read .*Permission denied$"):
+        keys.fetch_ca("pve", "root")
+    with pytest.raises(KeyProblem, match="usas-build isn't allowed to read it: paste the certificate instead"):
+        keys.fetch_ca("pve", "usas-build")
 
     def boom(argv, **kw):
         raise FileNotFoundError(2, "No such file or directory", "/usr/bin/ssh")
 
     monkeypatch.setattr(k.subprocess, "run", boom)
     with pytest.raises(KeyProblem, match=r"SSH to pve failed: No such file or directory\.$"):
-        keys.test_login("pve")
+        keys.test_login("pve", "root")
 
     def odd(argv, **kw):
         raise OSError("something without an errno")
 
     monkeypatch.setattr(k.subprocess, "run", odd)
     with pytest.raises(KeyProblem, match=r"SSH to pve failed: OSError\.$"):
-        keys.test_login("pve")
+        keys.test_login("pve", "root")
+
+
+def test_the_node_user_pattern_is_the_roles():
+    import yaml
+
+    from .conftest import REPO
+
+    release = yaml.safe_load((REPO / "roles/ubuntu_release/vars/main.yml").read_text())
+    common = yaml.safe_load((REPO / "roles/common/vars/main.yml").read_text())
+    assert k.NODE_USER == release["pve_ssh_user_pattern"] == common["common_username_pattern"]
 
 
 def make_ca() -> str:

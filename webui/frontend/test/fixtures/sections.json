@@ -150,6 +150,17 @@
     "choices": null
    },
    {
+    "name": "pve_ssh_user",
+    "label": "Node SSH user",
+    "kind": "text",
+    "help": "The UI and the playbooks log in to the node over SSH as this user. The user Ansible logs in to the Proxmox nodes as over SSH; the proxmox_nodes' ansible_user must match (the roles check). root needs nothing else. Any other user needs playbooks/prepare-node.yml run once (it logs in as root) first: it creates the user, with write access to the ISO storages' folders only (docs/installing.md).",
+    "required": false,
+    "advanced": true,
+    "variable": "pve_ssh_user",
+    "default": "root",
+    "choices": null
+   },
+   {
     "name": "ubuntu_point_release",
     "label": "Ubuntu point release",
     "kind": "text",
@@ -175,6 +186,7 @@
    "pve_vlan": "",
    "pve_iso_storage": "local",
    "pve_api_timeout": "60",
+   "pve_ssh_user": "root",
    "ubuntu_point_release": "26.04.1"
   },
   "cluster": {

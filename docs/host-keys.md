@@ -1,7 +1,7 @@
 # Pinning the Proxmox node's SSH host key and API certificate
 
-The playbooks reach each Proxmox node in two ways: over **SSH as root** (to build the ISOs and write the seed
-files, through the inventory host named by `pve_ssh_host`) and over **HTTPS to the API** (to create, start
+The playbooks reach each Proxmox node in two ways: over **SSH as `pve_ssh_user`**, root by default (to
+build the ISOs and write the seed files, through the inventory host named by `pve_ssh_host`) and over **HTTPS to the API** (to create, start
 and watch the VMs, at `pve_api_host:pve_api_port`). Both are checked by default: `ansible.cfg` sets
 `host_key_checking = true`, and `pve_validate_certs` is `true`. A check only helps if what you trusted the
 first time was the real node, though. This page shows how to read the node's SSH host key and the API's
@@ -63,11 +63,11 @@ fail the run instead, for the Proxmox nodes:
 ```yaml
     proxmox_nodes:
       vars:
+        ansible_user: "{{ pve_ssh_user }}"
         ansible_ssh_common_args: "-o StrictHostKeyChecking=yes"
       hosts:
         pve-1:
           ansible_host: 192.0.2.10
-          ansible_user: root
 ```
 
 Setting it under `all.vars` works too, and is what the web UI and the integration tests do: provisioning

@@ -636,8 +636,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if action == "remove-ca":
                     remove_ca(settings)
                     return reply(message="The CA certificate was removed.")
-                pem = (str(form.get("ca_pem", "")) if action == "save-ca"
-                       else keys.fetch_ca(config.node_addresses.get(config.default_node, "")))
+                if action == "save-ca":
+                    pem = str(form.get("ca_pem", ""))
+                else:
+                    pem = keys.fetch_ca(config.node_addresses.get(config.default_node, ""), store.node_user(config))
                 certs = save_ca(settings, pem)
                 return reply(message="Saved the CA certificate " + ", ".join(c["subject"] for c in certs) + ".")
             except KeyProblem as exc:
@@ -836,7 +838,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return reply(public_key=pub or "", key_info=describe_public_key(pub) if pub else None,
                      nodes=[node_json(config, n) for n in config.node_names()],
                      pending={"node": session.pending_node, "keys": [hostkey(k) for k in pending]} if pending else None,
-                     pve_node=config.default_node)
+                     pve_node=config.default_node, node_user=store.node_user(config))
 
     NODE_ACTIONS = ("address", "scan", "trust", "forget", "test", "remove")
 
@@ -856,8 +858,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     return reply(422, area="key", error="Tick the box to confirm replacing the current key.")
                 keys.generate()
                 store.save(config)  # puts the new public key into admin_extra_ssh_keys
-                return reply(message="Created a new Ed25519 key. Add its public key to root's authorized_keys on "
-                                     "each node.")
+                return reply(message=f"Created a new Ed25519 key. Add its public key to {store.node_user(config)}'s "
+                                     "authorized_keys on each node.")
             if action == "upload":
                 upload = form.get("key_file")
                 data = await upload.read(MAX_PART) if upload is not None and hasattr(upload, "read") else b""
@@ -896,7 +898,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 keys.forget(address)
                 return reply(message=f"Forgot {address}'s host keys (node {node}).", node=node)
             if action == "test":
-                return reply(message=keys.test_login(address), node=node)
+                return reply(message=keys.test_login(address, store.node_user(config)), node=node)
         except KeyProblem as exc:
             area = {"generate": "key", "upload": "key", "address": "address"}.get(action, "hostkey")
             return reply(422, area=area, node=node, error=exc.message)

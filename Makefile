@@ -4,7 +4,7 @@ LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 
-.PHONY: help deps app lint syntax test fuzz webui-test webui-browser image smoke ui site build-installer provision baseline keys
+.PHONY: help deps app lint syntax test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -22,7 +22,7 @@ lint: ## Run yamllint, ansible-lint and ruff
 	ruff check
 
 syntax: ## Syntax-check every playbook against the example inventory
-	ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml
+	ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml
 
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
@@ -48,6 +48,9 @@ ui: app ## Build the app, then run the web UI from this checkout on http://local
 
 site: ## Build installer, provision missing VMs, apply baseline
 	$(PLAYBOOK) playbooks/site.yml $(LIMIT_ARG) $(ARGS)
+
+prepare-node: ## Optional, once, as root: set up pve_ssh_user on the Proxmox node(s) so the builds need no root
+	$(PLAYBOOK) playbooks/prepare-node.yml $(LIMIT_ARG) $(ARGS)
 
 build-installer: ## Download and remaster the Ubuntu ISO on the Proxmox nodes the servers use
 	$(PLAYBOOK) playbooks/build-installer.yml $(LIMIT_ARG) $(ARGS)

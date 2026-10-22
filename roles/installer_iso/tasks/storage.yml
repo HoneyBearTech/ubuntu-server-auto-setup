@@ -1,13 +1,20 @@
 ---
 # Downloads the Ubuntu ISO into one ISO storage (installer_iso_storage) and remasters it there, unless the
 # autoinstall ISO is already in it. Included once per storage by main.yml, after the checksum is verified.
+
+# A fact, not a parameter of the include: iso_dir sets pve_iso_dir itself and reads it back, and an include
+# parameter would hide what it set. Starting from the inventory's value (usually empty) makes it look up this
+# storage's folder rather than reuse the previous storage's.
+- name: Start from the ISO folder set in the inventory, if any
+  ansible.builtin.set_fact:
+    pve_iso_dir: "{{ installer_iso_dir_override }}"
+
 - name: Find the folder of ISO storage {{ installer_iso_storage }}
   ansible.builtin.include_role:
     name: ubuntu_release
     tasks_from: iso_dir
   vars:
     pve_iso_storage: "{{ installer_iso_storage }}"
-    pve_iso_dir: "{{ installer_iso_dir_override }}"
 
 - name: Download the Ubuntu Server ISO (checksum from the signed SHA256SUMS)
   ansible.builtin.get_url:

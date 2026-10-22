@@ -1,0 +1,12 @@
+---
+# Sets up pve_ssh_user (ubuntu_release's variable; it must not be root here) on a Proxmox node so that the ISO
+# builds and the seed files need no root: run by playbooks/prepare-node.yml, which logs in as root.
+
+# Public keys that may log in as pve_ssh_user, one authorized_keys line each. They replace whatever its
+# authorized_keys held. Required: for the web UI, its public key (SSH page).
+proxmox_node_user_ssh_keys: []
+# The ISO storages pve_ssh_user may write ISO images to. Each must allow ISO images, and its folder gets an ACL
+# entry for the user; for an NFS or CIFS storage the file server must allow that (or grant the access itself).
+proxmox_node_user_iso_storages: ["{{ pve_iso_storage }}"]
+# The user's home directory (its authorized_keys is there).
+proxmox_node_user_home: "/var/lib/{{ pve_ssh_user }}"

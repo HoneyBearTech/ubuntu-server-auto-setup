@@ -74,6 +74,7 @@ export const ssh: SshData = {
   ],
   pending: { node: "hephaestus", keys: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:offered1" }] },
   pve_node: "hephaestus",
+  node_user: "root",
 };
 
 export const log = [

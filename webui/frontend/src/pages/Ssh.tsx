@@ -58,7 +58,8 @@ export function Ssh() {
   };
 
   if (!data) return <><PageHead title="SSH key and the Proxmox nodes" /><Loading error={page.error} /></>;
-  const { public_key: pub, key_info: info, nodes, pending } = data;
+  const { public_key: pub, key_info: info, nodes, pending, node_user: user } = data;
+  const root = user === "root";
   return (
     <>
       <PageHead title="SSH key and the Proxmox nodes" crumb="Set up · step 2" />
@@ -67,7 +68,7 @@ export function Ssh() {
         <div className="card-body">
           <h2 id="key-heading">The UI's SSH key</h2>
           <p className="lead">
-            The UI logs in to each Proxmox node as <code>root</code> with this key (to build the installer ISO and
+            The UI logs in to each Proxmox node as <code>{user}</code> with this key (to build the installer ISO and
             the seed files), and to the servers as the admin user. The private key never leaves the data volume.
           </p>
           {pub && info ? (
@@ -76,10 +77,17 @@ export function Ssh() {
               <pre className="key" id="public-key">{pub}</pre>
               <p>
                 <a href="/ssh/id_ed25519.pub" download><Icon name="download" /> Download the public key</a>. On each
-                node, add it to <code>/root/.ssh/authorized_keys</code>, for example in the node's shell in the
-                Proxmox web UI:
+                node, add it to {root ? <code>/root/.ssh/authorized_keys</code> : <>the authorized keys
+                of <code>{user}</code></>}, for example in the node's shell in the Proxmox web UI:
               </p>
-              <pre className="key">{`echo '${pub}' >> /root/.ssh/authorized_keys`}</pre>
+              <pre className="key">{`echo '${pub}' >> ${root ? "/root" : `~${user}`}/.ssh/authorized_keys`}</pre>
+              {root ? null : (
+                <p>
+                  The user must exist first: <code>playbooks/prepare-node.yml</code> creates it (see the
+                  installation guide). That playbook replaces the user's keys with
+                  its <code>proxmox_node_user_ssh_keys</code>, so list this key there.
+                </p>
+              )}
             </>
           ) : <p>There is no key yet. Create one (recommended) or upload one.</p>}
           <form method="post" action="/api/ssh" onSubmit={submit} className="stack-sm">
@@ -133,7 +141,7 @@ export function Ssh() {
           ) : null}
         </div>
         {nodes.map((n, i) => (
-          <NodePart key={n.name} node={n} index={i} busy={busy} submit={submit} notes={notes}
+          <NodePart key={n.name} node={n} index={i} busy={busy} submit={submit} notes={notes} user={user}
                     pending={pending && pending.node === n.name ? pending.keys : null} />
         ))}
       </section>
@@ -141,8 +149,9 @@ export function Ssh() {
   );
 }
 
-function NodePart({ node: n, index: i, busy, submit, notes, pending }: {
+function NodePart({ node: n, index: i, busy, submit, notes, pending, user }: {
   node: SshNode;
+  user: string;
   index: number;
   busy: boolean;
   submit: (event: FormEvent<HTMLFormElement>) => void;
@@ -163,7 +172,9 @@ function NodePart({ node: n, index: i, busy, submit, notes, pending }: {
           <label htmlFor={`node_address-${i}`}>SSH address of {n.name}</label>
           <input type="text" id={`node_address-${i}`} name="node_address" defaultValue={n.address} className="mono"
                  spellCheck={false} autoComplete="off" aria-describedby={`node-address-${i}-help`} />
-          <p className="help" id={`node-address-${i}-help`}>Host name or IP address, port 22, user root.</p>
+          <p className="help" id={`node-address-${i}-help`}>
+            Host name or IP address, port 22, user <code>{user}</code> (set on the <Link href="/proxmox">Proxmox</Link> page).
+          </p>
         </div>
         <div className="actions">
           <Button action="address" busy={busy}>Save the address</Button>

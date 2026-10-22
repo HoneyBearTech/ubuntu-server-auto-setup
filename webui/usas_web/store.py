@@ -272,8 +272,9 @@ class Store:
 
         children: dict[str, Any] = {}
         # One host per node with an SSH address, named like the node (a host name, checked against the roles'
-        # pattern): build-installer and provisioning reach each node the servers use through it.
-        nodes = {name: {"ansible_host": Unsafe(address), "ansible_user": "root"}
+        # pattern): build-installer and provisioning reach each node the servers use through it, as pve_ssh_user.
+        user = Unsafe(self.node_user(config))
+        nodes = {name: {"ansible_host": Unsafe(address), "ansible_user": user}
                  for name, address in sorted(config.node_addresses.items()) if address}
         if nodes:
             children["proxmox_nodes"] = {"hosts": nodes}
@@ -292,6 +293,10 @@ class Store:
         )
         write_private(s.inventory_file, header + dump_yaml(inventory))
         self.write_secrets(config.secrets)
+
+    def node_user(self, config: Config) -> str:
+        """The user the playbooks and the UI log in to the Proxmox node as (pve_ssh_user, root by default)."""
+        return str(config.values.get("pve_ssh_user") or self.schema.by_name["pve_ssh_user"].default)
 
     def host_names(self) -> set[str]:
         """Every host and group name, for checking --limit."""

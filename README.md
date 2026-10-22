@@ -75,7 +75,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 `playbooks/site.yml` that runs all three in order:
 
 1. **`playbooks/build-installer.yml`** runs on the Proxmox nodes your servers use (inventory group
-   `proxmox_nodes`) over SSH as root: once for a storage the cluster shares, on each node for a node-local one. It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
+   `proxmox_nodes`) over SSH as root, or as a user of its own without root's privileges (optional, set up once
+   by `playbooks/prepare-node.yml`): once for a storage the cluster shares, on each node for a node-local one.
+   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
    Ubuntu's published `SHA256SUMS` after verifying Ubuntu's GPG signature on that file, and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
@@ -110,7 +112,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 You need [Docker](https://docs.docker.com/get-started/get-docker/) (on Windows, Docker Desktop with the WSL 2
 backend), a Proxmox API token with the privileges in
 [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token), root SSH access to the Proxmox
-node (the UI makes a key you add there), and free static IP addresses.
+node (the UI makes a key you add there; a [user without root's
+privileges](docs/installing.md#6-optional-a-node-user-other-than-root) works too), and free static IP
+addresses.
 
 On Windows, download [`start.ps1`](start.ps1) and run it in PowerShell; it starts the container, shows the
 setup code for the first sign-in and opens the browser:
@@ -154,7 +158,8 @@ browser. It works down to a phone's width.
 You need:
 
 - a control node (Linux or macOS) with Python 3.12 or later (what ansible-core 2.20 needs) and `git`;
-- one or more Proxmox VE 8 or 9 nodes that you can reach over SSH as `root` with a key;
+- one or more Proxmox VE 8 or 9 nodes that you can reach over SSH as `root` with a key (afterwards, optionally,
+  as a [user without root's privileges](docs/installing.md#6-optional-a-node-user-other-than-root));
 - a Proxmox API token with the privileges listed in [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token);
 - free static IP addresses on the VMs' network (or a DHCP server there), and a GitHub account with your SSH public keys on it.
 
@@ -248,7 +253,9 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `pve_api_timeout` | `60` | Seconds each Proxmox API call may take (disk allocation can be slow). |
 
 **Proxmox nodes** (group `proxmox_nodes`): each inventory host name must match the Proxmox node name, with
-`ansible_host` and `ansible_user: root`. The ISO location is set by `pve_iso_storage` (default `local`); its
+`ansible_host`; the group logs in as `pve_ssh_user` (`root` by default; see
+[docs/installing.md](docs/installing.md#6-optional-a-node-user-other-than-root) for a user without root's
+privileges). The ISO location is set by `pve_iso_storage` (default `local`); its
 folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The Ubuntu release is
 set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3
 seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.

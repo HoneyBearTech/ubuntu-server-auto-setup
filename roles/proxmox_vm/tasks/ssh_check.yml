@@ -5,6 +5,14 @@
 # fails here instead of being trusted on first use (see docs/host-keys.md). ControlPath=none makes it a new
 # connection: one reused from an earlier task (ControlPersist) wouldn't check the host key again. One error
 # names every node that didn't answer, and why.
+# Checked before it becomes the user of an SSH connection.
+- name: Check the node's SSH user
+  ansible.builtin.assert:
+    that: pve_ssh_user is match(pve_ssh_user_pattern)
+    fail_msg: pve_ssh_user must be a lowercase Linux user name (letters, digits, underscores, hyphens).
+    quiet: true
+  run_once: true
+
 - name: Note which node to reach
   ansible.builtin.set_fact:
     pve_ssh_check_node: "{{ pve_ssh_check_host }}"

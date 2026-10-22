@@ -45,7 +45,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 
 ## How a server is built
 
-### 1. The installer ISO (`build-installer.yml`, on the nodes the servers use, as root over SSH)
+### 1. The installer ISO (`build-installer.yml`, on the nodes the servers use, over SSH as `pve_ssh_user`)
 
 One inventory places VMs on the nodes of one Proxmox VE cluster: each server names its node (`pve_node`, the
 group's value by default), and one API endpoint answers for every node. The first play plans, without
@@ -63,7 +63,12 @@ connecting to any host:
 The second play runs on `pve_iso_build`. It first reaches every node over SSH with strict host-key checking,
 and stops with one message naming each node that didn't answer, before any node builds. Then each node:
 
-1. Install `xorriso` and `gpgv` on the node.
+The playbooks log in to the node as root by default. With the optional node user (`prepare-node.yml`,
+which runs once as root), they log in as a user with no sudo that can write only to its work directory and
+the ISO folders (through ACL entries), and read the ISO storage's folder from the file `prepare-node.yml`
+recorded, because `pvesm` runs for root only.
+
+1. Install `xorriso` and `gpgv` on the node (as root), or check that they are installed (as the node user).
 2. Fetch `SHA256SUMS` and its signature `SHA256SUMS.gpg` from `releases.ubuntu.com` over HTTPS, and check
    the signature with `gpgv` against the Ubuntu CD image signing key that ships with the role
    (`files/ubuntu-cdimage-keyring.gpg`); stop unless it is a good signature by the key with the pinned

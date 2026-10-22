@@ -138,6 +138,7 @@ export interface SshData {
   nodes: SshNode[];
   pending: { node: string; keys: HostKey[] } | null;
   pve_node: string;
+  node_user: string;
 }
 
 export interface ServersData {

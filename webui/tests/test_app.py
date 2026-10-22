@@ -449,9 +449,10 @@ def test_proxmox_ca(ui, monkeypatch, settings):
     assert len(ca) == 1 and ca[0]["subject"].startswith("CN=Proxmox Virtual Environment")
     r = post(ui, "/proxmox", {"action": "save-ca", "ca_pem": "junk"})
     assert r.status_code == 422 and "PEM certificate" in r.json()["ca_error"]
-    monkeypatch.setattr(ui.app_state.keys, "fetch_ca", lambda host: make_ca())
+    users = []
+    monkeypatch.setattr(ui.app_state.keys, "fetch_ca", lambda host, user: users.append(user) or make_ca())
     r = post(ui, "/proxmox", {"action": "fetch-ca"})
-    assert "Saved the CA certificate" in r.json()["message"]
+    assert "Saved the CA certificate" in r.json()["message"] and users == ["root"]
     r = post(ui, "/proxmox", {"action": "remove-ca"})
     assert "was removed" in r.json()["message"] and not settings.ca_bundle.exists()
 
@@ -626,6 +627,29 @@ def test_ssh_key_lifecycle(ui, monkeypatch):
     assert r.status_code == 403
 
 
+def test_a_node_user_other_than_root(ui, monkeypatch):
+    post(ui, "/proxmox", {"action": "save", **PROXMOX})
+    post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.2"})
+    assert get(ui, "/api/ssh").json()["node_user"] == "root"
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_ssh_user": "usas-build;id"})
+    assert r.status_code == 422 and "pve_ssh_user" in r.json()["errors"]
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_ssh_user": "usas-build"})
+    assert r.status_code == 200 and get(ui, "/api/ssh").json()["node_user"] == "usas-build"
+    text = ui.app_state.settings.inventory_file.read_text()
+    assert "pve_ssh_user: !unsafe 'usas-build'" in text and "ansible_user: !unsafe 'usas-build'" in text
+    # Every node is reached as that user.
+    config = ui.app_state.store.load()
+    config.node_addresses["pve-2"] = "10.0.0.3"
+    ui.app_state.store.save(config)
+    hosts = load_yaml(ui.app_state.settings.inventory_file.read_text())["all"]["children"]["proxmox_nodes"]["hosts"]
+    assert {host["ansible_user"] for host in hosts.values()} == {"usas-build"} and set(hosts) == {"pve-1", "pve-2"}
+    r = post(ui, "/ssh", {"action": "generate"})
+    assert "Add its public key to usas-build's authorized_keys" in r.json()["message"]
+    keys = ui.app_state.keys
+    monkeypatch.setattr(keys, "test_login", lambda host, user: f"Logged in to {user}@{host} with the UI's key.")
+    assert "usas-build@10.0.0.2" in post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
+
+
 def test_no_public_key_yet(ui):
     assert ui.get("/ssh/id_ed25519.pub").status_code == 404
 
@@ -714,10 +738,10 @@ def test_node_host_key(ui, monkeypatch):
     r = post(ui, "/ssh", {"action": "trust", "node": "pve-1", "confirm": "on"})
     assert "Trusted 10.0.0.2" in r.json()["message"] and keys.trusted("10.0.0.2") == offered
     assert get(ui, "/api/ssh").json()["nodes"][0]["trusted"][0]["fingerprint"] == offered[0].fingerprint
-    monkeypatch.setattr(keys, "test_login", lambda host: "Logged in to root@10.0.0.2 with the UI's key.")
-    assert "Logged in" in post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
+    monkeypatch.setattr(keys, "test_login", lambda host, user: f"Logged in to {user}@{host} with the UI's key.")
+    assert "Logged in to root@10.0.0.2" in post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
 
-    def failing(host):
+    def failing(host, user):
         raise KeyProblem("SSH to root@10.0.0.2 failed: Permission denied")
 
     monkeypatch.setattr(keys, "test_login", failing)

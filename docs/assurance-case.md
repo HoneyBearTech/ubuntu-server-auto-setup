@@ -22,10 +22,11 @@ is continuously checked (4).
 ## 1. Threat model
 
 **Assets**, most valuable first: root access to the servers and the Proxmox nodes (through the control
-node's SSH keys and the admin user's sudo); the Proxmox API token; the admin password (and its hash); the
-Vault password; with the container image, the web UI's password, its passkeys (their public keys and
-counters, whose integrity matters: a key added by someone else is a way in) and sessions, and the data
-volume (which holds the key, the Vault and by default the Vault password); the integrity of the installed system (the
+node's SSH keys and the admin user's sudo; with the optional node user, write access to the ISO storage
+instead of root on the nodes); the Proxmox API token; the admin password (and its hash); the Vault password;
+with the container image, the web UI's password, its passkeys (their public keys and counters, whose
+integrity matters: a key added by someone else is a way in) and sessions, and the data volume (which holds
+the key, the Vault and by default the Vault password); the integrity of the installed system (the
 ISO, the installer configuration, the authorized keys); the availability of the servers (a lockout or a
 wiped disk); the project's release artifacts, including the container image.
 
@@ -59,7 +60,7 @@ themselves; anything on the servers beyond the baseline.
 | # | Boundary | What crosses it | How it is mediated |
 | --- | --- | --- | --- |
 | B1 | Control node → Proxmox API | VM create/start/config/status calls, the API token | HTTPS with certificate verification (`pve_validate_certs`, default `true`); a token with a narrow role and privilege separation ([installing.md](installing.md#2-create-the-proxmox-api-token)); token handling hidden from output (`pve_hide_secrets`, `roles/proxmox_vm/tasks/`). |
-| B2 | Control node → Proxmox node (SSH as root) | ISO builds, seed files with the password hash | SSH with host key checking (`ansible.cfg`: `host_key_checking = true`); seed directory `0700`, files `0600`; seed ISO and directory deleted after the install (`roles/proxmox_vm/tasks/provision.yml`). |
+| B2 | Control node → Proxmox node (SSH as `pve_ssh_user`: root, or a node user set up by `prepare-node.yml`) | ISO builds, seed files with the password hash | SSH with host key checking (`ansible.cfg`: `host_key_checking = true`); seed directory `0700`, files `0600`; seed ISO and directory deleted after the install (`roles/proxmox_vm/tasks/provision.yml`). With a node user: no password, no groups, no sudo; write access through one ACL entry per ISO folder and its own `0700` work directory only; the folders recorded by root in a file the user can't change, since `pvesm` is root-only; every run checks the login user, the work directory's owner and type, and that the ISO folder is writable before it downloads anything (`roles/proxmox_node_user/`, `roles/ubuntu_release/tasks/iso_dir.yml`, `roles/installer_iso/tasks/main.yml`). |
 | B3 | Proxmox node → `releases.ubuntu.com` | The Ubuntu ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` | HTTPS; `gpgv` checks the signature on `SHA256SUMS` against Ubuntu's CD image signing key, shipped with the role and pinned by its full fingerprint (never fetched at run time); the checksum is then read from those verified bytes, the ISO is verified against it before use, and the run stops if the signature is missing or bad, is by another key, or the release isn't listed (`roles/installer_iso/tasks/main.yml`). |
 | B4 | Control node → `github.com` | Public SSH keys | HTTPS; lines filtered to public-key formats; an empty result stops the run; written into the installer configuration (`roles/proxmox_vm/templates/user-data.j2`, `roles/common/tasks/ssh_keys.yml`). |
 | B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are written as data with `to_nice_yaml` where they are free text. |
@@ -81,7 +82,8 @@ themselves; anything on the servers beyond the baseline.
 | Ports opened by `ufw_allow` | as configured | default deny; each rule explicit, optionally limited to a source network | `roles/firewall/tasks/main.yml` |
 | GitHub keys endpoint | whoever controls `github_user` | 2FA on the account (operator), key-format filter, empty-result guard | `roles/common/tasks/ssh_keys.yml`, `roles/proxmox_vm/tasks/provision.yml` |
 | Ubuntu download | network path to `releases.ubuntu.com` | HTTPS, SHA-256 verification | `roles/installer_iso/tasks/main.yml` |
-| Seed ISO in ISO storage | root on the node, Proxmox users with access to that storage | `0600`, short-lived, deleted after install | `roles/proxmox_vm/tasks/provision.yml` |
+| Seed ISO in ISO storage | root on the node, the node user (if one is set up), Proxmox users with access to that storage | `0600`, short-lived, deleted after install | `roles/proxmox_vm/tasks/provision.yml` |
+| The node user's SSH key (optional) | anything that can read the control node's or the web UI's key | no root, no sudo, no `/etc/pve`; write access to the listed ISO folders only, so a stolen key can replace installer ISOs but not take the node | `roles/proxmox_node_user/`, `playbooks/prepare-node.yml` |
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
 | The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in (password or passkey), sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `passkeys.py`, `schema.py` |
@@ -109,11 +111,14 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   role; every SSH connection is authenticated by key and host key.
 - **Open design.** The playbooks, this case and the threat model are public. Security relies on keys and
   the Vault, not on the secrecy of the design.
-- **Separation of privilege.** VM management goes through the API with a token; ISO handling uses SSH as
-  root on the node; server changes use the admin user with sudo. The token can't run commands on the node.
+- **Separation of privilege.** VM management goes through the API with a token; ISO handling uses SSH on the
+  node, as root or as a node user that can only write ISOs; server changes use the admin user with sudo.
+  The token can't run commands on the node, and the node user can't change Proxmox's configuration.
 - **Least privilege.** The API token's role lists only the privileges provisioning uses, with privilege
-  separation; the token has no password-based login; workflows get read-only tokens and raise permissions
-  per job only where needed.
+  separation; on the nodes, the optional node user (`playbooks/prepare-node.yml`) replaces root for every
+  run after one setup run, with write access to the ISO folders through ACL entries and no sudo rule at all
+  (root's privileges remain the default, so existing setups keep working); the token has no password-based
+  login; workflows get read-only tokens and raise permissions per job only where needed.
 - **Least common mechanism.** Each VM gets its own seed ISO and seed directory, removed after its install.
 - **Psychological acceptability.** One command per task (`make provision`, `make baseline`, `make keys`),
   `--check --diff` works for the baseline, and failures say what to fix. The web UI lays out every option
@@ -126,7 +131,7 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
 - **Input validation with allowlists.** Required variables are asserted before provisioning starts (a
   numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
   files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
-  user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times, sysctl names
+  user name and the node's SSH user, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times, sysctl names
   and values, notification addresses, the mail relay's host and user, the webhook URL), anchored
   with `\Z` so a trailing line break can't slip through. Keys are split on every line break and filtered to
   known public-key prefixes. The installer configuration is built as data and written with `to_nice_yaml`.
