@@ -9,3 +9,6 @@ vault_pve_api_token_secret: "00000000-0000-0000-0000-000000000000"
 # fail2ban_webhook_url: "{{ vault_fail2ban_webhook_url }}"):
 # vault_mail_relay_password: "relay-password"
 # vault_fail2ban_webhook_url: "https://ntfy.sh/your-private-topic"
+# Optional, for disk encryption (inventory: vm_disk_encryption: true and
+# vm_disk_passphrase: "{{ vault_disk_passphrase }}"); also the recovery key at the VM's console:
+# vault_disk_passphrase: "a-long-random-passphrase"

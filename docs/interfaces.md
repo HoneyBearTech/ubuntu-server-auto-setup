@@ -75,12 +75,15 @@ example shows a typical value.
 | `pve_api_timeout` | `60` | Seconds one Proxmox API request may take before it fails (the Proxmox modules' own default is 5, too short while disks are allocated). |
 | `pve_ssh_host` | `"{{ pve_node }}"` | The inventory host used to reach that node over SSH. |
 | `pve_vmid` | `""` | The VM ID (required, fixed per host). |
-| `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Disk storage and the EFI disk format (`qcow2` on directory storage). |
+| `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Storage for the VM's disk and its 4 MB EFI disk, and the EFI disk's format (`qcow2` on directory storage). |
+| `pve_tpmstate_storage` | `"{{ pve_storage }}"` | With `vm_disk_encryption`, the storage for the 4 MB vTPM state volume. On another storage than the disk, a copy of the disks' storage alone doesn't hold what unlocks them ([security.md](security.md#secure-boot-and-disk-encryption)). |
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Network bridge and optional VLAN tag. |
 | `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. |
 | `vm_cores`, `vm_sockets`, `vm_cpu_type` | `2`, `1`, `host` | CPU. |
 | `vm_memory_mb`, `vm_disk_gb` | `2048`, `32` | Memory and disk size. |
-| `vm_secure_boot` | `false` | Pre-enroll Secure Boot keys. |
+| `vm_secure_boot` | `true` | Secure Boot: the EFI disk gets Microsoft's keys pre-enrolled (`pre-enrolled-keys=1`), so the VM boots only signed code (Ubuntu's shim, GRUB and kernel; the kernel then refuses unsigned modules). New VMs only; `false` gives an EFI disk without keys. |
+| `vm_disk_encryption` | `false` | Install the root file system on LUKS2 (the `lvm` layout's volume group), with a vTPM (`tpmstate0`, TPM 2.0) that unlocks it at boot while the Secure Boot state (PCR 7) is the one measured at the VM's first boot; the passphrase stays enrolled as the recovery key. Needs `vm_secure_boot: true` and `autoinstall_storage_layout: lvm`. New VMs only. See [security.md](security.md#secure-boot-and-disk-encryption) for what it protects and what it doesn't. |
+| `vm_disk_passphrase` | `""` | The LUKS passphrase and recovery key, normally `"{{ vault_disk_passphrase }}"`: 12 to 512 printable ASCII characters, no braces. Required with `vm_disk_encryption`; hidden from all output. |
 | `vm_onboot` | `true` | Start the VM when the node boots. |
 | `vm_install_timeout` | `3600` | Seconds to wait for the installer to power off. |
 | `vm_install_poll_interval` | `20` | Seconds between checks of the VM's power state during the install. |
@@ -180,6 +183,7 @@ example shows a typical value.
 | `vault_pve_api_token_secret` | `pve_api_token_secret` | The token's secret. |
 | `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
 | `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
+| `vault_disk_passphrase` (optional) | `vm_disk_passphrase` | The disk encryption passphrase, also the recovery key at the console. |
 
 ### Commands
 

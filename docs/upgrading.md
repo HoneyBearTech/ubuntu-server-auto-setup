@@ -15,7 +15,9 @@ Back up, outside the repository:
 
 Back up your servers with Proxmox (`vzdump`, or Proxmox Backup Server) as you would anyway, and take a
 snapshot (`qm snapshot <vmid> before-baseline`) before running a new version of the baseline against a
-server that matters.
+server that matters. A backup of a VM with disk encryption includes its TPM state, so it restores to a VM
+that unlocks itself: encrypt backups that leave your control (Proxmox Backup Server's client-side
+encryption), and keep the Vault passphrase, which unlocks a restored disk whose TPM state is lost.
 
 To restore: copy the two files back into a fresh checkout of the same version, run `make deps`, and check
 the Vault opens with `ansible-vault view inventory/group_vars/all/vault.yml`.

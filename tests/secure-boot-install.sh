@@ -3,9 +3,10 @@
 # with Secure Boot and Microsoft's keys enrolled, a TPM 2.0 (swtpm) and the NoCloud seed, with the user-data
 # the proxmox_vm role renders for vm_disk_encryption. Then it boots the installed system and checks:
 #   - the firmware booted the installer and the installed system with Secure Boot on (shim, GRUB, kernel signed),
-#   - the root disk is LUKS2 with a TPM2 key slot bound to PCR 7, and boots without anyone typing a passphrase,
-#     after a reboot too,
-#   - the passphrase isn't stored anywhere on the installed disk,
+#   - the root disk is LUKS2 with a TPM2 key slot, and its first boot needs nobody to type a passphrase,
+#   - the role's first-boot tasks (roles/proxmox_vm/tasks/first_boot.yml, run here by Ansible as provisioning
+#     runs them) bind that slot to PCR 7, and later boots and reboots stay unattended,
+#   - after those tasks, no file on the installed disk holds the passphrase,
 #   - the recovery path in docs/security.md works: with the TPM slot gone the passphrase unlocks the disk at
 #     the console, and enrolling the TPM again brings back unattended boots.
 # Needs Linux with KVM, qemu-system-x86, ovmf, swtpm, xorriso, openssh-client, python3 and Ansible (the role's
@@ -56,6 +57,16 @@ import socket, sys, time
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
 s.sendall(sys.stdin.read().encode() + b"\n")
+time.sleep(1)
+EOF
+# Types the passphrase (from the environment) on the VM's screen, through QEMU's monitor.
+cat >"$W/sendkeys.py" <<'EOF'
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+for c in os.environ["DISK_PASSPHRASE"] + "\n":
+    s.sendall(("sendkey " + ("ret" if c == "\n" else c) + "\n").encode())
+    time.sleep(0.1)
 time.sleep(1)
 EOF
 # Watches the serial console for the passphrase prompt and types the passphrase (from the environment).
@@ -112,6 +123,18 @@ cat >"$W/vars.json" <<EOF
 EOF
 ANSIBLE_CONFIG="$ROOT/ansible.cfg" ansible-playbook -i localhost, -c local "$W/render.yml" -e "@$W/vars.json" \
   | sed -n '/PLAY RECAP/,$p'
+# For the test only: the installer also records PCR 7 as it measured it, to compare with the installed
+# system's (the install changes Secure Boot variables, which is why the role binds the slot after the first
+# boot). Everything else is the role's seed as rendered.
+python3 - "$W/seed/user-data" <<'EOF'
+import sys, yaml
+with open(sys.argv[1]) as f:
+    doc = yaml.safe_load(f)
+doc["autoinstall"]["late-commands"].append(
+    "curtin in-target -- tpm2_pcrread sha256:7 > /target/var/log/usas-test-installer-pcr7.txt 2>&1 || true")
+with open(sys.argv[1], "w") as f:
+    f.write("#cloud-config\n" + yaml.safe_dump(doc, width=4096))
+EOF
 xorriso -as mkisofs -quiet -output "$W/seed.iso" -volid CIDATA -joliet -rock "$W/seed/user-data" "$W/seed/meta-data"
 rm -rf "$W/seed" "$W/vars.json"
 
@@ -171,11 +194,22 @@ wait_ssh() {
 
 boot_id() { ssh_vm cat /proc/sys/kernel/random/boot_id; }
 
+# Waits for SSH; if the VM doesn't come up unattended, types the passphrase on its console to get in and
+# show why, then fails.
+wait_unattended() {
+  wait_ssh "$1" && return 0
+  echo "screendump $W/screen-stuck-$SECONDS.ppm" | python3 "$W/monitor.py" "$W/monitor.sock" || true
+  echo "Typing the passphrase on the console to find out why" >&2
+  for _ in 1 2 3; do python3 "$W/sendkeys.py" "$W/monitor.sock"; wait_ssh 120 && break; done
+  diagnose
+  exit 1
+}
+
 reboot_vm() {
   local before; before="$(boot_id)"
   ssh_vm sudo systemctl reboot || true
   sleep 15
-  wait_ssh "${1:-600}"
+  wait_unattended "${1:-600}"
   [ "$(boot_id)" != "$before" ] || { echo "ERROR: the VM didn't reboot" >&2; exit 1; }
 }
 
@@ -197,50 +231,77 @@ done
 wait_off 10
 echo "installed in $((SECONDS - start)) s"
 
+# What the installed system says about its disk, its TPM and its boots so far.
+diagnose() {
+  # shellcheck disable=SC2016 # expanded on the VM
+  ssh_vm 'set -x; cat /etc/crypttab; sudo lsinitrd -f etc/crypttab; sudo lsinitrd | grep -E "tpm2|cryptsetup" | head -20
+    sudo cryptsetup luksDump --dump-json-metadata "$(sudo blkid -t TYPE=crypto_LUKS -o device)"
+    cat /var/log/usas-test-installer-pcr7.txt; sudo tpm2_pcrread sha256:7
+    sudo journalctl -b -o short-monotonic --no-pager | grep -iE "tpm|cryptsetup|pcr|sbat|secure ?boot" | head -60
+    dpkg -l shim-signed grub-efi-amd64-signed secureboot-db 2>/dev/null | tail -3
+    sudo grep -hiE "late-commands|cryptenroll|enroll-tpm2" /var/log/installer/subiquity-server-debug.log | tail -20' || true
+}
+
+# Checks the LUKS header: two key slots (the passphrase's and the TPM's), and the TPM token's PCRs.
+check_luks() {
+  ssh_vm "sudo cryptsetup luksDump --dump-json-metadata $DEV" | python3 -c '
+import json, sys
+meta, pcrs = json.load(sys.stdin), json.loads(sys.argv[1])
+tokens = [t for t in meta["tokens"].values() if t["type"] == "systemd-tpm2"]
+assert len(meta["keyslots"]) == 2, meta["keyslots"].keys()
+assert len(tokens) == 1 and tokens[0]["tpm2-pcrs"] == pcrs, tokens
+print("LUKS2, key slots", sorted(meta["keyslots"]), "- TPM2 token on slot", tokens[0]["keyslots"], "bound to PCRs", pcrs)' "$1"
+}
+
 step "First boot from the disk: the TPM unlocks it, nobody types a passphrase"
 start_vm installed -serial "file:$W/serial-boot.log"
-wait_ssh 900
-ssh_vm 'mokutil --sb-state'
+wait_unattended 600
+ssh_vm 'mokutil --sb-state; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS'
 ssh_vm 'mokutil --sb-state' | grep -qx 'SecureBoot enabled'
 DEV="$(ssh_vm 'sudo blkid -t TYPE=crypto_LUKS -o device')"
 ssh_vm "sudo cryptsetup luksDump $DEV" | tee "$W/luksdump.txt"
-# LUKS2 with two key slots: the passphrase's and the TPM's, whose token binds it to PCR 7 alone.
-ssh_vm "sudo cryptsetup luksDump --dump-json-metadata $DEV" | python3 -c '
-import json, sys
-meta = json.load(sys.stdin)
-tokens = [t for t in meta["tokens"].values() if t["type"] == "systemd-tpm2"]
-assert len(meta["keyslots"]) == 2, meta["keyslots"].keys()
-assert len(tokens) == 1 and tokens[0]["tpm2-pcrs"] == [7], tokens
-print("LUKS2, key slots", sorted(meta["keyslots"]), "- TPM2 token on slot", tokens[0]["keyslots"], "bound to PCR 7")'
+check_luks '[]'
+diagnose
+
+step "The role's first-boot tasks bind the TPM slot to PCR 7"
+cat >"$W/first-boot.yml" <<EOF
+- name: Run the role's first-boot tasks, as provisioning does
+  hosts: all
+  gather_facts: false
+  vars_files: [$ROOT/roles/proxmox_vm/defaults/main.yml, $ROOT/roles/proxmox_vm/vars/main.yml]
+  tasks:
+    - name: First boot
+      ansible.builtin.include_tasks: $ROOT/roles/proxmox_vm/tasks/first_boot.yml
+EOF
+cat >"$W/first-boot-vars.json" <<EOF
+{"ansible_port": $SSH_PORT, "ansible_user": "sysadmin", "ansible_ssh_private_key_file": "$W/id_ed25519",
+ "ansible_ssh_common_args": "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", "vm_disk_encryption": true}
+EOF
+ANSIBLE_CONFIG="$ROOT/ansible.cfg" ansible-playbook -i "127.0.0.1," "$W/first-boot.yml" -e "@$W/first-boot-vars.json" \
+  | tee "$W/first-boot.log" | sed -n '/PLAY RECAP/,$p'
+grep -q 'failed=0' "$W/first-boot.log" || { cat "$W/first-boot.log"; exit 1; }
+check_luks '[7]'
 # shellcheck disable=SC2016 # expanded on the VM
 ssh_vm 'cat /etc/crypttab; for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
 ssh_vm 'grep -E "^[^#].*tpm2-device=auto" /etc/crypttab' >/dev/null
 ssh_vm 'sudo lsinitrd 2>/dev/null | grep -E "etc/crypttab|libtss2-tcti-device|systemd-cryptsetup$" || true'
 ssh_vm 'sudo grep -h "Secure boot" /var/log/installer/installer-journal.txt 2>/dev/null | head -2 || true'
 
-step "The passphrase is the recovery key, and no file on the disk holds it"
+step "The passphrase is the recovery key, and after the first-boot tasks no file on the disk holds it"
 ssh_vm "sudo cryptsetup open --test-passphrase --key-file=- $DEV" <"$W/passphrase"
-echo "the passphrase unlocks key slot 0"
-find_passphrase() {
-  ssh_vm 'sudo grep -rlF -f - / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev --exclude-dir=run 2>/dev/null' \
-    <"$W/passphrase"
-}
-echo "Files holding it after the install:"
-find_passphrase || echo "(none)"
-# What the role deletes right after the first boot (roles/proxmox_vm/vars/main.yml).
-for f in $(python3 -c 'import sys, yaml; print(" ".join(yaml.safe_load(open(sys.argv[1]))["provision_installer_config_copies"]))' \
-             "$ROOT/roles/proxmox_vm/vars/main.yml"); do
-  ssh_vm "sudo rm -f $f"
-done
-if find_passphrase; then
-  echo "ERROR: after the role's clean-up, the files above still hold the disk passphrase" >&2
+echo "the passphrase unlocks its key slot"
+if ssh_vm 'sudo grep -rlF -f - / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev --exclude-dir=run 2>/dev/null' \
+     <"$W/passphrase"; then
+  echo "ERROR: the files above hold the disk passphrase" >&2
   exit 1
 fi
-echo "after the role's clean-up, no file holds the passphrase"
+echo "no file holds the passphrase"
 
-step "A reboot unlocks without anyone too"
-reboot_vm
-echo "rebooted unattended"
+step "Reboots unlock with the PCR 7 binding, without anyone too"
+reboot_vm 300
+reboot_vm 300
+check_luks '[7]'
+echo "rebooted twice unattended"
 
 step "Recovery: without the TPM key slot the passphrase unlocks at the console; enrolling the TPM again restores unattended boots"
 # The kernel and the passphrase prompt go to the serial console too, where the test can answer it.

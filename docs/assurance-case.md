@@ -9,7 +9,7 @@ The top-level claim is:
 
 > **Run as documented, the playbooks install only the VMs the inventory asks for, without touching
 > existing ones; they never disclose the Vault's secrets beyond the systems that need them (the Proxmox API
-> for the token, the new server's installer for the password hash); and every server they harden ends up
+> for the token, the new server's installer for the password hash and any disk passphrase); and every server they harden ends up
 > reachable only with the authorized SSH keys, behind a default-deny firewall, with automatic security
 > updates, as stated in [security.md](security.md). Run from the container image, the web UI lets only the
 > person who set its password configure and start those runs, and never hands the secrets it holds to the
@@ -25,7 +25,8 @@ is continuously checked (4).
 node's SSH keys and the admin user's sudo); the Proxmox API token; the admin password (and its hash); the
 Vault password; with the container image, the web UI's password and sessions and the data volume (which
 holds the key, the Vault and by default the Vault password); the integrity of the installed system (the
-ISO, the installer configuration, the authorized keys); the availability of the servers (a lockout or a
+ISO, the installer configuration, the authorized keys, the signed boot chain); with disk encryption, the
+data on a VM's disk and the passphrase that is its recovery key; the availability of the servers (a lockout or a
 wiped disk); the project's release artifacts, including the container image.
 
 **Actors and what they may try:**
@@ -37,7 +38,8 @@ wiped disk); the project's release artifacts, including the container image.
 | Attacker on the VMs' network | Nothing | Impersonate a new VM to get a host key trusted; brute-force SSH on the servers; read installer data from the network. |
 | Internet attacker reaching a server | Nothing | Guess passwords, brute-force SSH, exploit exposed services, log in as root. |
 | Someone controlling the GitHub account `github_user` | The account | Add their own key to every server at the next sync. (Treated as trusted: see "Out of scope".) |
-| Another Proxmox user (non-root) | Their own Proxmox permissions | Read the seed ISO with the password hash from ISO storage. |
+| Another Proxmox user (non-root) | Their own Proxmox permissions | Read the seed ISO with the password hash (and any disk passphrase) from ISO storage; with `VM.Config.CDROM` and `VM.PowerMgmt` on an encrypted VM, boot it from other signed media to make its vTPM release the disk key. |
+| Someone with a copy of a VM's disk | A disk image, a storage snapshot or replica, a decommissioned disk | Read the server's data offline, or change its boot chain to run their code at the next boot. |
 | Upstream supply chain | What we install | A tampered ISO, a malicious Ansible collection or Python package, a compromised GitHub Action. |
 | Malicious contributor | Opening pull requests | Smuggle a backdoor into a role (an extra key, a weakened setting), exfiltrate CI credentials. |
 | A web page open in the operator's browser | Nothing | Drive the web UI through the browser: cross-site form posts (CSRF), DNS rebinding to reach `127.0.0.1`, framing the UI (clickjacking), injecting script through stored values (XSS). |
@@ -48,7 +50,8 @@ wiped disk); the project's release artifacts, including the container image.
 **Out of scope** (see [security.md](security.md#what-it-does-not-protect-against)): a compromised
 control node (for the image: the Docker host, its administrators and anyone who can read the data
 volume); someone who knows the web UI's password, or controls the browser it is used from; root on the
-Proxmox nodes; the GitHub account behind `github_user` being taken over;
+Proxmox nodes, who can read a VM's vTPM state and memory, so disk encryption doesn't keep them out; Proxmox
+backups that include a VM's TPM state; the GitHub account behind `github_user` being taken over;
 an operator using the playbooks to do harm; vulnerabilities in Ubuntu, Proxmox VE, OpenSSH or Ansible
 themselves; anything on the servers beyond the baseline.
 
@@ -60,13 +63,14 @@ themselves; anything on the servers beyond the baseline.
 | B2 | Control node → Proxmox node (SSH as root) | ISO builds, seed files with the password hash | SSH with host key checking (`ansible.cfg`: `host_key_checking = true`); seed directory `0700`, files `0600`; seed ISO and directory deleted after the install (`roles/proxmox_vm/tasks/provision.yml`). |
 | B3 | Proxmox node → `releases.ubuntu.com` | The Ubuntu ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` | HTTPS; `gpgv` checks the signature on `SHA256SUMS` against Ubuntu's CD image signing key, shipped with the role and pinned by its full fingerprint (never fetched at run time); the checksum is then read from those verified bytes, the ISO is verified against it before use, and the run stops if the signature is missing or bad, is by another key, or the release isn't listed (`roles/installer_iso/tasks/main.yml`). |
 | B4 | Control node → `github.com` | Public SSH keys | HTTPS; lines filtered to public-key formats; an empty result stops the run; written into the installer configuration (`roles/proxmox_vm/templates/user-data.j2`, `roles/common/tasks/ssh_keys.yml`). |
-| B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are written as data with `to_nice_yaml` where they are free text. |
+| B5 | Seed ISO → installer on the new VM | Hostname, network, admin user, password hash, keys, and with disk encryption the passphrase | A local CD-ROM image attached only to that VM, only during the install; no network datasource. Values from the inventory and GitHub are written as data with `to_nice_yaml` where they are free text. The passphrase goes only to the installer's RAM (`/run`) and the storage layout; its pattern is checked into a true/false so no output holds it; the installer's copy on the new disk is deleted at the first boot (`roles/proxmox_vm/templates/user-data.j2`, `tasks/provision.yml`). |
 | B6 | Control node → new VM (first SSH contact) | The VM's host key | Trust on first use: the old `known_hosts` entry for the IP is replaced with the scanned ed25519 key (`provision_manage_known_hosts`). Later port changes use the key read over the verified connection (`roles/ssh_hardening/tasks/main.yml`). |
 | B7 | Internet / LAN → servers | SSH and whatever `ufw_allow` opens | UFW default deny with rate-limited SSH; sshd public-key only, no root, `AllowUsers` optional; Fail2Ban (`roles/firewall/`, `roles/ssh_hardening/`, `roles/fail2ban/`). |
 | B8 | Contributors → `main` → releases | Code changes, release artifacts, the Docker Hub token | Protected `main` (pull request, required checks), DCO, lint and secret scanning, read-only workflow tokens, pinned actions, keyless signing and provenance (`.github/workflows/`). The Docker Hub token is a secret of the `release` environment, which only `v*` tags can deploy to, so pull requests and branches can't read it; release tags are protected from being moved or deleted. |
 | B9 | Browser → web UI | Sign-in, form values, the API token and admin password once, run requests | Published on `127.0.0.1` only; allowed host names (DNS rebinding) and HTTPS for any other name; argon2id password with a first-run setup code and throttling; server-side sessions in an `HttpOnly`, `SameSite=Strict` cookie, renewed at sign-in; a CSRF token on every form plus `Origin`/`Sec-Fetch-Site` checks; CSP, no framing; secrets never sent back (`webui/usas_web/main.py`, `auth.py`). |
 | B10 | Web UI → inventory, Vault and `ansible-playbook` | Validated values, the run's options | Values checked against the roles' own allowlist patterns (`schema.py`, read from `roles/*/vars/main.yml`) and written with `!unsafe`; secrets only in the Vault; files `0600`; `ansible-playbook`, `ssh` and `ssh-keyscan` started with argument lists; `--limit` only from inventory names; run IDs from a fixed format (`store.py`, `runner.py`, `sshkeys.py`). |
 | B12 | Guest agents (through the Proxmox API) → web UI | Each VM's addresses, OS release and host name, as the guest reports them | Read-only: `GET` calls with `VM.GuestAgent.Audit` (no command execution or file access; `VM.Monitor` on Proxmox VE 8 stays opt-in), over the verified API connection. VM IDs and node names are checked before they go into an API path. Answers are parsed by `webui/usas_web/vms.py`: IPv4 only, special-use ranges dropped, at most 16 addresses, strings stripped of control and direction characters and cut to 120 characters, host names checked against the roles' pattern. The data is display-only, labelled with its source, and shown as text by React. At most 4 agent calls at a time, 5 seconds each, 15 seconds per refresh, with caches shared by every session and negative caching of silent agents, all in a worker thread (`webui/usas_web/remote.py`). |
+| B13 | Firmware → boot chain → disk (each VM) | The VM's boot code; with disk encryption, the disk key | UEFI Secure Boot with Microsoft's keys pre-enrolled (`vm_secure_boot`, on by default): only Ubuntu's signed shim, GRUB and kernel run, and the kernel loads only signed modules; the remastered ISO keeps the signed EFI image and CI installs from it under Secure Boot (`tests/secure-boot-install.sh`). With `vm_disk_encryption`, the root file system is LUKS2 and a vTPM releases its key only while PCR 7 (the Secure Boot state and the certificates that verified the boot) matches the VM's first boot (the installer's TPM slot, bound to no PCR, is replaced by one bound to PCR 7 right after that boot, `roles/proxmox_vm/tasks/first_boot.yml`); the TPM state can live on other storage than the disks (`pve_tpmstate_storage`); a changed state stops at the passphrase prompt instead of booting. |
 | B11 | Registry (Docker Hub, or the GHCR mirror) → the operator's Docker | The container image | Built by the release workflow from a digest-pinned base and hash-pinned packages, scanned and smoke-tested, signed keylessly with cosign, with SBOM and SLSA provenance; `start.ps1 -Verify` and [verifying-releases.md](verifying-releases.md) check the signature. |
 | B12 | Servers → mail relay and webhook (optional, off by default) | Update reports and ban notices (host name, banned addresses), the relay password, the webhook URL's token | Only when the operator sets a relay or a URL. The relay password and URL come from the Vault and live on the server in root-only `0600` files; msmtp verifies the relay's certificate against the system's CAs (`tls_trust_file system`) unless `mail_relay_tls: "off"`; addresses, host, user and URL pass `\Z`-anchored allowlist patterns, fuzzed for injection (`roles/common/`, `roles/fail2ban/`, `tests/fuzz/`). |
 
@@ -79,6 +83,7 @@ themselves; anything on the servers beyond the baseline.
 | GitHub keys endpoint | whoever controls `github_user` | 2FA on the account (operator), key-format filter, empty-result guard | `roles/common/tasks/ssh_keys.yml`, `roles/proxmox_vm/tasks/provision.yml` |
 | Ubuntu download | network path to `releases.ubuntu.com` | HTTPS, SHA-256 verification | `roles/installer_iso/tasks/main.yml` |
 | Seed ISO in ISO storage | root on the node, Proxmox users with access to that storage | `0600`, short-lived, deleted after install | `roles/proxmox_vm/tasks/provision.yml` |
+| An encrypted VM's disk volume and vTPM state | the storage's administrators, backups, anyone who can attach media to the VM and start it | LUKS2; the key sealed to the vTPM under PCR 7; the passphrase only in the Vault and the short-lived seed; TPM state optionally on separate storage | `roles/proxmox_vm/templates/user-data.j2`, `roles/proxmox_vm/tasks/` |
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
 | The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in, sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `schema.py` |
@@ -95,7 +100,9 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
 
 - **Economy of mechanism.** Ubuntu's own installer, OpenSSH, UFW, Fail2Ban and unattended-upgrades, configured
   with small files; no agent, daemon or custom code on the servers. One role per concern.
-- **Fail-safe defaults.** Provisioning skips existing VMs rather than reconciling them; the ISO step stops
+- **Fail-safe defaults.** New VMs boot with Secure Boot on; an encrypted VM whose Secure Boot state
+  changed stops at the passphrase prompt rather than unlocking; disk encryption without Secure Boot is
+  refused. Provisioning skips existing VMs rather than reconciling them; the ISO step stops
   if the signature, the checksum or the release is missing; the key sync stops rather than writing an empty list;
   `ssh_hardening` stops if `ssh_allow_users` would exclude the admin user; sshd configuration is validated
   before it is installed; certificate verification is on by default; secrets are hidden from output by
@@ -122,7 +129,8 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
   files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
   user name, host names, IPv4 addresses, `ssh_allow_users`, `fail2ban_ignoreip`, Fail2Ban times, sysctl names
-  and values, notification addresses, the mail relay's host and user, the webhook URL), anchored
+  and values, notification addresses, the mail relay's host and user, the webhook URL, the disk passphrase
+  and the TPM state's storage), anchored
   with `\Z` so a trailing line break can't slip through. Keys are split on every line break and filtered to
   known public-key prefixes. The installer configuration is built as data and written with `to_nice_yaml`.
   The [fuzz targets](testing.md#fuzzing) check that no accepted value can change a file's structure. The
@@ -136,7 +144,7 @@ this kind:
 | Weakness | Countermeasures |
 | --- | --- |
 | **Hard-coded or committed credentials** (CWE-798, CWE-540) | Secrets only in a gitignored, encrypted Vault; examples hold placeholders; gitleaks scans every change and the full history; GitHub secret scanning and push protection. |
-| **Cleartext storage of sensitive information** (CWE-312, CWE-532) | The password reaches the node only as a SHA-512 crypt hash, in root-only files that are deleted after the install; `no_log` on tasks that handle the token or the hash; ansible-lint's `no-log-password` rule. |
+| **Cleartext storage of sensitive information** (CWE-312, CWE-532) | The password reaches the node only as a SHA-512 crypt hash, in root-only files that are deleted after the install; the disk passphrase only in those same files, in the installer's RAM, and in the installer's copy of its configuration inside the encrypted volume until the first boot deletes it (CI checks that no file on the installed disk holds it); `no_log` on tasks that handle the token, the hash or the passphrase, with the passphrase hidden even while debugging (the integration tests grep verbose output for it); ansible-lint's `no-log-password` rule. With disk encryption, the data on the VM's disk is encrypted at rest (LUKS2). |
 | **Cleartext transmission** (CWE-319) and **improper certificate validation** (CWE-295) | HTTPS for the API, GitHub and Ubuntu downloads, with certificate verification on by default. |
 | **Download of code without integrity check** (CWE-494) | The ISO is verified against Ubuntu's SHA-256 before use, taken from a `SHA256SUMS` whose signature by Ubuntu's pinned CD image signing key has been checked; collections and packages come from Galaxy and PyPI over HTTPS (see [dependencies.md](dependencies.md)). |
 | **OS command injection** (CWE-78) and **improper neutralization in templates** (CWE-1336) | Commands run with argument lists (`ansible.builtin.command` with `argv`), never through a shell; the installer's YAML is built as data and written with `to_nice_yaml`; key lines are filtered to public-key formats. Values that reach a configuration file or a shell command are validated against allowlist patterns, and Atheris fuzz targets check the generated user-data, sshd and Fail2Ban files on every change. |
@@ -187,7 +195,11 @@ this kind:
 - **Integration tests on every pull request**: every playbook runs against containers and a mock Proxmox
   API, and the results are checked, including what must be refused (password and root logins, an empty key
   list) and the cleanup of a failed install; every playbook must change nothing on a second run, and at
-  least 80% of role tasks must run ([testing.md](testing.md)). A weekly job remasters the real Ubuntu ISO.
+  least 80% of role tasks must run ([testing.md](testing.md)). A weekly job (and every change to the
+  installer or its configuration) remasters the real Ubuntu ISO and installs from it in a VM with Secure
+  Boot and a TPM 2.0 set up as Proxmox does, with an encrypted disk: it checks that Secure Boot is on, the
+  disk is LUKS2 with a TPM2 key slot bound to PCR 7, the VM boots and reboots without a passphrase, no file
+  on the disk holds the passphrase after provisioning, and the passphrase recovers the VM at the console.
 - **Manual end-to-end runs** for what containers can't show (a real install, reboots), as the
   [test policy](../CONTRIBUTING.md#test-policy) requires.
 - **Runtime checks inside the playbooks**: assertions on required variables, on the signature on Ubuntu's

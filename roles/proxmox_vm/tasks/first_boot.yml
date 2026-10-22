@@ -1,0 +1,40 @@
+---
+# On a new VM with disk encryption, once it has booted from its disk for the first time (unlocked by the TPM
+# key slot the installer added without PCRs).
+
+# The installer keeps root-only copies of its configuration on the new disk. They hold the disk passphrase,
+# so they go now rather than at the first baseline run (they were only ever inside the encrypted volume).
+- name: Delete the installer's copies of its configuration (they hold the disk passphrase)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ provision_installer_config_copies }}"
+  become: true
+
+- name: Find the encrypted disk
+  ansible.builtin.command:
+    argv: [blkid, -t, TYPE=crypto_LUKS, -o, device]
+  register: provision_luks_device
+  changed_when: false
+  become: true
+
+- name: Fail unless there is exactly one
+  ansible.builtin.assert:
+    that: provision_luks_device.stdout_lines | length == 1
+    fail_msg: "Expected one LUKS device on {{ inventory_hostname }}, found: {{ provision_luks_device.stdout_lines }}"
+    quiet: true
+
+# PCR 7 now holds this boot's Secure Boot state: the firmware's keys after the install's updates and the
+# certificates that verified this shim, GRUB and kernel. The TPM unlocks the disk for the new slot itself,
+# so the passphrase isn't needed here; the old, unbound TPM slot is wiped once the new one is in place.
+- name: Bind the disk's TPM key slot to the Secure Boot state (PCR 7)
+  ansible.builtin.command:
+    argv:
+      - systemd-cryptenroll
+      - --unlock-tpm2-device=auto
+      - --tpm2-device=auto
+      - --tpm2-pcrs=7
+      - --wipe-slot=tpm2
+      - "{{ provision_luks_device.stdout_lines | first }}"
+  changed_when: true
+  become: true

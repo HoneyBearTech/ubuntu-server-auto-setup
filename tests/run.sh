@@ -158,6 +158,8 @@ play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vm
   -e vm_secure_boot=false
 play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
   -e autoinstall_storage_layout=direct
+play_fails 'pve_tpmstate_storage must be a Proxmox storage ID' playbooks/provision-vms.yml --limit srv-luks \
+  -e 'pve_tpmstate_storage=local-lvm:1,version=v1.2'
 play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
   -e vm_disk_passphrase=too-short
 play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
@@ -166,11 +168,26 @@ play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --
   -e '{"vm_disk_passphrase": "long-enough-but-{braces}"}'
 
 step "provision-vms: an encrypted VM gets a vTPM, and the passphrase stays out of the output even while debugging"
+# The test server has no encrypted disk: blkid reports one and systemd-cryptenroll logs its arguments, for
+# the first-boot tasks.
+docker exec "$SRV" sh -c 'printf "#!/bin/sh\necho /dev/sda3\n" >/usr/local/sbin/blkid
+  printf "#!/bin/sh\necho \"\$*\" >>/tmp/cryptenroll.calls\n" >/usr/local/sbin/systemd-cryptenroll
+  chmod 755 /usr/local/sbin/blkid /usr/local/sbin/systemd-cryptenroll'
 play playbooks/provision-vms.yml --limit srv-luks -v --diff -e pve_hide_secrets=false
 if grep -lF test-disk-passphrase-4063 "$TEST_TMP"/play.*; then
   echo "ERROR: the disk passphrase is in the output above" >&2
   exit 1
 fi
+# After the first boot the TPM slot was bound to PCR 7, and the installer's copy of its configuration is gone.
+[ "$(docker exec "$SRV" cat /tmp/cryptenroll.calls)" = \
+  "--unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2 /dev/sda3" ] \
+  || { echo "ERROR: systemd-cryptenroll wasn't run as expected" >&2; docker exec "$SRV" cat /tmp/cryptenroll.calls; exit 1; }
+docker exec "$SRV" sh -c '! test -e /var/log/installer/autoinstall-user-data' \
+  || { echo "ERROR: the installer's copy of its configuration is still there" >&2; exit 1; }
+# Put back what the stand-in server had, for the baseline's own clean-up test.
+docker exec "$SRV" sh -c 'rm /usr/local/sbin/blkid /usr/local/sbin/systemd-cryptenroll /tmp/cryptenroll.calls
+  echo "password: \"\$6\$test\$hash\"" >/var/log/installer/autoinstall-user-data
+  chmod 0600 /var/log/installer/autoinstall-user-data'
 play --idempotent playbooks/provision-vms.yml --limit srv-luks
 play tests/verify-disk-encryption.yml
 
@@ -195,9 +212,9 @@ cat >"$TEST_TMP/enroll.expected" <<'EOF'
 # <name> <device> <key> <options>
 dm_crypt-0 UUID=1111-2222 none luks,tpm2-device=auto
 scratch UUID=3333 /dev/urandom swap
-systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 /dev/sda3
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= /dev/sda3
 dracut --regenerate-all --force
-systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 /dev/sda3
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= /dev/sda3
 dracut --regenerate-all --force
 # Unlock the root disk with the TPM at boot (set up by ubuntu-server-auto-setup).
 add_dracutmodules+=" tpm2-tss systemd-cryptsetup "

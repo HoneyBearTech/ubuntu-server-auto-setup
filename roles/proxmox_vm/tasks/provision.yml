@@ -71,7 +71,7 @@
         mode: "0600"
       delegate_to: "{{ pve_ssh_host }}"
       # The disk passphrase is in it in clear text: hidden even while debugging with pve_hide_secrets false.
-      no_log: "{{ pve_hide_secrets or vm_disk_encryption | bool }}"
+      no_log: "{{ pve_hide_secrets | bool or vm_disk_encryption | bool }}"
 
     - name: Render meta-data
       ansible.builtin.template:
@@ -126,8 +126,8 @@
           format: "{{ pve_efidisk_format }}"
           efitype: 4m
           pre_enrolled_keys: "{{ vm_secure_boot | bool }}"
-        # A virtual TPM 2.0 for unlocking the encrypted disk. Proxmox keeps its state on the VM's storage.
-        tpmstate0: "{{ {'storage': pve_storage, 'version': '2.0'} if vm_disk_encryption | bool else omit }}"
+        # A virtual TPM 2.0 for unlocking the encrypted disk. Proxmox keeps its state in a small volume.
+        tpmstate0: "{{ {'storage': pve_tpmstate_storage, 'version': '2.0'} if vm_disk_encryption | bool else omit }}"
         cpu: "{{ vm_cpu_type }}"
         sockets: "{{ vm_sockets }}"
         cores: "{{ vm_cores }}"
@@ -287,13 +287,6 @@
   ansible.builtin.wait_for_connection:
     timeout: 300
 
-# The installer keeps root-only copies of its configuration on the new disk. With encryption they hold the
-# disk passphrase, so they go now rather than at the first baseline run (they were only ever inside the
-# encrypted volume).
-- name: Delete the installer's copies of its configuration (they hold the disk passphrase)
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop: "{{ provision_installer_config_copies }}"
-  become: true
+- name: Finish the disk encryption on the running system
+  ansible.builtin.include_tasks: first_boot.yml
   when: vm_disk_encryption | bool

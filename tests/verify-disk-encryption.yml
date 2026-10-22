@@ -22,7 +22,7 @@
           - vm.config.bios == 'ovmf'
           - vm.config.machine == 'q35'
           - vm.config.efidisk0 == 'local-lvm:vm-4063-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M'
-          - vm.config.tpmstate0 == 'local-lvm:vm-4063-disk-1,size=4M,version=v2.0'
+          - vm.config.tpmstate0 == 'local-zfs:vm-4063-disk-1,size=4M,version=v2.0'
           - vm.installed
           - vm.starts == 2
           - vm.config_updates | length == 1
@@ -58,7 +58,7 @@
           - ai['late-commands'][2:] == ['curtin in-target -- sh /run/usas/enroll-tpm2.sh', 'rm -rf /run/usas']
           - doc.write_files | map(attribute='permissions') | list == ['0600', '0700']
           - files['/run/usas/disk-key'] == passphrase
-          - script is search('systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 ')
+          - script is search('systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= ')
           - script is search('dracut --regenerate-all --force')
         quiet: true
 

@@ -43,6 +43,14 @@
     quiet: true
   when: vm_disk_encryption | bool
 
+# It goes into the VM's tpmstate0 option ("<storage>:1,version=v2.0").
+- name: Check the TPM state's storage
+  ansible.builtin.assert:
+    that: pve_tpmstate_storage is match(pve_storage_id_pattern)
+    fail_msg: "{{ inventory_hostname }}: pve_tpmstate_storage must be a Proxmox storage ID (letters, digits, dots, underscores, hyphens)."
+    quiet: true
+  when: vm_disk_encryption | bool
+
 # The passphrase is checked into a plain true/false first, so no output of this task can hold it.
 - name: Check the disk passphrase's format
   ansible.builtin.set_fact:

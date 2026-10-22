@@ -11,19 +11,22 @@
 {#  Disk encryption: the lvm layout with a password puts the volume group on LUKS2. The passphrase and the
     script below are also written (by cloud-init, top-level write_files) to /run in the installer's own RAM,
     never to the installed disk. curtin in-target binds that /run into the installed system, where the script
-    adds a TPM2 key slot bound to PCR 7 (Secure Boot state) and sets up unlocking with the TPM at boot. The
+    adds a TPM2 key slot and sets up unlocking with the TPM at boot. The slot isn't bound to any PCR yet: the
+    install itself changes Secure Boot variables (dbx updates, shim's SBAT level), so PCR 7 at the first boot
+    differs from the installer's. tasks/first_boot.yml binds it to PCR 7 once the VM has booted. The
     passphrase keeps its key slot as the recovery key. #}
 {%   set layout = layout | combine({'password': vm_disk_passphrase | string}) %}
 {%   set enroll_script %}
 #!/bin/sh
-# Binds the root disk's LUKS key to the TPM and Secure Boot state, at the end of the install.
+# Adds a TPM2 key slot to the root disk (no PCRs yet; first_boot.yml binds it to PCR 7) and sets up
+# unlocking with the TPM at boot, at the end of the install.
 set -eu
 device=$(blkid -t TYPE=crypto_LUKS -o device)
 if [ "$(echo "$device" | wc -w)" -ne 1 ]; then
   echo "expected one LUKS device, found: $device" >&2
   exit 1
 fi
-systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 "$device"
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= "$device"
 # Its crypttab line (curtin writes "<name> UUID=<uuid> none luks") gets tpm2-device=auto.
 awk -v source="UUID=$(blkid -s UUID -o value "$device")" '
   /^[[:space:]]*(#|$)/ || $2 != source { print; next }

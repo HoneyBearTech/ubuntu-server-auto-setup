@@ -54,5 +54,9 @@ all:
           vm_cores: 4
           vm_memory_mb: 8192
           vm_disk_gb: 64
+          # Encrypt this VM's disk, unlocked at boot by a vTPM (see docs/security.md, "Secure Boot and disk
+          # encryption"); the Vault passphrase stays the recovery key.
+          # vm_disk_encryption: true
+          # vm_disk_passphrase: "{{ vault_disk_passphrase }}"
           ufw_allow:
             - { port: "5432", proto: tcp, from: 10.10.10.0/24, comment: postgres }

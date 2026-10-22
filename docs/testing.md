@@ -13,7 +13,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
-| Real installer ISO | Ubuntu's real signature on `SHA256SUMS`, checked with the shipped key, and the remastering of the real Ubuntu 26.04 live-server ISO | `tests/real-iso.sh` | weekly, and on pull requests that change the installer roles |
+| Real installer ISO | Ubuntu's real signature on `SHA256SUMS`, checked with the shipped key, and the remastering of the real Ubuntu 26.04 live-server ISO; then an install from it in QEMU with Secure Boot and a TPM 2.0, with an encrypted disk, and boots of the result | `tests/real-iso.sh`, then `tests/secure-boot-install.sh` (Linux with KVM) | weekly, and on pull requests that change the installer roles or the installer's configuration |
 | Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy), and before every release with the [pre-release checklist](release-checklist.md) |
 
 ## The integration tests
@@ -36,11 +36,25 @@ run; your own `~/.ssh` is never touched. The steps:
    timeout, and the second run changes nothing. Then it must refuse a `SHA256SUMS` whose checksum was
    swapped (bad signature), one with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one,
    and a malformed fingerprint.
-2. **provision-vms** for `srv-01`: the VM is created with the expected hardware, both ISOs attached, the
-   install awaited, the ISOs detached, the boot order set to disk only, the seed deleted, the VM started and
-   its host key trusted. A second run skips the existing VM.
+2. **provision-vms** for `srv-01`: the VM is created with the expected hardware (an EFI disk with Secure
+   Boot keys pre-enrolled, no TPM), both ISOs attached, the install awaited, the ISOs detached, the boot
+   order set to disk only, the seed deleted, the VM started and its host key trusted. A second run, with
+   `vm_secure_boot: false`, skips the existing VM and changes nothing on it. The mock stores `efidisk0` and
+   `tpmstate0` the way Proxmox does and refuses what Proxmox would (keys on a 2 MB EFI disk, an EFI disk
+   without OVMF, an unknown TPM version).
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
+   **Disk encryption** for `srv-luks`: without Secure Boot, with a layout other than `lvm`, with a malformed
+   TPM state storage or with passphrases that are short, hold a line break or braces, the run must stop
+   before anything is created. Then a run with `-v --diff` and `pve_hide_secrets: false`, whose output must
+   not contain the passphrase, and `tests/verify-disk-encryption.yml`: the VM has `tpmstate0` (TPM 2.0, on
+   `pve_tpmstate_storage`), the passphrase never reached the API, and the user-data the installer got (the
+   test node's `xorriso` keeps a copy, `tests/fixtures/xorriso`) has the LUKS layout, `tpm2-tools`, the key
+   file and enrollment script in the installer's `/run`, and the late commands, while `srv-01`'s has none of
+   them. On the stand-in server (with `blkid` and `systemd-cryptenroll` stubbed for the run), the first-boot
+   tasks must have bound the TPM slot to PCR 7 and deleted the installer's copy of its configuration. The enrollment script itself then runs in a container with stubbed `blkid`, `systemd-cryptenroll`
+   and `dracut`: it must add `tpm2-device=auto` to the root disk's crypttab line only, write the dracut
+   drop-in, and change nothing on a second run.
 4. **baseline** in check mode (`--check --diff`) on the fresh `srv-01`, also with a new SSH port and with an
    admin user that doesn't exist yet: nothing may fail and nothing may change. Then the baseline twice,
    then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW rules and policies, the Fail2Ban jail,
@@ -77,6 +91,31 @@ run; your own `~/.ssh` is never touched. The steps:
 UFW rate-limits new SSH connections (6 in 30 seconds per address), and in the tests every connection comes
 from Docker's one address, so the script pauses between some steps.
 
+## Secure Boot and disk encryption in a VM
+
+What the containers can't show, `tests/secure-boot-install.sh` checks in a real VM, on a CI runner with
+KVM, after `tests/real-iso.sh` has remastered the real ISO (`.github/workflows/installer-iso.yml`). The VM is
+set up as Proxmox sets up the role's VMs: q35, OVMF with Secure Boot and Microsoft's keys enrolled, a
+TPM 2.0 (swtpm), a VirtIO SCSI disk and the two CD-ROMs, with the seed rendered from the role's own
+template for an encrypted disk. It installs unattended, then:
+
+- the installed system reports Secure Boot enabled (the shim, GRUB and kernel from the remastered ISO, and
+  then the installed ones, were verified by the firmware);
+- the root disk is LUKS2 with two key slots, the passphrase's and a TPM2 token, and crypttab has
+  `tpm2-device=auto`; the first boot needs nobody to type a passphrase;
+- the role's `first_boot.yml`, run by Ansible as provisioning runs it, binds the TPM slot to PCR 7 alone,
+  and two reboots after that stay unattended;
+- the passphrase opens the volume, and after `first_boot.yml` no file on the disk holds it;
+- if a boot stops at the passphrase prompt, the test types the passphrase through QEMU's monitor and prints
+  what the system says about its crypttab, initramfs, LUKS header, PCR 7 (also as the installer measured
+  it) and boot log, then fails;
+- recovery as [security.md](security.md#secure-boot-and-disk-encryption) describes it: with the TPM slot
+  wiped, the VM stops at the passphrase prompt (on the serial console here, where the test types the
+  passphrase), comes up, and enrolling the TPM again brings back unattended boots.
+
+The VM's serial logs, screen dumps and the LUKS header dump are kept as a workflow artifact when it fails.
+It needs about 3 GB for the ISO and up to 8 GB for the VM's disk, and takes 20 to 30 minutes.
+
 ## Fuzzing
 
 `tests/fuzz/` holds [Atheris](https://github.com/google/atheris) fuzz targets for the places where
@@ -86,7 +125,7 @@ filters and tests, and checks a property for every input the role would accept:
 
 | Target | What it renders | Property |
 | --- | --- | --- |
-| `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words |
+| `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words; with disk encryption, the passphrase is exactly the layout's password and the key file's content and nowhere else, the enrollment script is the same for every input, and every passphrase the role accepts is 12 to 512 printable ASCII characters without braces |
 | `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm` and `common` | both roles agree; every entry is one trimmed line of the input that starts with a key type |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |

@@ -18,6 +18,9 @@ pve_node: ""                   # Proxmox node name
 pve_ssh_host: "{{ pve_node }}" # inventory host used to reach that node over SSH
 pve_storage: local-lvm         # storage for the VM disks
 pve_efidisk_format: raw        # raw for LVM/ZFS/Ceph, qcow2 for directory storage
+# Storage for the vTPM's state (vm_disk_encryption). Somewhere other than pve_storage keeps a copy of the
+# disks' storage alone from holding what unlocks them.
+pve_tpmstate_storage: "{{ pve_storage }}"
 pve_bridge: vmbr0
 pve_vlan: ""                   # VLAN tag, empty for none
 pve_vmid: ""                   # required, fixed per host so reruns can find the VM

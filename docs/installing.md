@@ -13,6 +13,11 @@ and the ISO files the playbooks create. For a shorter walk-through, see the [qui
   password prompt), and its API reachable over HTTPS (port 8006) from the control node.
 - **Storage**: about 6 GB in the node's ISO storage (`local`, `/var/lib/vz/template/iso`) for the
   Ubuntu ISO and its remastered copy, and room on the VM storage (`local-lvm` by default) for each disk.
+  Every new VM also gets a 4 MB EFI disk on that storage (its Secure Boot keys and boot entries); a VM with
+  disk encryption gets a 4 MB TPM state volume as well, on `pve_tpmstate_storage` (the same storage unless
+  you set another). Both must be storages that allow disk images; on directory storage set
+  `pve_efidisk_format: qcow2`. If the TPM state goes to another storage, the token's permissions must cover
+  it too (the `pveum acl modify /` line below does).
 - **Network**: a static IP address, gateway and DNS servers for every new VM, on a bridge (`vmbr0`) the
   control node can reach over SSH.
 - **A GitHub account** with your SSH public keys (`https://github.com/<user>.keys`), protected with
@@ -122,6 +127,12 @@ cp inventory/hosts.example.yml inventory/hosts.yml
 Every variable is described in [interfaces.md](interfaces.md) and the README's
 [configuration section](../README.md#configuration); each role's `defaults/main.yml` has the full list.
 
+New VMs boot with Secure Boot (`vm_secure_boot: true`): the firmware runs only Ubuntu's signed boot chain,
+and the kernel loads only signed modules. Set `vm_secure_boot: false` for a VM that needs an unsigned
+kernel or out-of-tree modules (some DKMS drivers). To encrypt a VM's disk, unlocked at boot by a virtual
+TPM, set `vm_disk_encryption: true` and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"` for it (or
+for the group), after reading [what that protects](security.md#secure-boot-and-disk-encryption).
+
 ## 4. Create the Vault
 
 ```sh
@@ -131,7 +142,9 @@ ansible-vault encrypt inventory/group_vars/all/vault.yml
 ```
 
 It holds `vault_admin_password`, `vault_pve_api_token_id` (the token's name only, `automation`) and
-`vault_pve_api_token_secret`. The file is gitignored even when encrypted. Keep the Vault password in your
+`vault_pve_api_token_secret`, and `vault_disk_passphrase` if you encrypt VM disks (a long random one, for
+example from `openssl rand -base64 24`: it is the recovery key you may have to type at a VM's console, so
+keep a copy in your password manager too). The file is gitignored even when encrypted. Keep the Vault password in your
 password manager; pass it with `ARGS=--ask-vault-pass`, or keep it in a file outside the checkout (mode
 `0600`) and use `ARGS="--vault-password-file <file>"`. Change things later with
 `ansible-vault edit inventory/group_vars/all/vault.yml`.
