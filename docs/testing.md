@@ -23,9 +23,9 @@ leaves the machine except the container image builds:
 
 | Real system | Stand-in |
 | --- | --- |
-| Two Proxmox VE nodes of one cluster (SSH as root, ISO storage) | two Debian containers from `tests/images/pve-node`, `pve-test` with SSH on `127.0.0.1:2211` and `pve-test-2` on `2212`. Each has its own `local` storage folder; a Docker volume mounted at the same path in both stands in for the cluster's shared NFS storage (`synology-nfs`) |
+| Two Proxmox VE nodes of one cluster (SSH as root, ISO storage) | two Debian containers from `tests/images/pve-node`, `pve-test` with SSH on `127.0.0.1:2211` and `pve-test-2` on `2212`. Each has its own `local` storage folder; a Docker volume mounted at the same path in both stands in for the cluster's shared NFS storage (`synology-nfs`). Their `xorriso` keeps a copy of each seed's user-data for the network checks |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
-| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`, for a cluster of the two nodes with storages per node (`/nodes/<node>/storage`; `usb-iso` only on `pve-test`). A VM lives on the node it was created on, and calls for it must name that node. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`, for a cluster of the two nodes with storages per node (`/nodes/<node>/storage`; `usb-iso` only on `pve-test`). A VM lives on the node it was created on, and calls for it must name that node. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. Once an installed VM runs, its guest agent lists one interface per network card with the card's MAC address; VM 4063's `net0` has a DHCP lease, the others only link-local addresses, and VM 4066's agent may not be asked. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
 
@@ -48,13 +48,20 @@ run; your own `~/.ssh` is never touched. The steps:
    isn't created.
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
+   Then the networks: `srv-dhcp` (`net_mode: dhcp`) is provisioned with the address its guest agent reports
+   and reached there, and a rerun finds it again without changes; `srv-vlan` gets a VLAN on `net0` and two
+   more cards, and `tests/verify-network.yml` checks each card's Proxmox setting and the installer's netplan
+   configuration (every card matched by its MAC address, one default route). No DHCP lease, an agent the
+   token may not ask, options smuggled into a card, an unknown card key, a second default route and a
+   repeated MAC address must each stop the run with a message.
 4. **baseline** in check mode (`--check --diff`) on the fresh `srv-01`, also with a new SSH port and with an
    admin user that doesn't exist yet: nothing may fail and nothing may change. Then the baseline twice,
    then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW rules and policies, the Fail2Ban jail,
    the sudoers file, the timezone, automatic updates, the removed installer answers file, exactly the
    published key and the extra key in `authorized_keys`, and password and root logins refused. A check run
    on the finished server must report no changes.
-5. **Key sync**: a key that is no longer published is removed; an empty key list is refused rather than
+5. **Key sync**: the baseline reaches `srv-dhcp` at the address its guest agent reports, without changes; a
+   key that is no longer published is removed; an empty key list is refused rather than
    emptying `authorized_keys`.
 6. **Port change** to 2222: the firewall opens the new port before sshd moves, the old rule is removed,
    Fail2Ban follows, and a rerun on the new port changes nothing.

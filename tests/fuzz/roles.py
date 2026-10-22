@@ -67,9 +67,9 @@ def role_vars(role):
     return yaml.safe_load((ROOT / "roles" / role / "vars" / "main.yml").read_text())
 
 
-def set_fact_expression(path, var):
-    """The Jinja expression a set_fact task in a role assigns to var."""
-    return NATIVE.from_string(_set_fact_task(path, var)["ansible.builtin.set_fact"][var].strip())
+def set_fact_expression(path, var, last=False):
+    """The Jinja expression a set_fact task in a role assigns to var (the last such task if last)."""
+    return NATIVE.from_string(_set_fact_task(path, var, last)["ansible.builtin.set_fact"][var].strip())
 
 
 def set_fact_vars(path, var):
@@ -78,12 +78,49 @@ def set_fact_vars(path, var):
     return {name: NATIVE.from_string(str(value).strip()) for name, value in task_vars.items()}
 
 
-def _set_fact_task(path, var):
+def set_fact_raw_vars(path, var, last=False):
+    """The task vars of the set_fact task that assigns var, as written (render them with render())."""
+    return _set_fact_task(path, var, last).get("vars") or {}
+
+
+def render(value, context):
+    """Renders a task value the way Ansible does: every string in it is a template, evaluated to a native value."""
+    if isinstance(value, str):
+        if "{{" not in value and "{%" not in value:  # not a template: Ansible keeps it as it is ("" included)
+            return value
+        return NATIVE.from_string(value.strip()).render(context)
+    if isinstance(value, list):
+        return [render(v, context) for v in value]
+    if isinstance(value, dict):
+        return {k: render(v, context) for k, v in value.items()}
+    return value
+
+
+def assert_conditions(path, name):
+    """The conditions of the assert task with this name, compiled. Ansible checks them in order and fails at the
+    first one that is false, or that can't be evaluated."""
     for task in _walk(yaml.safe_load((ROOT / path).read_text())):
-        facts = task.get("ansible.builtin.set_fact") or {}
-        if var in facts:
-            return task
-    raise KeyError(f"no set_fact for {var} in {path}")
+        if task.get("name") == name:
+            that = task["ansible.builtin.assert"]["that"]
+            return [NATIVE.compile_expression(c.strip()) for c in ([that] if isinstance(that, str) else that)]
+    raise KeyError(f"no assert task {name!r} in {path}")
+
+
+def accepted(conditions, context):
+    """Whether an assert task with these conditions passes."""
+    try:
+        return all(bool(condition(**context)) for condition in conditions)
+    except Exception:  # noqa: BLE001 (Ansible fails the task on any error in a condition)
+        return False
+
+
+def _set_fact_task(path, var, last=False):
+    """The (first, or last) set_fact task that assigns var."""
+    tasks = [task for task in _walk(yaml.safe_load((ROOT / path).read_text()))
+             if var in (task.get("ansible.builtin.set_fact") or {})]
+    if not tasks:
+        raise KeyError(f"no set_fact for {var} in {path}")
+    return tasks[-1] if last else tasks[0]
 
 
 def _walk(tasks):
@@ -134,3 +171,13 @@ def ipv4(fdp):
     if fdp.ConsumeIntInRange(0, 9) == 0:
         return from_alphabet(fdp, "0123456789.\n :", 16)
     return ".".join(str(fdp.ConsumeIntInRange(0, 255)) for _ in range(4))
+
+
+def mac(fdp):
+    """Mostly valid MAC addresses (sometimes multicast), sometimes malformed, sometimes empty."""
+    choice = fdp.ConsumeIntInRange(0, 5)
+    if choice == 0:
+        return ""
+    if choice == 1:
+        return from_alphabet(fdp, "0123456789abcdefABCDEF:,= \n", 20)
+    return ":".join(f"{fdp.ConsumeIntInRange(0, 255):02{'x' if fdp.ConsumeBool() else 'X'}}" for _ in range(6))

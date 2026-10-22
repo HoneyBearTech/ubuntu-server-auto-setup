@@ -86,12 +86,34 @@ be tagged; replace them with yours.
   ```
 
 - [ ] A second run skips the VM ("VM 9001 already exists; skipping install") and reports `changed=0`.
+- [ ] **DHCP**, if the release touches networking: a second test VM (`test-02`, VM ID `9002`) with
+  `net_mode: dhcp`, no `ansible_host` and a `net_mac`, on a network with a DHCP server. Provisioning prints
+  "test-02 has <address> from DHCP on net0", and that is the address the DHCP server leased to `net_mac`.
+  The baseline then connects to it, in the same `make site` run and again with `make baseline` on its own.
+  On Proxmox VE 9 the token's `VM.GuestAgent.Audit` is enough; without it, the run stops naming that
+  privilege:
+
+  ```bash
+  qm config 9002 | grep -E '^(net0|agent):'   # net0: virtio=<net_mac>,bridge=...; agent: enabled=1
+  qm guest cmd 9002 network-get-interfaces | grep -i -A8 '<net_mac>'   # its ipv4 address
+  ```
+
+- [ ] **An extra network card on a VLAN**, if the release touches networking: `test-01` with
+  `vm_extra_nics: [{bridge: <bridge>, vlan: <tag>, mode: static, address: <address>, prefix: <prefix>}]` on a
+  VLAN the bridge carries (`bridge-vlan-aware yes`). The VM has `net1` with that tag, and in the VM the card
+  whose MAC address is `net1`'s has the address and comes up after a reboot; the default route still goes
+  through `net0`, and SSH answers on both addresses (the firewall's rules apply to every card):
+
+  ```bash
+  qm config 9001 | grep -E '^net[0-9]:'       # net1: virtio=<mac>,bridge=<bridge>,tag=<tag>
+  ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
+  ```
 
 ## Several nodes
 
 On a cluster of two nodes (the owner's: `hephaestus` and `hyve`; replace them with yours), with a second
-disposable server `test-02` (VM ID `9002`, address `192.0.2.11`) placed on the other node: `pve_node: hyve`
-on `test-02`, the group's `pve_node` left at `hephaestus`, both nodes in `proxmox_nodes` with their host keys
+disposable server `test-03` (VM ID `9003`, address `192.0.2.12`) placed on the other node: `pve_node: hyve`
+on `test-03`, the group's `pve_node` left at `hephaestus`, both nodes in `proxmox_nodes` with their host keys
 pinned ([host-keys.md](host-keys.md#clustered-nodes)).
 
 - [ ] **Shared storage, one build.** With `pve_iso_storage` the shared `<iso-storage>`, delete the remastered
@@ -105,20 +127,20 @@ pinned ([host-keys.md](host-keys.md#clustered-nodes)).
 - [ ] **Local storage, one build per node.** With `-e pve_iso_storage=local`, the plan says `built by` each
   node for its own `local`, and `pvesm list local --content iso | grep autoinstall` finds the ISO on both.
   A second run reports `changed=0`.
-- [ ] **A limit leaves a node out.** `make build-installer LIMIT=test-02 ARGS="-e pve_iso_storage=local"`
-  reports `local on hyve: skipped, --limit leaves its node out`; with `LIMIT=test-02,hyve` it builds there.
-- [ ] **A wrong node name is refused before anything is created.** With `pve_node: Hyve` on `test-02`,
-  `make provision` stops with `pve_node isn't a node in this cluster for 1 host(s): test-02 ('Hyve', did you
+- [ ] **A limit leaves a node out.** `make build-installer LIMIT=test-03 ARGS="-e pve_iso_storage=local"`
+  reports `local on hyve: skipped, --limit leaves its node out`; with `LIMIT=test-03,hyve` it builds there.
+- [ ] **A wrong node name is refused before anything is created.** With `pve_node: Hyve` on `test-03`,
+  `make provision` stops with `pve_node isn't a node in this cluster for 1 host(s): test-03 ('Hyve', did you
   mean hyve)`, listing the cluster's nodes, and `qm list` on both nodes shows no new VM. Put `hyve` back.
 - [ ] **An unpinned node is named before anything is built.** Remove `hyve`'s entry from the control node's
   `known_hosts` (`ssh-keygen -R <hyve's address>`): `make build-installer ARGS="-e pve_iso_storage=local"`
   stops with `Node hyve (...): its SSH host key isn't in known_hosts`, before any node builds. Pin it again,
   comparing the fingerprint with `hyve`'s console.
-- [ ] **Each VM on its node.** `make provision LIMIT=test-02` creates VM `9002` on `hyve` (`qm config 9002`
+- [ ] **Each VM on its node.** `make provision LIMIT=test-03` creates VM `9003` on `hyve` (`qm config 9003`
   works there, not on `hephaestus`), the install completes, and no seed ISO or seed folder is left on `hyve`.
   A second run skips it and reports `changed=0`.
 - [ ] **Web UI.** After **Test the connection**, the Servers page offers both nodes in each row's node
-  dropdown (Default first); setting `test-02` to `hyve` writes `pve_node: hyve` for it. The SSH key page
+  dropdown (Default first); setting `test-03` to `hyve` writes `pve_node: hyve` for it. The SSH key page
   lists both nodes with their own address, scan, trust and login test; the overview's SSH step is done only
   when both are trusted. The Run page shows `<iso-storage>` built once by `hephaestus` (or each node for
   `local`), and a `build-installer` run from the UI matches it.
@@ -238,10 +260,10 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] Delete the test VMs and any seed ISO a stopped run left behind:
 
   ```bash
-  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM
-  qm stop 9002; qm destroy 9002 --purge     # on hyve
+  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
+  qm stop 9003; qm destroy 9003 --purge     # on hyve
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
-  rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-02
+  rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03
   ```
 
 - [ ] Remove the test keys: any key added to the GitHub account for the run, the test image's key from

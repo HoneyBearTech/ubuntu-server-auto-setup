@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stands in for xorriso on the test node: keeps a copy of each NoCloud seed's user-data in /srv/seed-copies
+# (tests/verify-network.yml reads its network section; the role deletes the seed itself), then runs xorriso.
+for arg in "$@"; do
+  case "$arg" in
+    */seed-*/user-data)
+      copy="/srv/seed-copies/$(basename "$(dirname "$arg")")"
+      mkdir -p "$copy" && cp "$arg" "$copy/user-data"
+      ;;
+  esac
+done
+exec /usr/bin/xorriso "$@"
