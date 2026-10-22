@@ -110,6 +110,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- `make build-installer` retries fetching `SHA256SUMS` and its signature when the connection fails (a TLS
+  handshake timing out at releases.ubuntu.com stopped the run), with a 30-second timeout instead of 10.
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
   container image examples.
 
