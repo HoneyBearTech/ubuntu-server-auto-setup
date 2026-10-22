@@ -86,6 +86,28 @@ be tagged; replace them with yours.
   ```
 
 - [ ] A second run skips the VM ("VM 9001 already exists; skipping install") and reports `changed=0`.
+- [ ] **DHCP**, if the release touches networking: a second test VM (`test-02`, VM ID `9002`) with
+  `net_mode: dhcp`, no `ansible_host` and a `net_mac`, on a network with a DHCP server. Provisioning prints
+  "test-02 has <address> from DHCP on net0", and that is the address the DHCP server leased to `net_mac`.
+  The baseline then connects to it, in the same `make site` run and again with `make baseline` on its own.
+  On Proxmox VE 9 the token's `VM.GuestAgent.Audit` is enough; without it, the run stops naming that
+  privilege:
+
+  ```bash
+  qm config 9002 | grep -E '^(net0|agent):'   # net0: virtio=<net_mac>,bridge=...; agent: enabled=1
+  qm guest cmd 9002 network-get-interfaces | grep -i -A8 '<net_mac>'   # its ipv4 address
+  ```
+
+- [ ] **An extra network card on a VLAN**, if the release touches networking: `test-01` with
+  `vm_extra_nics: [{bridge: <bridge>, vlan: <tag>, mode: static, address: <address>, prefix: <prefix>}]` on a
+  VLAN the bridge carries (`bridge-vlan-aware yes`). The VM has `net1` with that tag, and in the VM the card
+  whose MAC address is `net1`'s has the address and comes up after a reboot; the default route still goes
+  through `net0`, and SSH answers on both addresses (the firewall's rules apply to every card):
+
+  ```bash
+  qm config 9001 | grep -E '^net[0-9]:'       # net1: virtio=<mac>,bridge=<bridge>,tag=<tag>
+  ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
+  ```
 
 ## baseline
 
@@ -202,7 +224,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] Delete the test VMs and any seed ISO a stopped run left behind:
 
   ```bash
-  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM
+  qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01
   ```

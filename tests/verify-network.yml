@@ -1,0 +1,93 @@
+---
+- name: Verify the network cards of the VMs through the API
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the DHCP server's card (net_mac set) and that its guest agent was asked
+      vars:
+        vm: "{{ verify_api.json.data.vms['4063'] }}"
+        agent_calls: "{{ verify_api.json.data.requests | selectattr('path', 'equalto', agent_path) | list }}"
+        agent_path: /nodes/pve-test/qemu/4063/agent/network-get-interfaces
+      ansible.builtin.assert:
+        that:
+          - vm.config.net0 == 'virtio=02:00:00:00:40:63,bridge=vmbr0'
+          - "'net1' not in vm.config"
+          - vm.config.agent == 'enabled=1'
+          - agent_calls | length >= 2
+          - vm.status == 'running'
+
+    - name: Check the cards of the server with VLANs (MAC addresses derived, net1 and net2 added)
+      vars:
+        config: "{{ verify_api.json.data.vms['4064'].config }}"
+      ansible.builtin.assert:
+        that:
+          - config.net0 is match('virtio=BC:24:11:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2},bridge=vmbr0,tag=10\Z')
+          - config.net1 is match('virtio=BC:24:11:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2},bridge=vmbr1,tag=20,mtu=9000\Z')
+          - config.net2 is match('e1000=BC:24:11:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2},bridge=vmbr2\Z')
+          - "'net3' not in config"
+
+- name: Verify the network configuration the installer got
+  hosts: proxmox_nodes
+  gather_facts: false
+  vars:
+    vms: "{{ hostvars['localhost'].verify_api.json.data.vms }}"
+  tasks:
+    - name: Read the copies of the seeds' user-data (tests/fixtures/xorriso keeps them)
+      ansible.builtin.slurp:
+        src: /srv/seed-copies/seed-{{ item }}/user-data
+      loop: [srv-dhcp, srv-vlan]
+      register: verify_seeds
+
+    - name: Check the DHCP server's network section
+      vars:
+        autoinstall: "{{ (verify_seeds.results[0].content | b64decode | from_yaml).autoinstall }}"
+        expected:
+          primary:
+            match: {macaddress: "02:00:00:00:40:63"}
+            dhcp4: true
+            dhcp6: false
+            dhcp-identifier: mac
+            nameservers: {addresses: [10.10.10.1], search: []}
+      ansible.builtin.assert:
+        that:
+          - autoinstall.network.version == 2
+          - autoinstall.network.ethernets == expected
+          - "'qemu-guest-agent' in autoinstall.packages"
+        fail_msg: "{{ autoinstall.network | to_json }}"
+
+    - name: Check the network section of the server with VLANs (each card matched by its MAC address)
+      vars:
+        ethernets: "{{ (verify_seeds.results[1].content | b64decode | from_yaml).autoinstall.network.ethernets }}"
+        macs: "{{ ['net0', 'net1', 'net2'] | map('extract', vms['4064'].config) | map('regex_search', '([0-9A-F]{2}:){5}[0-9A-F]{2}')
+                  | map('lower') | list }}"
+        expected:
+          primary:
+            match: {macaddress: "{{ macs[0] }}"}
+            dhcp4: false
+            dhcp6: false
+            addresses: [127.0.0.1/24]
+            routes: [{to: default, via: 10.10.10.1}]
+            nameservers: {addresses: [10.10.10.1], search: []}
+          net1:
+            match: {macaddress: "{{ macs[1] }}"}
+            dhcp4: false
+            dhcp6: false
+            addresses: [10.20.0.64/24]
+            mtu: 9000
+            optional: true
+          net2:
+            match: {macaddress: "{{ macs[2] }}"}
+            dhcp4: true
+            dhcp6: false
+            dhcp-identifier: mac
+            dhcp4-overrides: {use-routes: false, use-dns: false}
+            optional: true
+      ansible.builtin.assert:
+        that: ethernets == expected
+        fail_msg: "{{ ethernets | to_json }}"
