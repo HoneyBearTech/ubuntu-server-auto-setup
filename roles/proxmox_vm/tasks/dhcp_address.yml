@@ -87,7 +87,7 @@
 - name: Fail unless the guest agent reported an address
   ansible.builtin.assert:
     that: pve_dhcp_leases | length > 0
-    fail_msg: "{{ pve_dhcp_forbidden if pve_dhcp_agent.status == 403 else pve_dhcp_no_lease }}"
+    fail_msg: "{{ (pve_dhcp_forbidden if pve_dhcp_agent.status == 403 else pve_dhcp_no_lease) ~ pve_dhcp_new_vm_hint }}"
     quiet: true
   vars:
     <<: *pve_dhcp_leases
@@ -100,6 +100,11 @@
       {{ net_dhcp_timeout }} seconds. Check that a DHCP server answers on that card's bridge and VLAN, and that
       qemu-guest-agent runs in the VM. Proxmox said:
       {{ pve_dhcp_agent.json.message | default(pve_dhcp_agent.msg | default(pve_dhcp_agent.status)) | trim }}
+    # Right after the install, the new VM's host key isn't trusted yet, and later runs skip the VM.
+    pve_dhcp_new_vm_hint: >-
+      {{ '' if not pve_dhcp_new_vm | default(false) else ' VM ' ~ pve_vmid ~ ' is installed, but its SSH host key
+      was never trusted, and later runs skip it: delete it and run again, or pin its key ("When a key or
+      certificate changes" in docs/host-keys.md).' }}
 
 - name: Use the address DHCP gave net0 as ansible_host
   ansible.builtin.set_fact:

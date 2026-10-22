@@ -205,7 +205,9 @@ system get. Unless `ansible_host` is set, provisioning waits for the installed s
 `qemu-guest-agent` package, enabled on the VM) to report the address of the card with `net0`'s MAC address,
 up to `net_dhcp_timeout` seconds, prints it, and uses it as `ansible_host` for the rest of the run. The
 baseline playbook does the same when it runs on its own. The API token needs `VM.GuestAgent.Audit` on
-Proxmox VE 9 or `VM.Monitor` on Proxmox VE 8 for that ([installing.md](installing.md#2-create-the-proxmox-api-token)).
+Proxmox VE 9 or `VM.Monitor` on Proxmox VE 8 for that ([installing.md](installing.md#2-create-the-proxmox-api-token));
+provisioning checks it before it creates such a VM, because a VM whose address can't be read after the install
+never has its host key trusted and must be deleted and created again.
 Only an IPv4 address that matches `provision_ipv4_pattern` and isn't link-local is used: the guest reports it,
 so it is treated as untrusted. The new VM's host key is trusted for that address right after the install;
 if DHCP later gives the server another address, SSH refuses it until its key is in `known_hosts` for the new
@@ -292,7 +294,7 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 
 | System | From | Protocol and authentication | What for |
 | --- | --- | --- | --- |
-| Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). |
+| Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for a new server with `net_mode: dhcp`, check first that the token may ask its guest agent (`/access/permissions`); for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature. `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails; any answer from the server, an error included, is final | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
