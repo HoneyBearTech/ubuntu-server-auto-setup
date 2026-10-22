@@ -100,11 +100,14 @@
           as root) with '{{ pve_iso_storage }}' in proxmox_node_user_iso_storages, or set pve_ssh_user back to root.
         quiet: true
 
+# stat fails (Permission denied) when the node user can't reach the folder at all, as with an NFS export that
+# doesn't let its UID in: that is reported below with the rest.
 - name: Look at the ISO folder
   ansible.builtin.stat:
     path: "{{ pve_iso_dir }}"
     get_checksum: false
   register: ubuntu_release_iso_dir
+  failed_when: false
   delegate_to: "{{ ubuntu_release_node | default(inventory_hostname) }}"
 
 - name: Fail unless the node user can write to the ISO folder
@@ -114,7 +117,10 @@
       - ubuntu_release_iso_dir.stat.writeable | default(false)
     fail_msg: >-
       {{ pve_iso_dir }} on {{ ubuntu_release_node | default(inventory_hostname) }}
-      {{ "isn't writable by " ~ pve_ssh_user if ubuntu_release_iso_dir.stat.isdir | default(false) else "isn't a folder" }}.
-      {{ 'Run playbooks/prepare-node.yml again, or check the file server for a network storage.'
-         if pve_ssh_user != 'root' else 'Is the storage mounted and writable?' }}
+      {{ ("can't be reached by " ~ pve_ssh_user ~ " (" ~ ubuntu_release_iso_dir.msg | default('') ~ ")")
+         if ubuntu_release_iso_dir.stat is not defined
+         else ("isn't writable by " ~ pve_ssh_user) if ubuntu_release_iso_dir.stat.isdir | default(false)
+         else "isn't a folder" }}.
+      {{ 'Run playbooks/prepare-node.yml again; for an NFS or CIFS storage, its export must let that user write,
+         or keep pve_ssh_user root for it.' if pve_ssh_user != 'root' else 'Is the storage mounted and writable?' }}
     quiet: true

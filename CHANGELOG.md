@@ -119,6 +119,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   handshake timing out at releases.ubuntu.com stopped the run), with a 30-second timeout instead of 10.
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
   container image examples.
+- `prepare-node.yml` writes a test file as the node user in each ISO folder and stops, naming the folder and
+  the user's UID, if it can't: an NFS export that doesn't let that UID write (Synology's defaults, for example)
+  accepted the ACL entry, so the run reported success and the build failed later. That build now says the
+  folder can't be reached by the node user instead of a bare "Permission denied". docs/installing.md says
+  what the export needs, and that root stays the way for a share that won't let the user in.
 
 ## [0.4.0] - 2026-10-21
 

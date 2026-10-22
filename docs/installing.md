@@ -247,9 +247,13 @@ Once it works, the control node no longer needs root's key on the node: remove i
 `authorized_keys` (rerunning `prepare-node.yml` then needs the `--become` form). Leave sshd's
 `PermitRootLogin` alone on a cluster, whose nodes reach each other as root over SSH.
 
-**Network storage.** On an NFS or CIFS storage the ACL may not take, because the file server decides who may
-write: the playbook stops and says so. Give the user's UID write access on the file server (or mount the
-share so that it has it), or keep that storage out of `proxmox_node_user_iso_storages`.
+**Network storage.** On an NFS or CIFS storage the file server decides who may write, whatever ACL the node
+sets: an NFS export that squashes or doesn't map other users (Synology's defaults, for example) accepts the ACL
+entry and still refuses the user. The playbook writes a test file as the user in each ISO folder and stops,
+naming the folder, if it can't. Either let the user's UID (`id -u usas-build` on the node; the same on every
+node that shares the storage) write on the file server, or keep that storage out of
+`proxmox_node_user_iso_storages` and keep `pve_ssh_user` at `root` for an inventory that builds there: root is
+still the way for such a share.
 
 **By hand.** The same, as root on the node, for the `local` storage:
 
