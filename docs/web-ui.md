@@ -64,6 +64,48 @@ docker exec usas rm /data/auth.json && docker restart usas && docker logs usas
 Sessions end after 2 hours without activity, after 12 hours in any case, when you sign out, and when the
 container restarts.
 
+### Passkeys
+
+Once signed in with the password, you can add **passkeys** on the account page (**Account** in the
+sidebar): a passkey signs you in with your device's screen lock, a password manager or a security key
+instead of the password. Name it (such as the laptop or password manager it is in), enter the current
+password, and confirm on the device. The page lists your passkeys with when each was added and last used,
+and removes them; removing one also signs out the sessions that signed in with it. On the sign-in page,
+**Sign in with a passkey** sits next to the password form.
+
+The password keeps working unless you turn on **Require a passkey** on the account page, which needs at
+least one passkey. Then the sign-in page offers only passkeys, the password is refused without being
+checked, and sessions that signed in with the password are signed out. Changing the password still works.
+
+Every passkey must verify you (a PIN, a fingerprint or a face, not just a touch), and the UI keeps only each
+passkey's public key, in `passkeys.json` in the data volume.
+
+**Lost every passkey?** Delete the passkeys file; the password works again at once, no restart needed. Your
+settings, the Vault and the SSH key stay as they are:
+
+```sh
+docker exec usas rm /data/passkeys.json
+```
+
+If you have forgotten the password too, also delete `auth.json` and restart, as above.
+
+**Where passkeys work.** Browsers offer passkeys only on a secure page, and a passkey belongs to one host
+name:
+
+- On the same machine, open the UI at `http://localhost:<port>` (as `start.ps1` and the commands above
+  do). That works without any setting, on any port. At `http://127.0.0.1:<port>` the page explains that
+  passkeys belong to `localhost` and doesn't offer them: they aren't valid for an IP address.
+- From another machine, the UI needs HTTPS under a host name, and that name in `USAS_PUBLIC_URL`, such as
+  `USAS_PUBLIC_URL=https://usas.example.lan` (with the port if it isn't 443). Passkeys are then made for
+  `usas.example.lan` and accepted only from exactly that address; the name is added to the allowed host
+  names. Passkeys made for `localhost` don't work there, and the other way round, so add new ones after
+  you set it. The host name comes from this setting, never from the request.
+
+On a plain-HTTP page other than localhost the passkey buttons are hidden and the page says why. To get
+HTTPS, use one of the setups in [exposing it](#exposing-it-beyond-localhost): a reverse proxy with a
+certificate from your own CA or a public one (Caddy, nginx, Traefik), or an SSH tunnel, which keeps the
+address `http://localhost:<port>` and so needs no `USAS_PUBLIC_URL` at all.
+
 ## The interface
 
 ![The run page in the dark theme: a provisioning run that succeeded, with its options and the coloured Ansible log](images/webui-run-dark.png)
@@ -167,6 +209,7 @@ directories):
 | `ssh/known_hosts` | The trusted host keys: the Proxmox node's, and each new VM's (added by provisioning). |
 | `pve-ca.pem`, `ca-bundle.pem` | The cluster CA you saved, and that CA together with the public ones. |
 | `auth.json` | The UI password's argon2id hash. |
+| `passkeys.json` | The passkeys' public keys, IDs, names and signature counters, and whether a passkey is required. |
 | `webui.json` | The cluster's name and nodes from the last connection test, for the node dropdown. |
 | `runs/` | The run history: one `.json` and one `.log` per run. |
 
@@ -219,6 +262,7 @@ The container reads these environment variables; the defaults suit the documente
 | `USAS_SECURE_COOKIES` | `auto` | `auto` marks the session cookie `Secure` (and names it `__Host-usas_session`) when the request came over HTTPS; `true` always does. |
 | `USAS_TRUSTED_PROXIES` | (none) | Addresses of a reverse proxy whose `X-Forwarded-Proto` and `X-Forwarded-For` headers are trusted. |
 | `USAS_SESSION_HOURS` | `12` | The longest a session lasts. |
+| `USAS_PUBLIC_URL` | (none: `http://localhost` on any port) | The address the UI is opened at, `https://host[:port]`: passkeys belong to its host name and are accepted only from it ([passkeys](#passkeys)). It must use a host name and HTTPS (unless it is `localhost`); the name is added to `USAS_ALLOWED_HOSTS`. |
 | `USAS_PORT` | `8080` | The port inside the container. |
 | `USAS_VERSION` | the image's version | The version in the page footer. Release images set it from their tag; images you build yourself say `dev`. |
 
@@ -234,8 +278,18 @@ What it does to protect them:
 - **Sign-in required** for everything except the health check. One password, stored as an argon2id hash
   (`auth.json`); failed attempts are slowed down (after 5, each failure doubles the wait, up to 15
   minutes). The first password needs the setup code from the log.
+- **Passkeys** (optional, WebAuthn with py_webauthn): added only by a signed-in session that enters the
+  password again; each challenge is random, tied to the session, used once and valid for 5 minutes; a
+  response counts only from the UI's own origin and for its host name (`USAS_PUBLIC_URL`, or `localhost`),
+  with user verification, and with a signature counter that goes up when the authenticator keeps one.
+  Failed passkey sign-ins count towards the same slow-down as wrong passwords. With **Require a passkey**,
+  the password doesn't sign in at all.
+- **The log** records every sign-in and failed sign-in with the client's address (and the passkey's
+  name, or why a passkey was refused), and passkeys being added, removed or required:
+  `docker logs usas`.
 - **Sessions** are random 256-bit IDs kept in memory, in an `HttpOnly`, `SameSite=Strict` cookie (also
-  `Secure` over HTTPS). Signing in issues a new ID; changing the password signs out every other session.
+  `Secure` over HTTPS). Signing in issues a new ID; changing the password signs out every other session,
+  removing a passkey the other sessions that used it, and requiring a passkey those that used the password.
 - **CSRF**: every post carries the session's token in an `X-CSRF-Token` header (a page on another site
   can't set that header without the server's permission, which it never gives), and requests whose
   `Origin` or `Sec-Fetch-Site` header says they came from another site are refused. The API answers no
@@ -264,20 +318,25 @@ What it does to protect them:
   file system, no capabilities and `no-new-privileges`.
 
 What it doesn't protect against: anyone with access to the Docker host or the data volume (they have the
-key, the Vault and, by default, its password); someone who knows the UI password; a browser extension or
+key, the Vault and, by default, its password); someone who knows the UI password (while passkeys aren't
+required) or holds an unlocked device with one of its passkeys; a browser extension or
 malware in the browser you use it from; and everything the playbooks themselves don't protect against
 ([security.md](security.md#what-it-does-not-protect-against)).
 
 ### Exposing it beyond localhost
 
 Don't publish the port on a network unless you have to. Anyone who can reach it can try to sign in, and
-the UI has a single password, no second factor and no accounts. If you need to reach it from another
-machine, prefer an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 docker-host`) or a VPN to the Docker host.
+the UI has no accounts and, unless you require a passkey, a password that can be guessed (slowly). If you
+need to reach it from another machine, prefer an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 docker-host`) or
+a VPN to the Docker host. Through the tunnel the address stays `http://localhost:8080`, so passkeys work
+as they do on the Docker host.
 
 If you do publish it, put it behind a reverse proxy that serves HTTPS, then:
 
 - add the proxy's host name to `USAS_ALLOWED_HOSTS` (the UI refuses other names over plain HTTP);
 - set `USAS_TRUSTED_PROXIES` to the proxy's address, so the UI sees the original scheme and client address;
+- set `USAS_PUBLIC_URL` to the address you open, such as `https://usas.example.lan`, to use passkeys there
+  (then [require a passkey](#passkeys), so the password alone can't sign in from the network);
 - publish the container's port only to the proxy, not on `0.0.0.0`;
 - consider the proxy's own authentication (client certificates or single sign-on) as a second factor.
 
@@ -302,8 +361,12 @@ For reference:
 | --- | --- | --- |
 | `/healthz` | GET | `ok`; the container's health check. No sign-in. |
 | `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/vms`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
-| `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version and the theme. |
+| `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version, the theme, and whether passkeys are registered or required. |
 | `/api/setup`, `/api/login`, `/api/logout`, `/api/account` | POST | First-run password, sign-in, sign-out, password change. |
+| `/api/account` | GET | The passkeys (name, when added and last used, never the key), whether one is required, and their host name. |
+| `/api/passkeys/register-options`, `/api/passkeys/register` | POST | Add a passkey: the options for `navigator.credentials.create()` (needs the name and the current password), then the browser's answer. |
+| `/api/passkeys/login-options`, `/api/passkeys/login` | POST | Sign in with a passkey: the options for `navigator.credentials.get()`, then the browser's answer. |
+| `/api/passkeys/remove`, `/api/passkeys/require` | POST | Remove a passkey; turn "Require a passkey" on or off. |
 | `/api/theme` | POST | Remember the theme (`dark`, `light` or `system`) for this browser. |
 | `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
 | `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, and whether the playbooks support them. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. Read-only. |
@@ -323,8 +386,8 @@ Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms ar
 
 - One Proxmox node per inventory (the VMs are created on it; the API can be any node of the cluster),
   IPv4 only, as the playbooks.
-- One password, no accounts or second factor. Passkeys were considered and are on the
-  [roadmap](roadmap.md); they need a stable host name, which a localhost tool doesn't have.
+- One user, no accounts. Passkeys replace the password rather than adding a second step to it; they work
+  on `http://localhost` or under the host name in `USAS_PUBLIC_URL`, not at an IP address.
 - One run at a time, and sessions don't survive a restart of the container.
 - The VMs page only lists the cluster's VMs; running playbooks against VMs picked there is planned.
 - It needs JavaScript (any current browser).
@@ -336,6 +399,12 @@ Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms ar
   `USAS_ALLOWED_HOSTS` (and serve it over HTTPS).
 - **"Cross-site request refused" or "The form expired"**: reload the page and send the form again. Browser
   extensions that strip the `Origin` header cause the first.
+- **No "Sign in with a passkey" button, or "Passkeys need a secure page"**: open the UI at
+  `http://localhost:<port>`, or over HTTPS at the address in `USAS_PUBLIC_URL` ([passkeys](#passkeys)).
+- **"The passkey was used on another site" or "couldn't be verified"**: the log says why
+  (`docker logs usas`). Usually the address you opened isn't exactly `USAS_PUBLIC_URL` (the scheme, the
+  host name and the port must all match), or the passkey was made for another host name.
+- **Locked out with "Require a passkey" on**: delete `passkeys.json` ([passkeys](#passkeys)).
 - **The page says "The web UI's app isn't built"**: you are running the UI from a checkout without
   building the app. Run `make app` (or `npm ci` and `npm run build` in `webui/frontend`); `make ui` does it
   for you. The container image always has it.

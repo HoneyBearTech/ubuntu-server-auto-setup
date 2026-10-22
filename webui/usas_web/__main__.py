@@ -28,6 +28,12 @@ def main() -> None:
             flush=True,
         )
     logging.getLogger("uvicorn.access").addFilter(_QuietHealthChecks())
+    # Sign-ins (and failed ones) and passkey changes, next to uvicorn's own lines.
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    ui_log = logging.getLogger("usas_web")
+    ui_log.addHandler(handler)
+    ui_log.setLevel(logging.INFO)
     uvicorn.run(
         app,
         host=settings.host,

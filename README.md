@@ -338,8 +338,9 @@ Each release's notes list the exact ansible-core and collection versions its che
   the installer's own copy of the answers (`/var/log/installer/autoinstall-user-data`) from the server.
 - **Keep the web UI on localhost.** It can create VMs and change SSH and firewall settings everywhere, and
   its data volume holds a root SSH key and the API token. The documented command publishes it on
-  `127.0.0.1` only; anyone who can reach it can try to sign in. Use a strong password, back up the volume
-  like a secret, and see [docs/web-ui.md](docs/web-ui.md#security) before exposing it.
+  `127.0.0.1` only; anyone who can reach it can try to sign in. Use a strong password (or require a
+  passkey), back up the volume like a secret, and see [docs/web-ui.md](docs/web-ui.md#security) before
+  exposing it.
 - What this project does and doesn't protect against is in [docs/security.md](docs/security.md).
 
 ## Previous version

@@ -1,7 +1,8 @@
 // Browser tests of the web UI (e2e/), in Chromium with real layout: keyboard use, focus, live regions and
 // axe-core. They need the server, the mock Proxmox API and a fresh data directory, which tests/webui-browser.sh
 // starts before it runs them (see docs/testing.md). "flow" sets the UI up by keyboard and leaves a signed-in
-// session for "pages", which checks every page (and the VMs page in more detail, in vms.spec.ts).
+// session for "pages", which checks every page (and the VMs page in more detail, in vms.spec.ts); "passkeys"
+// adds a passkey with a virtual authenticator and signs in with it.
 import { defineConfig, devices } from "@playwright/test";
 
 const url = process.env.USAS_URL;
@@ -28,5 +29,7 @@ export default defineConfig({
   projects: [
     { name: "flow", testMatch: "flow.spec.ts" },
     { name: "pages", testMatch: /(pages|vms)\.spec\.ts/, dependencies: ["flow"], use: { storageState: STATE } },
+    // Requiring a passkey signs out the session "pages" uses, so this runs after it.
+    { name: "passkeys", testMatch: "passkeys.spec.ts", dependencies: ["pages"] },
   ],
 });
