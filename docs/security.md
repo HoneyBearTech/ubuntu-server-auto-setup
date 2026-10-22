@@ -53,6 +53,15 @@ and in [web-ui.md](web-ui.md#security).
 - The Proxmox API token needs only the privileges listed in [installing.md](installing.md#2-create-the-proxmox-api-token)
   (no `Sys.*`, no user or permission management, no `VM.Console`), on a dedicated user with privilege
   separation.
+- For a server with `net_mode: dhcp` and no `ansible_host`, the address Ansible connects to is the one the
+  VM's guest agent reports for the card with `net0`'s MAC address. It is used only if it is a plain IPv4
+  address (not link-local), and SSH host key checking still applies: a fresh VM's key is trusted once, right
+  after its install, and later runs need the key already in `known_hosts`. To leave the guest out of it,
+  reserve the address on the DHCP server and set it as `ansible_host`.
+- Every network value (bridges, VLAN tags, MAC addresses, MTUs, addresses, prefixes, gateways and the keys
+  of `vm_extra_nics`) is checked against `\Z`-anchored patterns before a VM is created, so none can add an
+  option to a Proxmox network card or a key to the installer's network configuration (fuzzed in
+  `tests/fuzz/fuzz_user_data.py`).
 
 **Baseline** (on every server in `ubuntu_servers`, whether this project installed it or not)
 

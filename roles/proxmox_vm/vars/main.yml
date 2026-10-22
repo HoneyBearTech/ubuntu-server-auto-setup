@@ -4,3 +4,13 @@
 provision_username_pattern: '^[a-z_][a-z0-9_-]{0,31}\Z'
 provision_hostname_pattern: '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z'
 provision_ipv4_pattern: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\Z'
+provision_bridge_pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}\Z'
+provision_vlan_pattern: '^(409[0-4]|40[0-8][0-9]|[1-3][0-9]{3}|[1-9][0-9]{0,2})\Z'
+provision_prefix_pattern: '^([1-9]|[12][0-9]|3[0-2])\Z'
+provision_mtu_pattern: '^(57[6-9]|5[89][0-9]|[6-9][0-9]{2}|[1-8][0-9]{3}|9[01][0-9]{2}|920[0-9]|921[0-6])\Z'
+# A unicast MAC address (the lowest bit of the first byte is clear).
+provision_mac_pattern: '^[0-9A-Fa-f][02468ACEace](:[0-9A-Fa-f]{2}){5}\Z'
+provision_net_modes: [static, dhcp]
+provision_nic_modes: [static, dhcp, none]
+provision_nic_models: [virtio, e1000, e1000e, vmxnet3, rtl8139]
+provision_nic_keys: [mode, bridge, vlan, model, mac, mtu, address, prefix, gateway]

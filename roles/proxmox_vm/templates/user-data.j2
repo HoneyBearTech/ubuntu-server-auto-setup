@@ -6,6 +6,36 @@
 {% set sudoers = '/target/etc/sudoers.d/90-ansible-' ~ admin_user %}
 {% set layout = {'name': autoinstall_storage_layout, 'sizing-policy': 'all'}
      if autoinstall_storage_layout == 'lvm' else {'name': autoinstall_storage_layout} %}
+{# One entry per network card, matched by its MAC address (provision_nics, built in tasks/main.yml): net0 is
+   "primary", the others are named like their Proxmox cards. DHCP identifies the card by its MAC address, so an
+   address reserved for it is the one the installer and the installed system both get. Only net0 may take the
+   default route and DNS servers from DHCP. #}
+{% set net = namespace(ethernets={}) %}
+{% for nic in provision_nics %}
+{%   set eth = {'match': {'macaddress': nic.mac | lower}, 'dhcp4': nic.mode == 'dhcp', 'dhcp6': false} %}
+{%   if nic.mode == 'dhcp' %}
+{%     set eth = eth | combine({'dhcp-identifier': 'mac'}) %}
+{%     if not loop.first %}
+{%       set eth = eth | combine({'dhcp4-overrides': {'use-routes': false, 'use-dns': false}}) %}
+{%     endif %}
+{%   elif nic.mode == 'static' %}
+{%     set eth = eth | combine({'addresses': [nic.address ~ '/' ~ nic.prefix]}) %}
+{%     if nic.gateway | string | length > 0 %}
+{%       set eth = eth | combine({'routes': [{'to': 'default', 'via': nic.gateway | string}]}) %}
+{%     endif %}
+{%   endif %}
+{%   if loop.first and (nic.mode == 'static' or net_dns or net_search) %}
+{%     set eth = eth | combine({'nameservers': {'addresses': net_dns, 'search': net_search}}) %}
+{%   endif %}
+{%   if nic.mtu | string | length > 0 %}
+{%     set eth = eth | combine({'mtu': nic.mtu | int}) %}
+{%   endif %}
+{%   if not loop.first %}
+{%     set eth = eth | combine({'optional': true}) %}
+{%   endif %}
+{%   set net.ethernets = net.ethernets | combine({('primary' if loop.first else nic.key): eth}) %}
+{% endfor %}
+{% set packages = (autoinstall_packages + ['qemu-guest-agent']) | unique if net_mode == 'dhcp' else autoinstall_packages %}
 {% set autoinstall = {
      'version': 1,
      'interactive-sections': [],
@@ -13,18 +43,12 @@
      'keyboard': {'layout': autoinstall_keyboard_layout},
      'source': {'id': autoinstall_source_id},
      'refresh-installer': {'update': false},
-     'network': {'version': 2, 'ethernets': {'primary': {
-       'match': {'name': net_interface_match},
-       'dhcp4': false,
-       'dhcp6': false,
-       'addresses': [ansible_host ~ '/' ~ net_prefix],
-       'routes': [{'to': 'default', 'via': net_gateway}],
-       'nameservers': {'addresses': net_dns, 'search': net_search}}}},
+     'network': {'version': 2, 'ethernets': net.ethernets},
      'storage': {'layout': layout},
      'identity': {'hostname': inventory_hostname_short, 'realname': admin_realname,
                   'username': admin_user, 'password': provision_password_hash},
      'ssh': {'install-server': true, 'allow-pw': false, 'authorized-keys': provision_ssh_keys},
-     'packages': autoinstall_packages,
+     'packages': packages,
      'updates': autoinstall_updates,
      'late-commands': [
        "echo '" ~ admin_user ~ " ALL=(ALL:ALL) NOPASSWD: ALL' > " ~ sudoers,

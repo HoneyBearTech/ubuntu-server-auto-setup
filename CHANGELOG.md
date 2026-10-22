@@ -8,6 +8,29 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- **DHCP** for new VMs: `net_mode: dhcp` (per host or for a group; the default stays `static`). The installer
+  configures the first network card with DHCP, and once the installed system boots, provisioning asks its
+  QEMU guest agent for the address and uses it as `ansible_host` for the rest of the run, printing it; the
+  baseline playbook does the same when run on its own. It waits up to `net_dhcp_timeout` seconds (300) and
+  says what to check if no address comes. The API token needs `VM.GuestAgent.Audit` on Proxmox VE 9 or
+  `VM.Monitor` on Proxmox VE 8 for this; with an address reserved on the DHCP server for `net_mac` and set
+  as `ansible_host`, the agent isn't asked at all.
+- **More network cards and VLANs**: `vm_extra_nics` adds `net1` and up, each with its bridge, VLAN tag,
+  model, MAC address, MTU and a static address, DHCP or no address; `pve_vlan` already tags `net0`. Each
+  card gets a fixed MAC address (`net_mac`, a card's `mac`, or one derived from the host name and VM ID, so a
+  VM created again keeps it) and the installed system matches cards by MAC address, not by interface name.
+  Exactly one card may have the default route; every network value is checked before anything is created.
+  The firewall's rules apply to every card (docs/interfaces.md, Networks).
+
+### Changed
+
+- The installer matches the first network card by its MAC address instead of the interface name pattern
+  `net_interface_match`, which is no longer used. New VMs get a MAC address derived from their host name and
+  VM ID instead of a random one; existing VMs are untouched.
+- `pve_bridge` and `pve_vlan` are now checked (a bridge name, a VLAN tag 1-4094) before a VM is created.
+
 ### Fixed
 
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
