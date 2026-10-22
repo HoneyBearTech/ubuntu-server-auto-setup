@@ -185,6 +185,18 @@ play playbooks/baseline.yml --limit srv-01 --tags ssh_keys
 play tests/verify-baseline.yml
 cool_down
 
+step "baseline: a published key that is also an extra key is installed once, and a rerun changes nothing"
+dup_keys="$TEST_TMP/dup-keys.json"
+printf '{"admin_extra_ssh_keys": ["%s also-extra"]}\n' "$(cut -d' ' -f1-2 "$TEST_TMP/id_ed25519.pub")" >"$dup_keys"
+play playbooks/baseline.yml --limit srv-01 --tags ssh_keys -e "@$dup_keys"
+play --idempotent playbooks/baseline.yml --limit srv-01 --tags ssh_keys -e "@$dup_keys"
+keys_file="$(docker exec "$SRV" cat /home/sysadmin/.ssh/authorized_keys)"
+if [ "$(printf '%s\n' "$keys_file" | wc -l)" -ne 1 ] || ! grep -q also-extra <<<"$keys_file"; then
+  echo "ERROR: the duplicated key isn't in authorized_keys exactly once" >&2
+  exit 1
+fi
+cool_down
+
 step "baseline: an empty key list is refused instead of wiping authorized_keys"
 play_fails 'refusing to touch authorized_keys' playbooks/baseline.yml --limit srv-01 --tags ssh_keys \
   -e github_user= -e '{"admin_extra_ssh_keys": []}'

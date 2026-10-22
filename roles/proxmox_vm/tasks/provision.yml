@@ -31,9 +31,15 @@
 
 - name: Collect the authorized keys
   ansible.builtin.set_fact:
+    # Each key once, by its type and key material: a key both on GitHub and in admin_extra_ssh_keys (the web
+    # UI's key can be a published one) would otherwise make authorized_key report a change on every run.
+    # The later entry wins, so an extra key's comment is kept.
+    provision_ssh_keys: "{{ dict(provision_ssh_keys_listed | map('split') | map('batch', 2) | map('first') | map('join', ' ')
+      | zip(provision_ssh_keys_listed)).values() | list }}"
+  vars:
     # One key per line: the GitHub file and the extra keys are split on every line break, so no entry can
     # carry a second line into authorized_keys or the installer configuration.
-    provision_ssh_keys: "{{ ((pve_github_keys.content | default('')) ~ '\n' ~ (admin_extra_ssh_keys | join('\n'))).splitlines()
+    provision_ssh_keys_listed: "{{ ((pve_github_keys.content | default('')) ~ '\n' ~ (admin_extra_ssh_keys | join('\n'))).splitlines()
       | map('trim') | select('match', '^(ssh-|ecdsa-|sk-)') | list }}"
 
 - name: Fail if there are no SSH keys
