@@ -209,7 +209,8 @@ play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
-play --idempotent playbooks/provision-vms.yml --limit srv-01
+# Changed settings don't reach a VM that exists: it is skipped, not reconfigured.
+play --idempotent playbooks/provision-vms.yml --limit srv-01 -e vm_secure_boot=false
 
 step "provision-vms: a VM on the second node, created through that node's API path, its seed ISO on that node"
 play playbooks/provision-vms.yml --limit srv-two
@@ -230,6 +231,75 @@ step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml
 
+step "provision-vms: disk encryption needs Secure Boot, the lvm layout and a usable passphrase"
+play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+  -e vm_secure_boot=false
+play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+  -e autoinstall_storage_layout=direct
+play_fails 'pve_tpmstate_storage must be a Proxmox storage ID' playbooks/provision-vms.yml --limit srv-luks \
+  -e 'pve_tpmstate_storage=local-lvm:1,version=v1.2'
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e vm_disk_passphrase=too-short
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e '{"vm_disk_passphrase": "long-enough-passphrase\n"}'
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e '{"vm_disk_passphrase": "long-enough-but-{braces}"}'
+
+step "provision-vms: an encrypted VM gets a vTPM, and the passphrase stays out of the output even while debugging"
+# The test server has no encrypted disk: blkid reports one and systemd-cryptenroll logs its arguments, for
+# the first-boot tasks.
+docker exec "$SRV" sh -c 'printf "#!/bin/sh\necho /dev/sda3\n" >/usr/local/sbin/blkid
+  printf "#!/bin/sh\necho \"\$*\" >>/tmp/cryptenroll.calls\n" >/usr/local/sbin/systemd-cryptenroll
+  chmod 755 /usr/local/sbin/blkid /usr/local/sbin/systemd-cryptenroll'
+play playbooks/provision-vms.yml --limit srv-luks -v --diff -e pve_hide_secrets=false
+if grep -lF test-disk-passphrase-4069 "$TEST_TMP"/play.*; then
+  echo "ERROR: the disk passphrase is in the output above" >&2
+  exit 1
+fi
+# After the first boot the TPM slot was bound to PCR 7, and the installer's copy of its configuration is gone.
+[ "$(docker exec "$SRV" cat /tmp/cryptenroll.calls)" = \
+  "--unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2 /dev/sda3" ] \
+  || { echo "ERROR: systemd-cryptenroll wasn't run as expected" >&2; docker exec "$SRV" cat /tmp/cryptenroll.calls; exit 1; }
+docker exec "$SRV" sh -c '! test -e /var/log/installer/autoinstall-user-data' \
+  || { echo "ERROR: the installer's copy of its configuration is still there" >&2; exit 1; }
+# Put back what the stand-in server had, for the baseline's own clean-up test.
+docker exec "$SRV" sh -c 'rm /usr/local/sbin/blkid /usr/local/sbin/systemd-cryptenroll /tmp/cryptenroll.calls
+  echo "password: \"\$6\$test\$hash\"" >/var/log/installer/autoinstall-user-data
+  chmod 0600 /var/log/installer/autoinstall-user-data'
+play --idempotent playbooks/provision-vms.yml --limit srv-luks
+play tests/verify-disk-encryption.yml
+
+step "The installer's TPM enrollment script edits only the root disk's crypttab line, and a second run changes nothing"
+docker exec "$PVE" cat /srv/seed-copies/seed-srv-luks/user-data >"$TEST_TMP/user-data-luks"
+python3 -c 'import sys, yaml
+files = {f["path"]: f["content"] for f in yaml.safe_load(open(sys.argv[1]))["write_files"]}
+sys.stdout.write(files["/run/usas/enroll-tpm2.sh"])' "$TEST_TMP/user-data-luks" >"$TEST_TMP/enroll-tpm2.sh"
+# blkid, systemd-cryptenroll and dracut are stubs that log their arguments.
+docker run --rm -v "$TEST_TMP/enroll-tpm2.sh:/enroll-tpm2.sh:ro" usas-test-pve:latest sh -euc '
+  mkdir -p /stubs /etc/dracut.conf.d
+  printf "#!/bin/sh\ncase \"\$*\" in *UUID*) echo 1111-2222 ;; *) echo /dev/sda3 ;; esac\n" >/stubs/blkid
+  for c in systemd-cryptenroll dracut; do printf "#!/bin/sh\necho %s \"\$*\" >>/calls\n" "$c" >/stubs/$c; done
+  chmod +x /stubs/*
+  printf "# <name> <device> <key> <options>\ndm_crypt-0 UUID=1111-2222 none luks\nscratch UUID=3333 /dev/urandom swap\n" >/etc/crypttab
+  PATH="/stubs:$PATH" sh /enroll-tpm2.sh
+  cp /etc/crypttab /crypttab.first
+  PATH="/stubs:$PATH" sh /enroll-tpm2.sh
+  cmp /etc/crypttab /crypttab.first
+  cat /etc/crypttab /calls /etc/dracut.conf.d/90-usas-tpm2.conf' >"$TEST_TMP/enroll.out"
+cat >"$TEST_TMP/enroll.expected" <<'EOF'
+# <name> <device> <key> <options>
+dm_crypt-0 UUID=1111-2222 none luks,tpm2-device=auto
+scratch UUID=3333 /dev/urandom swap
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= /dev/sda3
+dracut --regenerate-all --force
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= /dev/sda3
+dracut --regenerate-all --force
+# Unlock the root disk with the TPM at boot (set up by ubuntu-server-auto-setup).
+add_dracutmodules+=" tpm2-tss systemd-cryptsetup "
+install_items+=" /etc/crypttab "
+EOF
+diff -u "$TEST_TMP/enroll.expected" "$TEST_TMP/enroll.out"
+
 step "ISO storage the cluster shares (NFS): built once, by one node, and the VMs' CD-ROMs use it"
 SHARED=(-e pve_iso_storage=synology-nfs -e installer_work_dir=/var/tmp/usas-shared)
 play_says 'synology-nfs on pve-test-2 (shared): built by pve-test' playbooks/build-installer.yml "${SHARED[@]}"
@@ -237,7 +307,8 @@ play --idempotent playbooks/build-installer.yml "${SHARED[@]}"
 # Only the node that built it has the build's work directory.
 [ "$(nodes_with /var/tmp/usas-shared)" = 1 ] && docker exec "$PVE" test -d /var/tmp/usas-shared \
   || { echo "ERROR: the shared storage's ISO wasn't built exactly once, by pve-test" >&2; exit 1; }
-play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs
+# It also opts out of Secure Boot.
+play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs -e vm_secure_boot=false
 play tests/verify-iso-storage.yml
 
 step "ISO storages that don't fit a node are refused"

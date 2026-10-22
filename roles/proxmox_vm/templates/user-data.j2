@@ -1,9 +1,10 @@
 #cloud-config
-# Autoinstall answers. Holds a password hash: deleted from the node after the install.
+# Autoinstall answers. Holds a password hash and any disk passphrase: deleted from the node after the install.
 # The configuration is built as data and written with to_nice_yaml, so every value comes back exactly as
 # given and no inventory value can change the structure (tests/fuzz/fuzz_user_data.py checks this). The
 # values used in the shell commands are also checked against roles/proxmox_vm/vars/main.yml.
 {% set sudoers = '/target/etc/sudoers.d/90-ansible-' ~ admin_user %}
+{% set encrypt = vm_disk_encryption | bool %}
 {% set layout = {'name': autoinstall_storage_layout, 'sizing-policy': 'all'}
      if autoinstall_storage_layout == 'lvm' else {'name': autoinstall_storage_layout} %}
 {# One entry per network card, matched by its MAC address (provision_nics, built in tasks/main.yml): net0 is
@@ -36,6 +37,44 @@
 {%   set net.ethernets = net.ethernets | combine({('primary' if loop.first else nic.key): eth}) %}
 {% endfor %}
 {% set packages = (autoinstall_packages + ['qemu-guest-agent']) | unique if net_mode == 'dhcp' else autoinstall_packages %}
+{% if encrypt %}
+{#  Disk encryption: the lvm layout with a password puts the volume group on LUKS2. The passphrase and the
+    script below are also written (by cloud-init, top-level write_files) to /run in the installer's own RAM,
+    never to the installed disk. curtin in-target binds that /run into the installed system, where the script
+    adds a TPM2 key slot and sets up unlocking with the TPM at boot. The slot isn't bound to any PCR yet: the
+    install itself changes Secure Boot variables (dbx updates, shim's SBAT level), so PCR 7 at the first boot
+    differs from the installer's. tasks/first_boot.yml binds it to PCR 7 once the VM has booted. The
+    passphrase keeps its key slot as the recovery key. #}
+{%   set layout = layout | combine({'password': vm_disk_passphrase | string}) %}
+{%   set enroll_script %}
+#!/bin/sh
+# Adds a TPM2 key slot to the root disk (no PCRs yet; first_boot.yml binds it to PCR 7) and sets up
+# unlocking with the TPM at boot, at the end of the install.
+set -eu
+device=$(blkid -t TYPE=crypto_LUKS -o device)
+if [ "$(echo "$device" | wc -w)" -ne 1 ]; then
+  echo "expected one LUKS device, found: $device" >&2
+  exit 1
+fi
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= "$device"
+# Its crypttab line (curtin writes "<name> UUID=<uuid> none luks") gets tpm2-device=auto.
+awk -v source="UUID=$(blkid -s UUID -o value "$device")" '
+  /^[[:space:]]*(#|$)/ || $2 != source { print; next }
+  { found = 1
+    if ($3 == "") $3 = "none"
+    if ($4 !~ /(^|,)tpm2-device=/) $4 = ($4 == "" ? "luks" : $4) ",tpm2-device=auto"
+    print }
+  END { exit !found }' /etc/crypttab >/etc/crypttab.usas
+cat /etc/crypttab.usas >/etc/crypttab
+rm -f /etc/crypttab.usas
+cat >/etc/dracut.conf.d/90-usas-tpm2.conf <<'EOF'
+# Unlock the root disk with the TPM at boot (set up by ubuntu-server-auto-setup).
+add_dracutmodules+=" tpm2-tss systemd-cryptsetup "
+install_items+=" /etc/crypttab "
+EOF
+dracut --regenerate-all --force
+{%   endset %}
+{% endif %}
 {% set autoinstall = {
      'version': 1,
      'interactive-sections': [],
@@ -48,10 +87,17 @@
      'identity': {'hostname': inventory_hostname_short, 'realname': admin_realname,
                   'username': admin_user, 'password': provision_password_hash},
      'ssh': {'install-server': true, 'allow-pw': false, 'authorized-keys': provision_ssh_keys},
-     'packages': packages,
+     'packages': packages + (['tpm2-tools'] if encrypt and 'tpm2-tools' not in packages else []),
      'updates': autoinstall_updates,
      'late-commands': [
        "echo '" ~ admin_user ~ " ALL=(ALL:ALL) NOPASSWD: ALL' > " ~ sudoers,
-       'chmod 0440 ' ~ sudoers],
+       'chmod 0440 ' ~ sudoers]
+       + (['curtin in-target -- sh /run/usas/enroll-tpm2.sh', 'rm -rf /run/usas'] if encrypt else []),
      'shutdown': 'poweroff'} %}
-{{ {'autoinstall': autoinstall} | to_nice_yaml(indent=2, width=4096) }}
+{% set user_data = {'autoinstall': autoinstall} %}
+{% if encrypt %}
+{%   set user_data = user_data | combine({'write_files': [
+       {'path': '/run/usas/disk-key', 'permissions': '0600', 'content': vm_disk_passphrase | string},
+       {'path': '/run/usas/enroll-tpm2.sh', 'permissions': '0700', 'content': enroll_script | trim ~ '\n'}]}) %}
+{% endif %}
+{{ user_data | to_nice_yaml(indent=2, width=4096) }}

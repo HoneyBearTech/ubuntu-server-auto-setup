@@ -336,11 +336,11 @@
     "name": "vm_secure_boot",
     "label": "Secure Boot keys",
     "kind": "bool",
-    "help": "Pre-enroll Secure Boot keys in the EFI disk.",
+    "help": "Pre-enroll Microsoft's Secure Boot keys in the EFI disk, so the firmware boots only signed code (Ubuntu's shim, GRUB and kernel). New VMs only; set false for a VM that must boot unsigned kernels or modules.",
     "required": false,
     "advanced": true,
     "variable": "vm_secure_boot",
-    "default": "false",
+    "default": "true",
     "choices": null
    }
   ],

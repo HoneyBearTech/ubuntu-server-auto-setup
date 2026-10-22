@@ -15,7 +15,9 @@ Back up, outside the repository:
 
 Back up your servers with Proxmox (`vzdump`, or Proxmox Backup Server) as you would anyway, and take a
 snapshot (`qm snapshot <vmid> before-baseline`) before running a new version of the baseline against a
-server that matters.
+server that matters. A backup of a VM with disk encryption includes its TPM state, so it restores to a VM
+that unlocks itself: encrypt backups that leave your control (Proxmox Backup Server's client-side
+encryption), and keep the Vault passphrase, which unlocks a restored disk whose TPM state is lost.
 
 To restore: copy the two files back into a fresh checkout of the same version, run `make deps`, and check
 the Vault opens with `ansible-vault view inventory/group_vars/all/vault.yml`.
@@ -67,6 +69,10 @@ Moving an existing server to a new Ubuntu release (24.04 to 26.04) is not someth
   put its name and secret in the Vault (`ansible-vault edit inventory/group_vars/all/vault.yml`), check
   that `make provision` still works, then remove the old one (`pveum user token remove ansible@pve automation`).
 - **The Vault password**: `ansible-vault rekey inventory/group_vars/all/vault.yml`.
+- **The disk encryption passphrase** (`vault_disk_passphrase`): on each encrypted VM,
+  `sudo cryptsetup luksChangeKey "$(sudo blkid -t TYPE=crypto_LUKS -o device)"` (the TPM's key slot is
+  unaffected), then change it in the Vault so VMs installed later use the new one. Keep the old one until
+  every VM has the new one: it is the recovery key at their consoles.
 - **The admin password**: change `vault_admin_password`; new VMs get the new password. The baseline sets
   the password only when it creates the user, so on existing servers change it there (`sudo passwd
   sysadmin`) as well.

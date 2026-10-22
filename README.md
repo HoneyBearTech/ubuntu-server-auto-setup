@@ -234,6 +234,7 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `vault_pve_api_token_id` | The Proxmox API token's name only (`automation`, not `ansible@pve!automation`). |
 | `vault_pve_api_token_secret` | The token's secret (a UUID). |
 | `vault_mail_relay_password`, `vault_fail2ban_webhook_url` | Optional: the mail relay's password and the Fail2Ban webhook URL (it usually holds a token). |
+| `vault_disk_passphrase` | Optional: the disk encryption passphrase (`vm_disk_passphrase`), also the recovery key at the VM's console. |
 
 **All hosts**
 
@@ -272,7 +273,8 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | The network bridge and an optional VLAN tag. |
 | `vm_extra_nics` | `[]` | More network cards, each with a bridge, VLAN, and a static address, DHCP or none ([docs/interfaces.md](docs/interfaces.md#networks)). |
 | `vm_cores`, `vm_memory_mb`, `vm_disk_gb` | `2`, `2048`, `32` | The VM's size. |
-| `vm_secure_boot` | `false` | Pre-enroll the Secure Boot keys in the EFI disk. |
+| `vm_secure_boot` | `true` | Secure Boot: Microsoft's keys are pre-enrolled in the EFI disk, so the VM boots only signed code. `false` opts a new VM out. |
+| `vm_disk_encryption` | `false` | Encrypt the root disk (LUKS2) and unlock it at boot with a vTPM, the passphrase (`vm_disk_passphrase: "{{ vault_disk_passphrase }}"`) kept as the recovery key. Read [what it protects](docs/security.md#secure-boot-and-disk-encryption) first. |
 | `net_prefix`, `net_gateway` | `24`, (required for `static`) | The network prefix length and the default gateway. |
 | `net_dns`, `net_search` | `[]`, `[]` | DNS servers and search domains. |
 | `autoinstall_storage_layout` | `lvm` | The installer's disk layout: `lvm`, `direct` or `zfs`. |

@@ -1,7 +1,8 @@
 # Pre-release checklist on real Proxmox VE
 
 CI tests every playbook against containers and a mock Proxmox API, and remasters the real Ubuntu ISO every
-week ([testing.md](testing.md)), but it never boots a real VM. Before tagging a release, the maintainer
+week and installs from it in QEMU under Secure Boot ([testing.md](testing.md)), but it never runs on
+Proxmox VE itself. Before tagging a release, the maintainer
 runs this checklist on real Proxmox VE hardware, against the commit that will be tagged. It is the
 "real run" part of the [test policy](../CONTRIBUTING.md#test-policy).
 
@@ -108,6 +109,66 @@ be tagged; replace them with yours.
   qm config 9001 | grep -E '^net[0-9]:'       # net1: virtio=<mac>,bridge=<bridge>,tag=<tag>
   ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
   ```
+
+## Secure Boot and disk encryption
+
+CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
+VMs, but not on Proxmox itself. Here the test VM (Secure Boot is the default) and a second disposable VM
+with disk encryption, `test-05` (VM ID `9005`, address `192.0.2.14`), with `vm_disk_encryption: true`
+and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real cluster.
+
+- [ ] Both VMs have an EFI disk with pre-enrolled keys, and only the encrypted one has a TPM state volume,
+  version 2.0, on `pve_tpmstate_storage`. Note whether the EFI disks carry `ms-cert=2023k`:
+
+  ```bash
+  qm config 9001 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
+  qm config 9005 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
+  ```
+
+- [ ] Both report Secure Boot on:
+
+  ```bash
+  ssh sysadmin@192.0.2.10 mokutil --sb-state      # SecureBoot enabled
+  ssh sysadmin@192.0.2.14 mokutil --sb-state
+  ```
+
+- [ ] `test-05`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
+  passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto`:
+
+  ```bash
+  ssh sysadmin@192.0.2.14 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
+  ssh sysadmin@192.0.2.14 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
+  ssh sysadmin@192.0.2.14 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
+  ```
+
+- [ ] A reboot unlocks without anyone typing: watch the console in Proxmox (no passphrase prompt) and wait
+  for SSH:
+
+  ```bash
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
+  ```
+
+- [ ] The recovery passphrase works: it opens the LUKS volume, and after the TPM slot is wiped the VM stops
+  at the passphrase prompt on its console, where the Vault passphrase unlocks it; the command in
+  [security.md](security.md#secure-boot-and-disk-encryption) enrolls the TPM again, and the next reboot is
+  unattended again:
+
+  ```bash
+  ssh -t sysadmin@192.0.2.14 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
+  ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot   # type the passphrase on the console, then:
+  ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
+  ```
+
+- [ ] The installer's copy of its configuration is gone from `test-05`, and no seed is left on the node:
+
+  ```bash
+  ssh sysadmin@192.0.2.14 'sudo ls /var/log/installer/'    # no autoinstall-user-data
+  ```
+
+- [ ] A Proxmox backup of `test-05` restores to a VM that boots unattended (the backup carries the TPM
+  state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
 
 ## Several nodes
 
@@ -306,6 +367,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
   qm stop 9003; qm destroy 9003 --purge
   qm stop 9004; qm destroy 9004 --purge     # on hyve
+  qm stop 9005; qm destroy 9005 --purge     # the encrypted test VM (its TPM state volume goes too)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03 \
     /var/tmp/ubuntu-server-auto-setup/seed-test-04

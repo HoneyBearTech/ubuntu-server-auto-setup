@@ -84,12 +84,19 @@
     mode: "0644"
   check_mode: false
 
+# A connection that fails (a TLS handshake timing out, as releases.ubuntu.com sometimes does) is retried; any
+# answer from the server, an error included, is final.
 - name: Fetch Ubuntu's SHA256SUMS
   ansible.builtin.get_url:
     url: "{{ ubuntu_iso_base_url }}/SHA256SUMS"
     dest: "{{ installer_work_dir }}/SHA256SUMS"
     force: true
     mode: "0644"
+    timeout: 30
+  register: installer_sums_fetch
+  until: installer_sums_fetch.status_code | default(-1) | int != -1
+  retries: 3
+  delay: 10
   check_mode: false
 
 - name: Fetch the signature on SHA256SUMS
@@ -100,6 +107,11 @@
         dest: "{{ installer_work_dir }}/SHA256SUMS.gpg"
         force: true
         mode: "0644"
+        timeout: 30
+      register: installer_sig_fetch
+      until: installer_sig_fetch.status_code | default(-1) | int != -1
+      retries: 3
+      delay: 10
       check_mode: false
   rescue:
     - name: Fail if Ubuntu's SHA256SUMS isn't signed

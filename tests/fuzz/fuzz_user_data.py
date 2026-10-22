@@ -6,7 +6,10 @@ Property: for any values the proxmox_vm role's checks accept (its own assert con
 roles/proxmox_vm/tasks/main.yml), the rendered user-data is valid YAML whose fields hold exactly those values
 (nothing can add or change a key), the two shell commands it runs as root split into exactly the expected
 words, each network card's Proxmox setting holds exactly the given options (a value can't add another), the
-installed system matches every card by its MAC address, and exactly one card has the default route.
+installed system matches every card by its MAC address, and exactly one card has the default route. With
+disk encryption, the passphrase is exactly the storage layout's password and the content of the installer's key
+file, the enrollment script is the same for every input, and every passphrase the role accepts is 12 to 512
+printable ASCII characters without braces.
 """
 
 import re
@@ -30,6 +33,7 @@ NIC_SETTINGS = roles.assert_conditions(TASKS, "Check the network card settings")
 EXTRA_NIC = roles.assert_conditions(TASKS, "Check the extra network cards")
 ONE_GATEWAY = roles.assert_conditions(TASKS, "Check that exactly one network card has the default route")
 UNIQUE_MACS = roles.assert_conditions(TASKS, "Check that no two network cards share a MAC address")
+ENCRYPTION = roles.assert_conditions(TASKS, "Check the disk encryption settings")
 EXTRA_NICS = roles.set_fact_expression(TASKS, "provision_extra_nics")
 EXTRA_NICS_VARS = roles.set_fact_raw_vars(TASKS, "provision_extra_nics")
 NICS = roles.set_fact_expression(TASKS, "provision_nics", last=True)
@@ -37,6 +41,11 @@ NICS_VARS = roles.set_fact_raw_vars(TASKS, "provision_nics", last=True)
 BRIDGE_CHARS = "vmbr019._-,= \n"
 NUMBER_CHARS = "0123456789,= \n-"
 NIC_KEYS = PATTERNS["provision_nic_keys"]
+# Characters that could break YAML, the shell or a template, besides ordinary ones.
+PASSPHRASE_ALPHABET = "aZ09 '\"#:-&*!%@`|>\\{}[],?\n\t\r\x00\x7f\u00e9"
+# Every character the role accepts: printable ASCII but the braces.
+PASSPHRASE_PRINTABLE = "".join(c for c in map(chr, range(0x20, 0x7F)) if c not in "{}")
+ENROLL_SCRIPTS = set()
 
 
 def bridge(fdp):
@@ -78,6 +87,33 @@ def extra_nic(fdp):
     if fdp.ConsumeIntInRange(0, 15) == 0:
         nic[roles.from_alphabet(fdp, "vlan_tg", 8)] = "1"
     return nic
+
+
+def passphrase(fdp):
+    """Mostly passphrases the role accepts (YAML, shell and template characters included), sometimes not."""
+    choice = fdp.ConsumeIntInRange(0, 3)
+    if choice == 0:
+        return roles.text(fdp, 60)
+    if choice == 1:
+        return roles.from_alphabet(fdp, PASSPHRASE_ALPHABET, 40)
+    alphabet = PASSPHRASE_PRINTABLE if choice == 2 else PASSPHRASE_ALPHABET[:22]
+    return "".join(alphabet[fdp.ConsumeIntInRange(0, len(alphabet) - 1)] for _ in range(fdp.ConsumeIntInRange(10, 60)))
+
+
+def encryption(fdp, values):
+    """Fills in the disk encryption values; returns False if the role would refuse them."""
+    values.update({"vm_disk_encryption": fdp.ConsumeBool(), "vm_disk_passphrase": passphrase(fdp),
+                   "vm_secure_boot": fdp.ConsumeIntInRange(0, 9) > 0})
+    if not values["vm_disk_encryption"]:
+        return True
+    if fdp.ConsumeIntInRange(0, 9) > 0:
+        values["autoinstall_storage_layout"] = "lvm"
+    if not (roles.accepted(ENCRYPTION, {**PATTERNS, **values})
+            and roles.matches(PATTERNS["provision_disk_passphrase_pattern"], values["vm_disk_passphrase"])):
+        return False
+    secret = values["vm_disk_passphrase"]
+    assert 12 <= len(secret) <= 512 and all(" " <= c <= "~" and c not in "{}" for c in secret), secret
+    return True
 
 
 def proxmox_options(nic, setting):
@@ -183,8 +219,9 @@ def one_input(data):
         "github_user": "u", "admin_extra_ssh_keys": [], "admin_password": "p",
     }
     # The role refuses anything else before rendering (roles/proxmox_vm/tasks/main.yml).
-    if not network(fdp, values):
+    if not network(fdp, values) or not encryption(fdp, values):
         return
+    encrypt, secret = values["vm_disk_encryption"], values["vm_disk_passphrase"]
     user, nics = values["admin_user"], values["provision_nics"]
 
     # Every card: its Proxmox setting holds exactly its options, and the MAC addresses are fixed and distinct.
@@ -195,7 +232,7 @@ def one_input(data):
     assert nics[0]["mac"].startswith("BC:24:11:") or nics[0]["mac"] == values["net_mac"].upper()
 
     doc = yaml.safe_load(USER_DATA.render(values))
-    assert list(doc) == ["autoinstall"], doc
+    assert sorted(doc) == (["autoinstall", "write_files"] if encrypt else ["autoinstall"]), doc
     ai = doc["autoinstall"]
     assert ai["locale"] == values["autoinstall_locale"]
     assert ai["keyboard"] == {"layout": values["autoinstall_keyboard_layout"]}
@@ -213,6 +250,8 @@ def one_input(data):
     layout = {"name": values["autoinstall_storage_layout"]}
     if values["autoinstall_storage_layout"] == "lvm":
         layout["sizing-policy"] = "all"
+    if encrypt:
+        layout["password"] = secret
     assert ai["storage"] == {"layout": layout}
     assert ai["identity"] == {"hostname": host, "realname": values["admin_realname"], "username": user,
                               "password": values["provision_password_hash"]}
@@ -220,13 +259,22 @@ def one_input(data):
     packages = values["autoinstall_packages"]
     if values["net_mode"] == "dhcp":  # the address is read from the guest agent
         packages = list(dict.fromkeys(packages + ["qemu-guest-agent"]))
+    if encrypt and "tpm2-tools" not in packages:  # dracut's tpm2-tss module needs the tpm2 tool
+        packages = packages + ["tpm2-tools"]
     assert ai["packages"] == packages
     assert ai["updates"] == values["autoinstall_updates"]
     assert ai["shutdown"] == "poweroff"
     sudoers = f"/target/etc/sudoers.d/90-ansible-{user}"
-    first, second = ai["late-commands"]
+    first, second, *rest = ai["late-commands"]
     assert shlex.split(first) == ["echo", f"{user} ALL=(ALL:ALL) NOPASSWD: ALL", ">", sudoers], first
     assert shlex.split(second) == ["chmod", "0440", sudoers], second
+    assert rest == (["curtin in-target -- sh /run/usas/enroll-tpm2.sh", "rm -rf /run/usas"] if encrypt else []), rest
+    if encrypt:
+        key_file, script = doc["write_files"]
+        assert key_file == {"path": "/run/usas/disk-key", "permissions": "0600", "content": secret}
+        assert script["path"] == "/run/usas/enroll-tpm2.sh" and script["permissions"] == "0700", script
+        ENROLL_SCRIPTS.add(script["content"])
+        assert len(ENROLL_SCRIPTS) == 1, "the enrollment script depends on an input"
 
     meta = yaml.safe_load(META_DATA.render(values))
     assert meta == {"instance-id": f"{host}-{values['pve_vmid']}", "local-hostname": host}, meta

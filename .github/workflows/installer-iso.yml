@@ -4,10 +4,14 @@ name: Installer ISO
 # The integration tests use a small stand-in ISO. This job remasters the real Ubuntu 26.04 live-server ISO
 # (about 3 GB) in the test "Proxmox node" container and checks the result: Ubuntu's signature on
 # SHA256SUMS (with the key that ships in the role), the checksum from it, the autoinstall kernel argument,
-# and BIOS and UEFI boot records identical to the original.
+# and BIOS and UEFI boot records identical to the original. Then it installs Ubuntu from that ISO in a VM
+# with Secure Boot (OVMF, Microsoft's keys enrolled) and a TPM 2.0, as Proxmox runs the role's VMs, with
+# the role's user-data for an encrypted disk, and checks Secure Boot, LUKS2, unlocking with the TPM and the
+# recovery passphrase (tests/secure-boot-install.sh).
 # Weekly (Ubuntu can publish a new point release or change the ISO layout at any time) and on changes to
-# the installer roles. The ISO is cached by its SHA-256, so only a new point release downloads it again;
-# the role still checks the cached copy against the signed SHA256SUMS, so a bad cache entry is re-downloaded.
+# the installer roles or the installer's configuration. The ISO is cached by its SHA-256, so only a new point
+# release downloads it again; the role still checks the cached copy against the signed SHA256SUMS, so a bad
+# cache entry is re-downloaded.
 on:  # yamllint disable-line rule:truthy
   schedule:
     - cron: "23 4 * * 3" # weekly, Wednesday 04:23 UTC
@@ -16,7 +20,9 @@ on:  # yamllint disable-line rule:truthy
     paths:
       - "roles/installer_iso/**"
       - "roles/ubuntu_release/**"
+      - "roles/proxmox_vm/templates/**"
       - "tests/real-iso.sh"
+      - "tests/secure-boot-install.sh"
       - "tests/images/pve-node/**"
       - ".github/workflows/installer-iso.yml"
 
@@ -27,7 +33,7 @@ jobs:
   real-iso:
     name: Remaster the real Ubuntu ISO
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +49,19 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-ci.txt
           ansible-galaxy collection install -r requirements.yml
+
+      # The cached ISO, the remastered one, the VM's disk and the container image need more room than the runner
+      # has free.
+      - name: Free disk space and install QEMU, OVMF and swtpm
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf swtpm swtpm-tools xorriso
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          df -h /
 
       - name: Find the current live-server ISO
         id: iso
@@ -90,4 +109,20 @@ jobs:
       - name: Remaster and check the real ISO
         env:
           USAS_ISO_CACHE: ~/iso-cache
+          USAS_KEEP_ISO: ${{ runner.temp }}/autoinstall.iso
         run: tests/real-iso.sh
+
+      - name: Install from it under Secure Boot with an encrypted disk, and boot unattended
+        run: tests/secure-boot-install.sh "$RUNNER_TEMP/autoinstall.iso" "$RUNNER_TEMP/secure-boot"
+
+      - name: Keep the VM's logs and screen dumps
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secure-boot-install
+          path: |
+            ${{ runner.temp }}/secure-boot/*.log
+            ${{ runner.temp }}/secure-boot/*.ppm
+            ${{ runner.temp }}/secure-boot/luksdump.txt
+          if-no-files-found: ignore
+          retention-days: 14

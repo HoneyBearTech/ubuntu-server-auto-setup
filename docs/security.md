@@ -28,6 +28,12 @@ defaults and the advice in the README's "Running it securely" section and in [we
   directory are deleted once the installer has finished.
 - The API token is sent only to the Proxmox API, over HTTPS with certificate verification on by default
   (`pve_validate_certs: true`).
+- The disk encryption passphrase (`vault_disk_passphrase`, only with `vm_disk_encryption`) is written only
+  into the same per-host seed files as the password hash, which are deleted after the install. It is
+  checked against its pattern into a plain true/false, so no task's output can hold it, and the task that
+  renders the seed stays hidden even with `pve_hide_secrets: false`. The installer reads it into its own
+  RAM; the copy Ubuntu's installer keeps of its configuration on the new, encrypted disk is deleted as soon
+  as the VM first boots.
 
 **Downloads**
 
@@ -51,6 +57,11 @@ defaults and the advice in the README's "Running it securely" section and in [we
   the new server doesn't fetch its configuration from anywhere.
 - The installed server has password authentication over SSH off and only your keys authorized from its
   first boot.
+- New VMs boot with UEFI Secure Boot on (`vm_secure_boot: true`, the default): their EFI disk has
+  Microsoft's keys pre-enrolled, so the firmware runs only Ubuntu's signed shim, GRUB and kernel, and the
+  kernel (in lockdown) loads only signed modules. The remastered installer ISO keeps Ubuntu's signed EFI boot
+  image unchanged (only `grub.cfg`, a configuration file GRUB doesn't verify, is replaced), and CI installs
+  from it under Secure Boot.
 - The Proxmox API token needs only the privileges listed in [installing.md](installing.md#2-create-the-proxmox-api-token)
   (no `Sys.*`, no user or permission management, no `VM.Console`), on a dedicated user with privilege
   separation.
@@ -202,6 +213,84 @@ removes its files; settings already loaded in the kernel stay until the next reb
   checked against `\Z`-anchored allowlist patterns (no spaces, quotes, line breaks, `%`, `<` or `>`), so a
   value can't add settings to apt, msmtp or Fail2Ban, or arguments to the webhook's `curl` command.
 
+## Secure Boot and disk encryption
+
+**Secure Boot** is on for new VMs. Ubuntu 26.04.1's shim is signed with the Microsoft UEFI CA 2011, which
+every Proxmox EFI disk with pre-enrolled keys trusts (UEFI firmware doesn't check certificate expiry, so
+the CA's expiry in 2026 doesn't stop it booting). Shims signed only with Microsoft's 2023 CA will need the
+2023 certificates in the EFI disk: `qm config <vmid>` shows `ms-cert=2023k` on the `efidisk0` line when
+they are there, and recent Proxmox VE releases can add them to a VM that is shut down
+(`qm enroll-efi-keys <vmid>` on 9.2 and later). Existing VMs are never changed by this project; turning
+Secure Boot on for one is a Proxmox setting (a new EFI disk with pre-enrolled keys). Opt a new VM out with
+`vm_secure_boot: false` if it must run an unsigned kernel or out-of-tree modules.
+
+**Disk encryption** (`vm_disk_encryption: true`, off by default) installs the root file system on LUKS2:
+the installer's `lvm` layout with a passphrase puts the volume group on an encrypted partition (`/boot`
+and the EFI system partition stay unencrypted, as Ubuntu does). The VM gets a virtual TPM 2.0 (Proxmox
+`tpmstate0`). Enrolling the TPM happens in two steps, both during provisioning:
+
+1. At the end of the install, the TPM is reachable from the installer, which runs `systemd-cryptenroll
+   --tpm2-device=auto --tpm2-pcrs=` in the new system: a TPM2 key slot not yet bound to any PCR. It also adds
+   `tpm2-device=auto` to `/etc/crypttab` and rebuilds the initramfs (dracut, with its TPM2 modules), so the
+   first boot unlocks without anyone typing a passphrase. That can't wait for the baseline: until the TPM
+   holds a key, nobody could answer the passphrase prompt.
+2. As soon as the VM has booted from its disk, provisioning runs `systemd-cryptenroll --unlock-tpm2-device=auto
+   --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2`: the TPM itself unlocks the disk for a new slot bound to
+   PCR 7 as this boot measured it, and the unbound slot is wiped. Binding to PCR 7 in the installer doesn't
+   work: the install changes Secure Boot variables (Ubuntu's forbidden-signatures (dbx) updates, shim's SBAT
+   level), so the installed system's first boot measures a different PCR 7 than the installer did, and the
+   VM would stop at the passphrase prompt. CI showed exactly that.
+
+The window between the two steps lasts the first boot (a minute or two, with the VM's TPM state on your
+Proxmox storage only). If provisioning stops in between, run step 2 by hand on the VM. The Vault passphrase
+keeps its own key slot all along: it is the recovery key.
+
+*Why PCR 7.* The TPM releases the disk key only while PCR 7 has the value it had at the first boot. PCR 7
+records the Secure Boot state: whether it is on, the enrolled keys (PK, KEK, db, dbx) and the certificates
+that verified the boot chain. It doesn't change when the kernel, the initramfs or GRUB's configuration is
+updated, so routine updates and reboots stay unattended. It does change, and the VM then stops at the
+passphrase prompt on its console, when Secure Boot is turned off, the EFI disk's keys change (for example
+`qm enroll-efi-keys`, a forbidden-signatures (dbx) update from the OS, or a new EFI disk), or the VM boots
+code signed by a different authority. Binding to more PCRs (the boot loader and kernel, 4 and 9) would also
+catch a swapped kernel, but would ask for the passphrase after every kernel update.
+
+*What it protects.* A copy of the VM's disk volume that doesn't come with the VM's TPM state: the disk
+image copied out of shared storage (NFS, Ceph) or a storage export, a storage-level snapshot, replication
+or backup of the disk volume alone, a decommissioned disk that held only the VM's disk. Without the TPM
+state and the passphrase, the data is unreadable. Keep the TPM state elsewhere than the disks with
+`pve_tpmstate_storage` (for example on the node's local storage while the disks are on shared storage) to
+make that hold for the disks' storage as a whole.
+
+*What it doesn't protect.*
+
+- **A compromised Proxmox host, or root on it.** The vTPM is software (swtpm) running on the node; its
+  state is a file the node can read. Root on the node can also read a running VM's memory, where the disk
+  key is, change the VM's disks, and run commands in it through `qemu-guest-agent`.
+- **Backups and copies that include the TPM state.** Proxmox backups (`vzdump`, Proxmox Backup Server)
+  include `tpmstate0` and `efidisk0` along with the disk, so whoever restores one gets a VM that unlocks
+  itself. Encrypt those backups (Proxmox Backup Server's client-side encryption) if they leave your
+  control. The same goes for a stolen node disk that held both the VM's disk and its TPM state.
+- **Someone who can start the VM from other media.** PCR 7 records which certificates verified the boot
+  chain, not which program they verified: booting other media signed by the same authorities (an Ubuntu
+  live ISO, for example) on the same VM gives the same PCR 7, and the TPM would release the key to it. Who
+  can attach an ISO to the VM and start it (`VM.Config.CDROM` and `VM.PowerMgmt`, which the project's API
+  token has) can therefore read the disk. Protect the token like a root credential.
+- **The running VM.** Once unlocked, the disk is readable by anything that gets into the VM.
+
+*Recovery.* When the TPM doesn't release the key, the VM waits at "Please enter passphrase for disk" on
+its console (Proxmox's noVNC or xterm.js console). Type the Vault passphrase; the keyboard layout there is
+`autoinstall_keyboard_layout`. Once it is up, enroll the TPM again for the new Secure Boot state (it asks
+for the passphrase):
+
+```sh
+sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"
+```
+
+To change the passphrase, run `sudo cryptsetup luksChangeKey "$(sudo blkid -t TYPE=crypto_LUKS -o device)"`
+on each VM and update `vault_disk_passphrase` for the VMs you install later. CI installs an encrypted VM
+under Secure Boot with a TPM, as Proxmox sets them up, and checks the unattended boots, that no file on the
+disk holds the passphrase after provisioning, and this recovery path (see [testing.md](testing.md)).
+
 ## Pinning the Proxmox nodes' keys
 
 The checks above stop a run when a Proxmox node's SSH host key or the API's certificate isn't the one the
@@ -235,11 +324,17 @@ in the trust store, and how to do the same in the web UI's data volume.
   VM's address, Ubuntu when it isn't. The VMs page labels this data as reported by the guest and shows
   where each address came from; check them before you act on them.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
-  installed, read and change VM disks, and run commands inside the VMs through `qemu-guest-agent`.
+  installed (with the disk passphrase, if the VM is encrypted), read and change VM disks, read a VM's vTPM
+  state and memory (so disk encryption doesn't keep them out), and run commands inside the VMs through
+  `qemu-guest-agent`.
+- **Snapshots of the ISO storage.** The seed ISO exists in the ISO storage only during the install, but a
+  storage that takes snapshots or backups on its own (a NAS behind NFS, for example) can keep a copy, with
+  the password hash and any disk passphrase. Exclude the ISO folder from them, or keep `pve_iso_storage`
+  on storage that doesn't.
 - **A stolen key of the node user.** A node user takes root on the node out of the SSH key's reach, but not
   the ISO storage: whoever has its key can replace the installer ISO that new VMs boot (on a storage shared
-  by the cluster, for every node), read a seed ISO during an install, and fill the storage. Guard that key
-  like the API token, and keep the user's storages to the ones it needs.
+  by the cluster, for every node), read a seed ISO during an install (with any disk passphrase in it), and
+  fill the storage. Guard that key like the API token, and keep the user's storages to the ones it needs.
 - **Trust on first use of a new VM's host key.** The control node accepts the host key it scans when a new
   VM first boots. An attacker who can impersonate the VM's IP address on your network at that moment could
   get their key trusted. Provision on a network you control.
@@ -249,7 +344,9 @@ in the trust store, and how to do the same in the web UI's data volume.
   in the node's ISO storage until you delete it ([installing.md](installing.md#troubleshooting)).
 - **The installer's own log.** Ubuntu's installer keeps a root-only copy of its configuration, including
   the password hash, in `/var/log/installer/autoinstall-user-data`. The baseline's `common` role deletes it;
-  until the baseline has run, it is on the server.
+  until the baseline has run, it is on the server. On an encrypted VM the copy also holds the disk
+  passphrase, so provisioning deletes it as soon as the VM first boots (it was only ever inside the
+  encrypted volume).
 - **Passwordless sudo during provisioning.** The installer gives the admin user passwordless `sudo` so the
   first baseline run can work unattended; the baseline then removes it (`admin_sudo_nopasswd: false`, the
   default), so an SSH key alone doesn't give root afterwards. Until that first baseline run finishes, anyone
@@ -258,8 +355,8 @@ in the trust store, and how to do the same in the web UI's data volume.
   `ufw_allow`, `ufw_ssh_sources` or `fail2ban_ignoreip` can create the wrong VM, open a port you didn't
   mean to, or lock you out.
 - **The servers' applications and wider hardening.** The baseline covers access (SSH, firewall, brute
-  force) and updates. It isn't a CIS or STIG benchmark: it doesn't configure auditd, AppArmor profiles,
-  disk encryption, kernel parameters, or anything your applications need.
+  force) and updates. It isn't a CIS or STIG benchmark, and it doesn't configure anything your applications
+  need. Disk encryption, auditd, AppArmor reporting and kernel parameters are opt-in (above).
 - **Between install and baseline.** A freshly installed server has key-only SSH but no firewall or
   Fail2Ban until the baseline has run; `make site` runs it straight away.
 - **Upstream components.** Vulnerabilities in Ubuntu, Proxmox VE, OpenSSH, Ansible or its collections

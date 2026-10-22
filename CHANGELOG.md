@@ -10,6 +10,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Upgrading
 
+- **New VMs now boot with Secure Boot** (`vm_secure_boot` defaults to `true`): their EFI disk gets
+  Microsoft's keys pre-enrolled (`pre-enrolled-keys=1`), so they run only Ubuntu's signed boot chain and the
+  kernel loads only signed modules. Existing VMs are untouched: provisioning skips every VM that exists.
+  To keep the old behaviour for new VMs (an EFI disk without keys, for example for an unsigned kernel or
+  out-of-tree DKMS modules), set `vm_secure_boot: false` in the inventory, for the group or the host. In the
+  web UI it is "Secure Boot keys" under the advanced options.
 - **`make build-installer` now uses the Proxmox API** (read-only: the cluster's nodes and each node's ISO
   storages), so it needs `pve_api_host` and the token like provisioning does. It builds on the nodes the
   servers use rather than on every host in `proxmox_nodes`: a node no server uses gets no ISO unless the run
@@ -17,6 +23,25 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Optional disk encryption with TPM2 unlocking** (`vm_disk_encryption`, off by default): the installer
+  puts the root file system on LUKS2 (the `lvm` layout with a passphrase), the VM gets a virtual TPM 2.0
+  (`tpmstate0`, on `pve_tpmstate_storage`, the VM storage by default). At the end of the install
+  `systemd-cryptenroll` adds a TPM2 key slot, with `tpm2-device=auto` in crypttab and the initramfs rebuilt,
+  so the VM boots unattended from its first boot; right after that boot, provisioning binds the slot to
+  PCR 7 (the Secure Boot state) as the installed system measures it. The passphrase comes from the Vault
+  (`vm_disk_passphrase: "{{ vault_disk_passphrase }}"`), stays enrolled as the recovery key, is written only
+  to the short-lived seed and the installer's RAM, and is hidden from all output; the installer's copy of its
+  configuration is deleted at the VM's first boot. It needs Secure Boot and the `lvm` layout (the run stops
+  otherwise). It protects a copy of the VM's disk taken without its TPM state, not a compromised Proxmox
+  host or a backup that includes the TPM state:
+  [docs/security.md](docs/security.md#secure-boot-and-disk-encryption) explains the threat model, why PCR 7,
+  and how to recover at the console.
+- CI installs from the real remastered ISO in a VM with Secure Boot and a TPM 2.0 (QEMU, OVMF with
+  Microsoft's keys, swtpm, set up as Proxmox does), with an encrypted disk, and checks Secure Boot, LUKS2
+  with a TPM2 key slot bound to PCR 7, unattended boots and reboots, that no file on the disk holds the
+  passphrase, and the recovery path (`tests/secure-boot-install.sh`, in the "Installer ISO" job).
+- A "Secure Boot and disk encryption" section in the pre-release checklist for the real-Proxmox checks
+  (`mokutil --sb-state`, `cryptsetup status`, an unattended reboot, the recovery passphrase).
 - **Several Proxmox nodes per inventory.** A server can set its own `pve_node` (and `pve_ssh_host`); the
   group's value stays the default. One API endpoint, any member of the cluster, serves every node; nodes of
   another cluster need another inventory.
@@ -75,6 +100,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- `vm_secure_boot` defaults to `true` (see Upgrading).
+- The mock Proxmox API stores `efidisk0` and `tpmstate0` the way Proxmox does and refuses what Proxmox
+  would; the integration tests check the installer configuration the VM actually got.
 - The installer matches the first network card by its MAC address instead of the interface name pattern
   `net_interface_match`, which is no longer used. New VMs get a MAC address derived from their host name and
   VM ID instead of a random one; existing VMs are untouched.
@@ -82,6 +110,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- `make build-installer` retries fetching `SHA256SUMS` and its signature when the connection fails (a TLS
+  handshake timing out at releases.ubuntu.com stopped the run), with a 30-second timeout instead of 10.
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
   container image examples.
 

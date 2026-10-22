@@ -21,6 +21,8 @@
           - create.ide2 == 'synology-nfs:iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,media=cdrom'
           - create.ide3 == 'synology-nfs:iso/seed-srv-nfs.iso,media=cdrom'
           - vm.starts == 2
+          # Provisioned with vm_secure_boot false: an EFI disk without pre-enrolled keys.
+          - vm.config.efidisk0 == 'local-lvm:vm-4062-disk-0,efitype=4m,pre-enrolled-keys=0,size=4M'
           - "'ide2' not in vm.config and 'ide3' not in vm.config"
 
 - name: Verify the files landed in the storage's folder
