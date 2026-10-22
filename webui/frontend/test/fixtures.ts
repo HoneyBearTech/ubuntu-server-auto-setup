@@ -1,7 +1,9 @@
 // What the API answers, for the tests. sections.json is the server's own output for the settings pages
 // (webui/tests/test_frontend_fixtures.py checks it still matches the fields schema.py builds).
 
-import type { OverviewData, Run, RunPageData, SectionData, ServersData, SshData, Vm, VmsData } from "../src/types";
+import type {
+  AccountData, OverviewData, Run, RunPageData, SectionData, ServersData, SessionData, SshData, Vm, VmsData,
+} from "../src/types";
 import sections from "./fixtures/sections.json";
 
 export const proxmox = sections.proxmox as unknown as SectionData;
@@ -113,4 +115,18 @@ export const vms: VmsData = {
   notes: [{ kind: "warning", message: "The token may not ask the guest agents of 1 VM(s) for their addresses: add VM.GuestAgent.Audit to its role (see docs/installing.md)." }],
   cluster: "olympus",
   fetched: 1792591331,
+};
+
+export const session: SessionData = {
+  configured: true, signed_in: false, csrf: "test-token", version: "1.2.3", theme: "dark",
+  passkeys: { registered: false, required: false, rp_id: "localhost", public_url: "" },
+};
+
+export const account: AccountData = {
+  passkeys: [
+    { id: "cred-laptop", name: "Laptop", created: 1792590061, last_used: 1792591331, backed_up: false },
+    { id: "cred-phone", name: "Phone", created: 1792591000, last_used: null, backed_up: true },
+  ],
+  require_passkey: false, broken: false, rp_id: "localhost", public_url: "", max_passkeys: 20, max_name: 64,
+  current: "cred-laptop",
 };

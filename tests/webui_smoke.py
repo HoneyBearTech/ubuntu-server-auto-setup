@@ -274,6 +274,16 @@ def main() -> None:
     calls = [r for r in state["data"]["requests"] if r["path"] == "/cluster/resources"]
     check(len(calls) >= 1, "the playbook called the API with the token from the Vault, over verified TLS")
 
+    # Passkeys (py_webauthn in the image): the options a browser would get to make one on http://localhost.
+    status, data = ui.get("/account")
+    check(status == 200 and data.get("passkeys") == [] and data.get("rp_id") == "localhost",
+          "the account page lists no passkeys yet", data)
+    status, data = ui.post("/passkeys/register-options", {"passkey_name": "Smoke", "passkey_current": PASSWORD})
+    options = data.get("options") or {}
+    check(status == 200 and options.get("rp", {}).get("id") == "localhost"
+          and options.get("authenticatorSelection", {}).get("userVerification") == "required",
+          "adding a passkey starts with a challenge for localhost that needs user verification", data)
+
     status, data = ui.post("/logout", {})
     check(data.get("redirect") == "/login", "signing out ends the session", data)
     status, url, _, _ = ui.page("/runs")
