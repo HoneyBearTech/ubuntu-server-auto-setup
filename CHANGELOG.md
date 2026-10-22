@@ -8,6 +8,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-22
+
+New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their
+virtual TPM unlocks at boot (off by default). New VMs can take their address from DHCP, read back through
+the QEMU guest agent, and get more network cards and VLANs, each with a fixed MAC address. One inventory can
+place VMs on several nodes of a Proxmox cluster, and the installer ISO is built once per shared storage or
+on each node for local storage. The ISO builds can run as a node user other than root, set up once by the
+new `prepare-node.yml`. The web UI adds passkey sign-in, a node per server and a network-card editor on the
+Servers page.
+
 ### Upgrading
 
 - **New VMs now boot with Secure Boot** (`vm_secure_boot` defaults to `true`): their EFI disk gets
@@ -20,6 +30,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   storages), so it needs `pve_api_host` and the token like provisioning does. It builds on the nodes the
   servers use rather than on every host in `proxmox_nodes`: a node no server uses gets no ISO unless the run
   has no server in it. Single-node inventories work unchanged. `make build-installer` now passes `LIMIT=`.
+- **Add `VM.GuestAgent.Audit` to the API token's role** on Proxmox VE 9 if you use DHCP (`net_mode: dhcp`)
+  or the web UI's VMs page: both ask the VMs' guest agents for their addresses. Without it, a run with a
+  DHCP server stops and names the privilege, and the VMs page shows only the addresses from the inventory or
+  cloud-init. Servers with static addresses don't need it. `pveum role modify UbuntuAutoSetup --privs VM.GuestAgent.Audit --append 1` adds it; Proxmox VE 8 has
+  no such privilege and needs `VM.Monitor` instead, with the risks
+  [docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token) describes.
+- **`net_interface_match` is no longer used**: the installer finds the first network card by its MAC
+  address. Remove it from your inventory; it has no effect. New VMs get a MAC address derived from their host
+  name and VM ID instead of a random one, so a DHCP reservation for a VM you create again keeps working; set
+  `net_mac` to choose it yourself. Existing VMs are untouched.
 
 ### Added
 
@@ -42,6 +62,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   passphrase, and the recovery path (`tests/secure-boot-install.sh`, in the "Installer ISO" job).
 - A "Secure Boot and disk encryption" section in the pre-release checklist for the real-Proxmox checks
   (`mokutil --sb-state`, `cryptsetup status`, an unattended reboot, the recovery passphrase).
+- A passkey check in the pre-release checklist's web UI section, with a real authenticator.
 - **Several Proxmox nodes per inventory.** A server can set its own `pve_node` (and `pve_ssh_host`); the
   group's value stays the default. One API endpoint, any member of the cluster, serves every node; nodes of
   another cluster need another inventory.
@@ -490,7 +511,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.5.0
 [0.4.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.4.0
 [0.3.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.0
 [0.2.3]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.3
