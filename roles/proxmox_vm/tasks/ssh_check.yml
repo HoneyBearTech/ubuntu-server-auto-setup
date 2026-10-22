@@ -1,0 +1,49 @@
+---
+# Before anything is built or created: every Proxmox node the play needs must answer over SSH, with a host key
+# already in known_hosts. Each host reaches the inventory host named by pve_ssh_check_host (empty: none), with
+# that host's own connection settings (address, user, key) and StrictHostKeyChecking=yes, so an unknown key
+# fails here instead of being trusted on first use (see docs/host-keys.md). ControlPath=none makes it a new
+# connection: one reused from an earlier task (ControlPersist) wouldn't check the host key again. One error
+# names every node that didn't answer, and why.
+# Checked before it becomes the user of an SSH connection.
+- name: Check the node's SSH user
+  ansible.builtin.assert:
+    that: pve_ssh_user is match(pve_ssh_user_pattern)
+    fail_msg: pve_ssh_user must be a lowercase Linux user name (letters, digits, underscores, hyphens).
+    quiet: true
+  run_once: true
+
+- name: Note which node to reach
+  ansible.builtin.set_fact:
+    pve_ssh_check_node: "{{ pve_ssh_check_host }}"
+
+# The ping's settings are templated for the delegated node, where this host's own variables aren't in scope,
+# so it reads the node's name from this host's facts through hostvars.
+- name: Reach the node over SSH with a trusted host key
+  ansible.builtin.ping:
+  delegate_to: "{{ hostvars[inventory_hostname].pve_ssh_check_node or inventory_hostname }}"
+  ignore_unreachable: true
+  register: pve_ssh_check
+  check_mode: false
+  when: pve_ssh_check_node | length > 0
+  vars:
+    ansible_ssh_extra_args: >-
+      {{ (hostvars[hostvars[inventory_hostname].pve_ssh_check_node] | default({})).ansible_ssh_extra_args | default('') }}
+      -o StrictHostKeyChecking=yes -o ControlPath=none
+
+- name: Fail unless every node answered
+  vars:
+    pve_ssh_failed: "{{ ansible_play_hosts | map('extract', hostvars) | selectattr('pve_ssh_check.unreachable', 'defined')
+                        | selectattr('pve_ssh_check.unreachable') | list }}"
+  ansible.builtin.assert:
+    that: pve_ssh_failed | length == 0
+    fail_msg: >-
+      {% for h in pve_ssh_failed | unique(attribute='pve_ssh_check_node') %}{% set msg = h.pve_ssh_check.msg | default('') %}
+      Node {{ h.pve_ssh_check_node }} ({{ hostvars[h.pve_ssh_check_node].ansible_host | default(h.pve_ssh_check_node) }}):
+      {% if 'Host key verification failed' in msg %}its SSH host key isn't in known_hosts, or has changed. Compare it
+      with the node's console and pin it (docs/host-keys.md){% elif 'Permission denied' in msg %}it refused the SSH
+      key; add the key to the authorized_keys of {{ hostvars[h.pve_ssh_check_node].ansible_user | default('root') }}
+      there{% else %}{{ msg }}{% endif %}.
+      {% endfor %}Nothing was built or created.
+    quiet: true
+  run_once: true

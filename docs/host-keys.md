@@ -79,7 +79,10 @@ key nobody compared.
 
 ### Clustered nodes
 
-Every node in a cluster has its own host key: pin each node you list in `proxmox_nodes`. The cluster keeps
+Every node in a cluster has its own host key: pin each node you list in `proxmox_nodes`. When the servers
+are spread over several nodes (`pve_node` on a server), `build-installer` and provisioning first reach every
+node they need with `StrictHostKeyChecking=yes`, whatever the inventory sets, and stop before building or
+creating anything with a message naming each node whose key isn't known (or has changed). The cluster keeps
 its nodes' keys in the shared `/etc/pve` file system, so once one node is verified you can read the others'
 keys over that verified connection instead of scanning each one:
 
@@ -169,8 +172,9 @@ default trust already verifies it and no bundle is needed; compare its fingerpri
 The web UI does all of this from its forms ([web-ui.md](web-ui.md#walking-through-it)), so you compare instead of
 copying files:
 
-- **SSH key** page: enter the node's SSH address, **scan** its host keys, compare the fingerprints with the
-  console's `ssh-keygen -lf` output, tick the box and choose **Trust these keys**. They are written to
+- **SSH key** page: for each node in use (the default node and every node a server names), enter its SSH
+  address, **scan** its host keys, compare the fingerprints with that node's console `ssh-keygen -lf`
+  output, tick the box and choose **Trust these keys**. They are written to
   `/data/ssh/known_hosts` in the data volume, and every connection the UI and the playbooks make uses that
   file with `StrictHostKeyChecking=yes` (the UI sets `ansible_ssh_common_args`,
   `provision_known_hosts_file` and `ssh_known_hosts_file` in its inventory).

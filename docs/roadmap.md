@@ -47,7 +47,8 @@ that run on each pull request.
   project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
 - Done: passkeys (WebAuthn) as another way to sign in, or the only one with "Require a passkey", on
   `http://localhost` or under the host name in `USAS_PUBLIC_URL` ([web-ui.md](web-ui.md#passkeys)).
-- Several Proxmox nodes per inventory (choosing the node per server).
+- Done: several Proxmox nodes per inventory: a node per server, picked from the cluster in the web UI,
+  with the installer ISO built once per shared storage and on each node for node-local storage.
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
 - Done: an automated keyboard and axe-core check of every page in a real browser in CI (Playwright,

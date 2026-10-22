@@ -114,7 +114,7 @@ be tagged; replace them with yours.
 
 CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
 VMs, but not on Proxmox itself. Here the test VM (Secure Boot is the default) and a second disposable VM
-with disk encryption, `test-04` (VM ID `9004`, address `192.0.2.13`), with `vm_disk_encryption: true`
+with disk encryption, `test-05` (VM ID `9005`, address `192.0.2.14`), with `vm_disk_encryption: true`
 and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real cluster.
 
 - [ ] Both VMs have an EFI disk with pre-enrolled keys, and only the encrypted one has a TPM state volume,
@@ -122,30 +122,30 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
 
   ```bash
   qm config 9001 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
-  qm config 9004 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
+  qm config 9005 | grep -E '^(bios|machine|efidisk0|tpmstate0):'
   ```
 
 - [ ] Both report Secure Boot on:
 
   ```bash
   ssh sysadmin@192.0.2.10 mokutil --sb-state      # SecureBoot enabled
-  ssh sysadmin@192.0.2.13 mokutil --sb-state
+  ssh sysadmin@192.0.2.14 mokutil --sb-state
   ```
 
-- [ ] `test-04`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
+- [ ] `test-05`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
   passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto`:
 
   ```bash
-  ssh sysadmin@192.0.2.13 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
-  ssh sysadmin@192.0.2.13 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
-  ssh sysadmin@192.0.2.13 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
+  ssh sysadmin@192.0.2.14 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
+  ssh sysadmin@192.0.2.14 'for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
+  ssh sysadmin@192.0.2.14 'sudo systemd-cryptenroll "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'   # password, tpm2
   ```
 
 - [ ] A reboot unlocks without anyone typing: watch the console in Proxmox (no passphrase prompt) and wait
   for SSH:
 
   ```bash
-  ssh sysadmin@192.0.2.13 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.13 uptime
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
   ```
 
 - [ ] The recovery passphrase works: it opens the LUKS volume, and after the TPM slot is wiped the VM stops
@@ -154,21 +154,57 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
   unattended again:
 
   ```bash
-  ssh -t sysadmin@192.0.2.13 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
-  ssh -t sysadmin@192.0.2.13 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.13 sudo systemctl reboot   # type the passphrase on the console, then:
-  ssh -t sysadmin@192.0.2.13 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.13 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.13 uptime
+  ssh -t sysadmin@192.0.2.14 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
+  ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot   # type the passphrase on the console, then:
+  ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
   ```
 
-- [ ] The installer's copy of its configuration is gone from `test-04`, and no seed is left on the node:
+- [ ] The installer's copy of its configuration is gone from `test-05`, and no seed is left on the node:
 
   ```bash
-  ssh sysadmin@192.0.2.13 'sudo ls /var/log/installer/'    # no autoinstall-user-data
+  ssh sysadmin@192.0.2.14 'sudo ls /var/log/installer/'    # no autoinstall-user-data
   ```
 
-- [ ] A Proxmox backup of `test-04` restores to a VM that boots unattended (the backup carries the TPM
+- [ ] A Proxmox backup of `test-05` restores to a VM that boots unattended (the backup carries the TPM
   state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
+
+## Several nodes
+
+On a cluster of two nodes (the owner's: `hephaestus` and `hyve`; replace them with yours), with a second
+disposable server `test-04` (VM ID `9004`, address `192.0.2.13`) placed on the other node: `pve_node: hyve`
+on `test-04`, the group's `pve_node` left at `hephaestus`, both nodes in `proxmox_nodes` with their host keys
+pinned ([host-keys.md](host-keys.md#clustered-nodes)).
+
+- [ ] **Shared storage, one build.** With `pve_iso_storage` the shared `<iso-storage>`, delete the remastered
+  ISO from it, then run `make build-installer`. The plan says `<iso-storage> on hyve (shared): built by
+  hephaestus`; only `hephaestus` appears in the build play, and both nodes list the new ISO:
+
+  ```bash
+  pvesm list <iso-storage> --content iso | grep autoinstall    # on each node
+  ```
+
+- [ ] **Local storage, one build per node.** With `-e pve_iso_storage=local`, the plan says `built by` each
+  node for its own `local`, and `pvesm list local --content iso | grep autoinstall` finds the ISO on both.
+  A second run reports `changed=0`.
+- [ ] **A limit leaves a node out.** `make build-installer LIMIT=test-04 ARGS="-e pve_iso_storage=local"`
+  reports `local on hyve: skipped, --limit leaves its node out`; with `LIMIT=test-04,hyve` it builds there.
+- [ ] **A wrong node name is refused before anything is created.** With `pve_node: Hyve` on `test-04`,
+  `make provision` stops with `pve_node isn't a node in this cluster for 1 host(s): test-04 ('Hyve', did you
+  mean hyve)`, listing the cluster's nodes, and `qm list` on both nodes shows no new VM. Put `hyve` back.
+- [ ] **An unpinned node is named before anything is built.** Remove `hyve`'s entry from the control node's
+  `known_hosts` (`ssh-keygen -R <hyve's address>`): `make build-installer ARGS="-e pve_iso_storage=local"`
+  stops with `Node hyve (...): its SSH host key isn't in known_hosts`, before any node builds. Pin it again,
+  comparing the fingerprint with `hyve`'s console.
+- [ ] **Each VM on its node.** `make provision LIMIT=test-04` creates VM `9004` on `hyve` (`qm config 9004`
+  works there, not on `hephaestus`), the install completes, and no seed ISO or seed folder is left on `hyve`.
+  A second run skips it and reports `changed=0`.
+- [ ] **Web UI.** After **Test the connection**, the Servers page offers both nodes in each row's node
+  dropdown (Default first); setting `test-04` to `hyve` writes `pve_node: hyve` for it. The SSH key page
+  lists both nodes with their own address, scan, trust and login test; the overview's SSH step is done only
+  when both are trusted. The Run page shows `<iso-storage>` built once by `hephaestus` (or each node for
+  `local`), and a `build-installer` run from the UI matches it.
 
 ## A node user other than root
 
@@ -330,9 +366,11 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   ```bash
   qm stop 9001; qm destroy 9001 --purge     # on the node that holds the VM (and 9002, if made)
   qm stop 9003; qm destroy 9003 --purge
-  qm stop 9004; qm destroy 9004 --purge     # the encrypted test VM (its TPM state volume goes too)
+  qm stop 9004; qm destroy 9004 --purge     # on hyve
+  qm stop 9005; qm destroy 9005 --purge     # the encrypted test VM (its TPM state volume goes too)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
-  rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01
+  rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03 \
+    /var/tmp/ubuntu-server-auto-setup/seed-test-04
   ```
 
 - [ ] Remove the test keys: any key added to the GitHub account for the run, the test image's key from

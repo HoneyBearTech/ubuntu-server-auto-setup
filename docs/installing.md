@@ -138,6 +138,37 @@ cp inventory/hosts.example.yml inventory/hosts.yml
   `net_mode: dhcp` and no `ansible_host`; more network cards and VLANs are set with `pve_vlan` and
   `vm_extra_nics` ([interfaces.md](interfaces.md#networks)).
 
+### Several nodes of one cluster
+
+One inventory can place VMs on any node of one Proxmox VE cluster. Set `pve_node` for the group (the default)
+and override it on the servers that go elsewhere, and list every node they use in `proxmox_nodes`:
+
+```yaml
+    proxmox_nodes:
+      hosts:
+        hephaestus: { ansible_host: 192.0.2.10, ansible_user: root }
+        hyve: { ansible_host: 192.0.2.11, ansible_user: root }
+    ubuntu_servers:
+      vars:
+        pve_node: hephaestus
+      hosts:
+        web-01: { ansible_host: 10.10.10.61, pve_vmid: 4061 }
+        db-01: { ansible_host: 10.10.10.62, pve_vmid: 4062, pve_node: hyve }
+```
+
+- One API endpoint serves the whole cluster: `pve_api_host` can be any member. Nodes of a different cluster
+  need their own inventory (and token).
+- Before anything is built or created, the playbooks check every server's node against the cluster's node
+  list (one error names every wrong one; names are case-sensitive), that its ISO storage allows ISO images on
+  that node, and that every node they need answers over SSH with a host key already in `known_hosts`. Pin each
+  node's key first ([host-keys.md](host-keys.md#clustered-nodes)).
+- `build-installer` builds the installer ISO where the servers need it: once for a storage the cluster
+  shares (`shared` in Proxmox, such as NFS, CIFS or CephFS), on one node that uses it; on every node that
+  uses a node-local storage such as `local`. A node that already has the current ISO is skipped. With
+  `LIMIT=`, only the servers in the limit count, and a node builds only if it is in the limit too
+  (`LIMIT=db-01,hyve`); a node left out is reported as skipped.
+- Each VM's seed ISO is written on its own node, in its ISO storage.
+
 Every variable is described in [interfaces.md](interfaces.md) and the README's
 [configuration section](../README.md#configuration); each role's `defaults/main.yml` has the full list.
 
@@ -256,6 +287,13 @@ To go back to root, set `pve_ssh_user: root` again. To remove the user: `userdel
 - **The installer waits for input or never powers off**: the remastered ISO didn't get the `autoinstall`
   argument, or the seed ISO wasn't found. Open the VM's console. Rebuild the ISO with
   `ARGS="-e installer_iso_rebuild=true"`.
+- **"pve_node isn't a node in this cluster for ... host(s)"**: the error lists each server with the node it
+  names, and the cluster's real node names. Fix the inventory; nothing was created.
+- **"Node ... its SSH host key isn't in known_hosts, or has changed"**: the playbooks reach that node with
+  strict host-key checking. Compare its key with the node's console and pin it
+  ([host-keys.md](host-keys.md)); don't switch the check off.
+- **"... skipped, --limit leaves its node out"** from `build-installer`: add the node to the limit, or run
+  without one.
 - **A provisioning run failed half-way**: the run deletes the seed ISO and names the failed task. The VM
   exists now, so a rerun would skip it: delete it in Proxmox (`qm destroy <vmid>`) and run again. If the
   run was killed outright (Ctrl-C), also delete `seed-<host>.iso` from the ISO storage and

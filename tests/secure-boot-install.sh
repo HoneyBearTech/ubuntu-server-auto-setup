@@ -25,8 +25,10 @@ SSH_PORT=2299
 # The installer matches the network card by its MAC address (provision_nics, as tasks/main.yml builds it).
 VM_MAC=BC:24:11:00:00:99
 INSTALL_TIMEOUT="${INSTALL_TIMEOUT:-1800}"
-UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
-UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu}"
+# The installer's package mirror. Canonical's own servers have been slow or failing from the CI runners
+# (apt-get update exiting 100, the kernel download stalling); the kernel.org mirror carries every pocket.
+UBUNTU_MIRROR="${UBUNTU_MIRROR:-https://mirrors.edge.kernel.org/ubuntu}"
+UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-$UBUNTU_MIRROR}"
 qemu_pid=""
 swtpm_pid=""
 
@@ -131,8 +133,8 @@ ANSIBLE_CONFIG="$ROOT/ansible.cfg" ansible-playbook -i localhost, -c local "$W/r
   | sed -n '/PLAY RECAP/,$p'
 # For the test only: the installer also records PCR 7 as it measured it, to compare with the installed
 # system's (the install changes Secure Boot variables, which is why the role binds the slot after the first
-# boot), and uses Ubuntu's main archive with retries instead of a mirror picked by geolocation, which has
-# failed apt-get update from the CI runners. Everything else is the role's seed as rendered.
+# boot), and uses UBUNTU_MIRROR with retries instead of a mirror picked by geolocation. Everything else is
+# the role's seed as rendered.
 python3 - "$W/seed/user-data" "$UBUNTU_MIRROR" "$UBUNTU_SECURITY_MIRROR" <<'EOF'
 import sys, yaml
 with open(sys.argv[1]) as f:
@@ -225,6 +227,13 @@ reboot_vm() {
   wait_unattended "${1:-600}"
   [ "$(boot_id)" != "$before" ] || { echo "ERROR: the VM didn't reboot" >&2; exit 1; }
 }
+
+step "Checking the package mirror ($UBUNTU_MIRROR)"
+# A slow or failing mirror shows up here, before the install waits on it.
+for path in dists/resolute/InRelease dists/resolute-security/InRelease; do
+  curl -fsS -o /dev/null --max-time 60 -w "$path: HTTP %{http_code}, %{speed_download} bytes/s, %{time_total} s\n" \
+    "$UBUNTU_MIRROR/$path"
+done
 
 step "Installing from the remastered ISO under Secure Boot (the installer powers the VM off)"
 start_vm install -serial "file:$W/serial-install.log" \

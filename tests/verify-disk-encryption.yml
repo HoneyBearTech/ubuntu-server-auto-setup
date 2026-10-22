@@ -33,7 +33,7 @@
         quiet: true
 
 - name: Verify the installer's configuration
-  hosts: proxmox_nodes
+  hosts: pve-test   # the node srv-luks and srv-01 were created on
   gather_facts: false
   vars:
     passphrase: "{{ hostvars['srv-luks'].vm_disk_passphrase }}"

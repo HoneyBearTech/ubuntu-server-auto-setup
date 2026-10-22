@@ -1,0 +1,18 @@
+---
+# Added to tests/inventory/hosts.yml (a second -i) by one step of tests/run.sh: servers whose nodes the cluster
+# doesn't have, one only by case. The playbooks must refuse them all in one error, before creating anything.
+all:
+  children:
+    ubuntu_servers:
+      hosts:
+        srv-case:
+          ansible_host: 127.0.0.1
+          ansible_port: 2201
+          pve_vmid: 4083
+          pve_node: PVE-Test
+        srv-gone:
+          ansible_host: 127.0.0.1
+          ansible_port: 2201
+          pve_vmid: 4084
+          pve_node: pve-gone
+          pve_ssh_host: pve-test

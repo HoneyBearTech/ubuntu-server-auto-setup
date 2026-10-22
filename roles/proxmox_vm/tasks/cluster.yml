@@ -1,0 +1,63 @@
+---
+# Checks every host's placement against the cluster at once, before anything is created: its node must be one
+# of the cluster's nodes, and its ISO storage must allow ISO images and be active on that node. pve_placements
+# is the play's list of {host, node, ssh_host, storage} (see filter_plugins/pve_cluster.py). One API endpoint,
+# any member of the cluster, answers for all of its nodes. Leaves pve_node_storages for the ISO plan.
+- name: Check the hosts' nodes and ISO storages against the cluster
+  run_once: true
+  delegate_to: localhost
+  become: false
+  block:
+    - name: List the cluster's nodes
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes"
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
+      register: pve_nodes
+      check_mode: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    # Proxmox node names are case-sensitive (usually the lowercase host name), and a wrong one would only fail
+    # later, inside the API call that creates the VM.
+    - name: Check that every host's node is one of them
+      vars:
+        pve_node_names: "{{ pve_nodes.json.data | map(attribute='node') | sort }}"
+        pve_bad_nodes: "{{ pve_placements | pve_unknown_nodes(pve_node_names) }}"
+      ansible.builtin.assert:
+        that: pve_bad_nodes | length == 0
+        fail_msg: >-
+          pve_node isn't a node in this cluster for {{ pve_bad_nodes | length }} host(s):
+          {% for b in pve_bad_nodes %}{{ b.host }} ('{{ b.node }}'{{ ', did you mean ' ~ b.did_you_mean if b.did_you_mean
+          else '' }}){{ '; ' if not loop.last else '.' }}{% endfor %}
+          Its nodes are {{ pve_node_names | join(', ') }}{{ ' (node names are case-sensitive)'
+          if pve_bad_nodes | selectattr('did_you_mean') | list else '' }}. One inventory places VMs on the nodes of
+          one cluster, the one pve_api_host belongs to.
+        quiet: true
+
+    - name: List the ISO storages of each node used
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes/{{ item | urlencode }}/storage?content=iso"
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
+      loop: "{{ pve_placements | map(attribute='node') | unique | sort }}"
+      register: pve_node_storage_lists
+      check_mode: false
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Keep each node's ISO storages
+      ansible.builtin.set_fact:
+        pve_node_storages: "{{ pve_node_storage_lists.results | pve_storages_by_node }}"
+
+    - name: Check that every host's ISO storage is on its node
+      vars:
+        pve_bad_storages: "{{ pve_placements | pve_storage_problems(pve_node_storages) }}"
+      ansible.builtin.assert:
+        that: pve_bad_storages | length == 0
+        fail_msg: >-
+          {% for b in pve_bad_storages %}{{ b.host }}: storage '{{ b.storage }}' doesn't allow ISO images on node
+          {{ b.node }}, or isn't active there (ISO storages there: {{ b.available | join(', ') or 'none' }}).
+          {% endfor %}Set pve_iso_storage to one of them, or allow ISO images on the storage for that node
+          (Datacenter → Storage → Content: ISO image, and Nodes).
+        quiet: true

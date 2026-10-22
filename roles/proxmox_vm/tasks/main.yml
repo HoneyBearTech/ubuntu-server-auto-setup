@@ -198,38 +198,38 @@
   check_mode: false
   no_log: "{{ pve_hide_secrets }}"
 
-- name: List the cluster's nodes
-  ansible.builtin.uri:
-    url: "{{ pve_api_url }}/nodes"
-    headers: "{{ pve_api_headers }}"
-    validate_certs: "{{ pve_validate_certs }}"
-    timeout: "{{ pve_api_timeout | int }}"
-  register: pve_nodes
-  delegate_to: localhost
-  become: false
-  check_mode: false
-  no_log: "{{ pve_hide_secrets }}"
+- name: Note where the VM goes
+  ansible.builtin.set_fact:
+    pve_placement:
+      host: "{{ inventory_hostname }}"
+      node: "{{ pve_node }}"
+      ssh_host: "{{ pve_ssh_host }}"
+      storage: "{{ pve_iso_storage }}"
 
-# Proxmox node names are case-sensitive (usually the lowercase host name), and a wrong one only fails
-# later, inside the API call that creates the VM.
-- name: Check that pve_node is one of them
+# Every server of the run at once: one error lists every host whose node or ISO storage is wrong.
+- name: Check the servers' nodes and ISO storages against the cluster
+  ansible.builtin.import_tasks: cluster.yml
   vars:
-    pve_node_names: "{{ pve_nodes.json.data | map(attribute='node') | sort }}"
-  ansible.builtin.assert:
-    that: pve_node in pve_node_names
-    fail_msg: >-
-      pve_node '{{ pve_node }}' isn't a node in this cluster; its nodes are {{ pve_node_names | join(', ') }}.
-      {% if pve_node | lower in (pve_node_names | map('lower')) %}Node names are case-sensitive.{% endif %}
-    quiet: true
+    pve_placements: "{{ ansible_play_hosts | map('extract', hostvars, 'pve_placement') | list }}"
 
 - name: Check whether the cluster already has VM {{ pve_vmid }}
   ansible.builtin.set_fact:
     pve_vm_exists: "{{ pve_vms.json.data | selectattr('vmid', 'equalto', pve_vmid | int) | list | length > 0 }}"
 
 - name: Report existing VM
+  vars:
+    pve_vm_node: "{{ (pve_vms.json.data | selectattr('vmid', 'equalto', pve_vmid | int) | first).node | default('') }}"
   ansible.builtin.debug:
-    msg: VM {{ pve_vmid }} already exists; skipping install for {{ inventory_hostname }}.
+    msg: >-
+      VM {{ pve_vmid }} already exists{{ (' on node ' ~ pve_vm_node) if pve_vm_node != pve_node else '' }};
+      skipping install for {{ inventory_hostname }}.
   when: pve_vm_exists
+
+# Only the nodes that get a new VM need SSH (for the seed ISO).
+- name: Check SSH to the nodes that get a new VM
+  ansible.builtin.import_tasks: ssh_check.yml
+  vars:
+    pve_ssh_check_host: "{{ '' if pve_vm_exists else pve_ssh_host }}"
 
 - name: Install Ubuntu on a new VM
   ansible.builtin.include_tasks: provision.yml

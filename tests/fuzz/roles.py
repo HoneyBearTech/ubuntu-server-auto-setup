@@ -1,6 +1,7 @@
 """Loads the real templates, Jinja expressions and input patterns from the roles, rendered with Ansible's own
 filters and tests, so the fuzz targets exercise exactly what the playbooks run."""
 
+import importlib.util
 import itertools
 import pathlib
 import re
@@ -51,6 +52,15 @@ NATIVE = _setup(_AnsibleNativeEnvironment(undefined=jinja2.StrictUndefined))
 
 def template(role, name):
     return TEXT.from_string((ROOT / "roles" / role / "templates" / name).read_text())
+
+
+def filter_plugin(role, name):
+    """A role's filter plugin module (roles/<role>/filter_plugins/<name>.py), imported from its file."""
+    path = ROOT / "roles" / role / "filter_plugins" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{role}_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def role_vars(role):

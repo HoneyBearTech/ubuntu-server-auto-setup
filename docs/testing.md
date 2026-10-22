@@ -23,17 +23,22 @@ leaves the machine except the container image builds:
 
 | Real system | Stand-in |
 | --- | --- |
-| A Proxmox VE node (SSH as root and as the node user `prepare-node.yml` creates, ISO storage, a fake `pvesm` that runs for root only) | a Debian container with SSH on `127.0.0.1:2211` (`tests/images/pve-node`); its `xorriso` keeps a copy of each seed's user-data for the network checks |
+| Two Proxmox VE nodes of one cluster (SSH as root and as the node user `prepare-node.yml` creates, ISO storage, a fake `pvesm` that runs for root only) | two Debian containers from `tests/images/pve-node`, `pve-test` with SSH on `127.0.0.1:2211` and `pve-test-2` on `2212`. Each has its own `local` storage folder; a Docker volume mounted at the same path in both stands in for the cluster's shared NFS storage (`synology-nfs`). Their `xorriso` keeps a copy of each seed's user-data for the network checks |
 | releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
-| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. Once an installed VM runs, its guest agent lists one interface per network card with the card's MAC address; VM 4063's `net0` has a DHCP lease, the others only link-local addresses, and VM 4066's agent may not be asked. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
+| The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`, for a cluster of the two nodes with storages per node (`/nodes/<node>/storage`; `usb-iso` only on `pve-test`). A VM lives on the node it was created on, and calls for it must name that node. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. Once an installed VM runs, its guest agent lists one interface per network card with the card's MAC address; VM 4063's `net0` has a DHCP lease, the others only link-local addresses, and VM 4066's agent may not be asked. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
 
 The test keys, the mock's TLS certificate and `known_hosts` are created in a temporary directory for each
 run; your own `~/.ssh` is never touched. The steps:
 
-1. **build-installer** twice: the remastered ISO has the `autoinstall` kernel argument and a 3-second GRUB
-   timeout, and the second run changes nothing. Then it must refuse a `SHA256SUMS` whose checksum was
+1. **build-installer** twice with `local` storage: the ISO is remastered on both nodes, each of which has
+   servers, it has the `autoinstall` kernel argument and a 3-second GRUB timeout, and the second run changes
+   nothing. With `--limit` leaving the second node out it is skipped, and said so; a node whose host key
+   isn't trusted is named before any node builds; servers naming nodes the cluster doesn't have are refused
+   in one error, by both playbooks, before anything is created. With the shared `synology-nfs` storage the
+   ISO is built once, by `pve-test` only (only it has that run's work directory), and a storage a node
+   doesn't have is refused. Then it must refuse a `SHA256SUMS` whose checksum was
    swapped (bad signature), one with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one,
    and a malformed fingerprint.
 2. **provision-vms** for `srv-01`: the VM is created with the expected hardware (an EFI disk with Secure
@@ -41,7 +46,8 @@ run; your own `~/.ssh` is never touched. The steps:
    order set to disk only, the seed deleted, the VM started and its host key trusted. A second run, with
    `vm_secure_boot: false`, skips the existing VM and changes nothing on it. The mock stores `efidisk0` and
    `tpmstate0` the way Proxmox does and refuses what Proxmox would (keys on a 2 MB EFI disk, an EFI disk
-   without OVMF, an unknown TPM version).
+   without OVMF, an unknown TPM version). `srv-two` is created through `/nodes/pve-test-2/...`, with its seed
+   ISO on that node; a new VM on a node whose host key isn't trusted isn't created.
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
    Then the networks: `srv-dhcp` (`net_mode: dhcp`) is provisioned with the address its guest agent reports
@@ -145,6 +151,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_node_user.py` | `pve_ssh_user_pattern`, and the expression in `ubuntu_release` that reads the ISO folder from the file `prepare-node.yml` writes | the user pattern accepts exactly what `common_username_pattern` does; the folder taken is the storage's entry, an absolute path without control characters, or nothing |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
+| `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each node-local storage is built by its node when in the run, each shared storage exactly once by a node that uses it, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
 
 `make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it

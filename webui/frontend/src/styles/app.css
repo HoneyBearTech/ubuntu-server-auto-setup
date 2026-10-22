@@ -1092,7 +1092,8 @@ td a {
   padding: var(--space-3) var(--space-2);
 }
 
-.servers input[type="text"] {
+.servers input[type="text"],
+.servers select {
   min-width: 7rem;
   font-family: var(--font-mono);
   font-size: var(--text-sm);

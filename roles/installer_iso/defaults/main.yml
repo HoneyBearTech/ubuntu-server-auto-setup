@@ -10,3 +10,6 @@ installer_iso_rebuild: false
 # only for a mirror that signs its own SHA256SUMS.
 installer_signing_keyring: ubuntu-cdimage-keyring.gpg
 installer_signing_fingerprint: 843938DF228D22F7B3742BC0D94AA3F0EFE21092
+# The ISO storages this node builds the ISO in. build-installer.yml works them out from the servers' nodes and
+# pve_iso_storage (a shared storage on one node only); empty means just pve_iso_storage.
+installer_iso_storages: []
