@@ -21,6 +21,14 @@ docker run -d --name "$PVE" -p 127.0.0.1:2211:22 usas-test-pve:latest >/dev/null
 docker exec -i "$PVE" sh -c 'cat > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys' \
   <"$TEST_TMP/id_ed25519.pub"
 for _ in $(seq 1 30); do ssh-keyscan -T 2 -p 2211 127.0.0.1 >"$TEST_TMP/known_hosts" 2>/dev/null && break; sleep 1; done
+# A copy of the original ISO from an earlier run (CI caches it) saves the 3 GB download. The role still checks
+# it against the signed SHA256SUMS and downloads it again if it doesn't match.
+if [ -n "${USAS_ISO_CACHE:-}" ]; then
+  cache="${USAS_ISO_CACHE/#\~/$HOME}"
+  for iso in "$cache"/ubuntu-*-live-server-amd64.iso; do
+    [ -f "$iso" ] && docker cp "$iso" "$PVE:$ISO_DIR/" && echo "=== Using the cached $(basename "$iso")"
+  done
+fi
 
 for run in first second; do
   echo "=== build-installer against releases.ubuntu.com ($run run)"

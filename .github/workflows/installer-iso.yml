@@ -6,7 +6,8 @@ name: Installer ISO
 # SHA256SUMS (with the key that ships in the role), the checksum from it, the autoinstall kernel argument,
 # and BIOS and UEFI boot records identical to the original.
 # Weekly (Ubuntu can publish a new point release or change the ISO layout at any time) and on changes to
-# the installer roles.
+# the installer roles. The ISO is cached by its SHA-256, so only a new point release downloads it again;
+# the role still checks the cached copy against the signed SHA256SUMS, so a bad cache entry is re-downloaded.
 on:  # yamllint disable-line rule:truthy
   schedule:
     - cron: "23 4 * * 3" # weekly, Wednesday 04:23 UTC
@@ -26,7 +27,7 @@ jobs:
   real-iso:
     name: Remaster the real Ubuntu ISO
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,5 +44,50 @@ jobs:
           python -m pip install --require-hashes -r requirements-ci.txt
           ansible-galaxy collection install -r requirements.yml
 
+      - name: Find the current live-server ISO
+        id: iso
+        run: |
+          line="$(curl -fsS --retry 3 https://releases.ubuntu.com/26.04/SHA256SUMS \
+            | grep -E '^[0-9a-f]{64} \*ubuntu-26\.04(\.[0-9]+)?-live-server-amd64\.iso$' | sort -V -k2 | tail -n 1)"
+          sha="${line%% *}"
+          name="${line#*\*}"
+          [[ "$sha" =~ ^[0-9a-f]{64}$ && "$name" =~ ^ubuntu-26\.04(\.[0-9]+)?-live-server-amd64\.iso$ ]]
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the cached ISO
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/iso-cache
+          key: ubuntu-iso-${{ steps.iso.outputs.sha256 }}
+
+      - name: Download the ISO (cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          ISO_NAME: ${{ steps.iso.outputs.name }}
+          ISO_SHA256: ${{ steps.iso.outputs.sha256 }}
+        run: |
+          mkdir -p ~/iso-cache
+          # Any mirror will do: the checksum below and the role's signed SHA256SUMS decide what's accepted.
+          for base in https://mirrors.edge.kernel.org/ubuntu-releases/26.04 https://releases.ubuntu.com/26.04; do
+            if curl -fL --retry 3 --speed-limit 1000000 --speed-time 60 -o ~/iso-cache/"$ISO_NAME" "$base/$ISO_NAME" \
+              && echo "$ISO_SHA256  $HOME/iso-cache/$ISO_NAME" | sha256sum -c -; then
+              exit 0
+            fi
+            rm -f ~/iso-cache/"$ISO_NAME"
+          done
+          echo "Couldn't download $ISO_NAME from any mirror" >&2
+          exit 1
+
+      - name: Save the ISO to the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/iso-cache
+          key: ubuntu-iso-${{ steps.iso.outputs.sha256 }}
+
       - name: Remaster and check the real ISO
+        env:
+          USAS_ISO_CACHE: ~/iso-cache
         run: tests/real-iso.sh
