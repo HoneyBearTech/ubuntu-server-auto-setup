@@ -160,6 +160,8 @@ test("sign in by keyboard", async ({ browser }) => {
   await expect(page.getByLabel("Password")).toBeFocused();
   await checkKeyboard(page, "/login");
   await page.goto("/login");
+  // Typing before the page has focused the field would send the keys nowhere.
+  await expect(page.getByLabel("Password")).toBeFocused();
   await page.keyboard.type("not the password");
   await page.keyboard.press("Enter");
   // A wrong password: the message takes focus, so it is read out and keyboard users start there.
