@@ -21,8 +21,9 @@ what you downloaded came from that workflow, unchanged:
   provenance in both registries, and its names and digest are in `images.txt`, which `SHA256SUMS` covers.
 
 This applies to every release from the first one,
-[v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0), which the examples
-use. You need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or later (with
+[v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0). The examples use
+[v0.4.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.4.0); use the version you
+downloaded. You need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or later (with
 cosign 2.6, add `--new-bundle-format`), and the [GitHub CLI](https://cli.github.com/) for the provenance.
 
 ## The release files
@@ -43,12 +44,12 @@ the archive and the SBOM match it.
 ## Build provenance
 
 ```sh
-gh attestation verify ubuntu-server-auto-setup-0.1.0.tar.gz --repo HoneyBearTech/ubuntu-server-auto-setup \
+gh attestation verify ubuntu-server-auto-setup-0.4.0.tar.gz --repo HoneyBearTech/ubuntu-server-auto-setup \
   --signer-workflow HoneyBearTech/ubuntu-server-auto-setup/.github/workflows/release.yml
 ```
 
 It prints the verified attestation, including the commit and the workflow run. To verify offline, add
-`--bundle ubuntu-server-auto-setup-0.1.0.provenance.sigstore.json`. The same works for the SBOM.
+`--bundle ubuntu-server-auto-setup-0.4.0.provenance.sigstore.json`. The same works for the SBOM.
 
 ## The container image
 
@@ -84,7 +85,7 @@ whose public half is in [`.github/allowed_signers`](../.github/allowed_signers):
 
 ```sh
 git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git && cd ubuntu-server-auto-setup
-git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.1.0
+git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.4.0
 ```
 
 It should print `Good "git" signature for 31805425+HoneyBearTech@users.noreply.github.com`. Check
