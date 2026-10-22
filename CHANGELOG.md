@@ -8,12 +8,25 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-21
+
+The first baseline run on Ubuntu 26.04 completes again (sudo-rs), and provisioning no longer detaches the
+installer before a slow-starting VM is running; Ubuntu's GPG signature on `SHA256SUMS` is verified before
+the ISO checksum is trusted; extra SSH keys, the web UI's own included, are installed again, each once;
+`--check --diff` works on a fresh server. New: optional extra hardening and update and ban notifications
+(all off by default), a read-only VMs page in the web UI, browser and screen-reader checks of the web UI,
+and a pre-release checklist on real Proxmox VE.
+
 ### Upgrading
 
 - **From 0.3.0, on Ubuntu 26.04: run the baseline again.** A first baseline run there stopped right after it
   removed passwordless sudo, so SSH hardening, the firewall and Fail2Ban were never applied; the next run
   applies them. Key logins and `sudo` with the admin password worked all along. Your own playbooks that
   become root on 26.04 with a password need `ansible_become_exe: /usr/bin/sudo.ws` as well.
+- **A mirror in `ubuntu_iso_base_url` must publish `SHA256SUMS.gpg`** next to `SHA256SUMS`, signed by
+  Ubuntu's CD image key: `make build-installer` now stops before the download if the signature is missing
+  or wrong. releases.ubuntu.com and old-releases.ubuntu.com publish it. The Proxmox node gets `gpgv` if it
+  doesn't have it.
 
 ### Added
 
@@ -76,14 +89,6 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
-- Web UI: on narrow screens, Escape now closes the open menu and puts focus back on the **Menu** button,
-  and moving focus out of the menu closes it, so it no longer covers the part of the page that has focus.
-
-- [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
-  virtual environment the Proxmox modules don't read the system's trust store.
-
-### Fixed
-
 - A key both published on GitHub and listed in `admin_extra_ssh_keys` (for example a personal key uploaded
   as the web UI's key) was installed twice by the installer, and every baseline run then reported
   "Install the authorized keys" as changed. Each key is now installed once, by its type and key material,
@@ -107,6 +112,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Fail2Ban and other services that the run would install are skipped in check mode until they exist. A check
   run with a new `ssh_port` no longer tries to reconnect on a port sshd isn't using yet, and one with an
   `admin_user` that doesn't exist yet no longer fails on its `authorized_keys`.
+- Web UI: on narrow screens, Escape now closes the open menu and puts focus back on the **Menu** button,
+  and moving focus out of the menu closes it, so it no longer covers the part of the page that has focus.
+
+- [docs/installing.md](docs/installing.md) now says to set `REQUESTS_CA_BUNDLE` on Linux as well: in a
+  virtual environment the Proxmox modules don't read the system's trust store.
 
 ### Security
 
@@ -368,7 +378,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.4.0
 [0.3.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.0
 [0.2.3]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.3
 [0.2.2]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.2.2
