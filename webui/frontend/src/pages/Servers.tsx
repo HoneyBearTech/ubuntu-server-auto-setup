@@ -61,7 +61,7 @@ function ServersForm({ data, reload, status, setStatus }: {
     }
   };
   const rowOf = (key: string) => `Row ${Number(key.split("-")[1]) + 1}`;
-  const lastHelp = columns[columns.length - 1]?.help ?? "";
+  const help = (name: string) => columns.find((c) => c.name === name)?.help ?? "";
 
   return (
     <>
@@ -89,7 +89,7 @@ function ServersForm({ data, reload, status, setStatus }: {
                     const error = errors[id];
                     const value = row.values[c.name] ?? "";
                     const common = {
-                      id, name: id, defaultValue: value, "aria-label": `${c.label}, row ${i + 1}`,
+                      id, name: id, "aria-label": `${c.label}, row ${i + 1}`,
                       "aria-invalid": error ? true : undefined,
                       "aria-describedby": error ? `${id}-error` : undefined,
                     };
@@ -98,15 +98,21 @@ function ServersForm({ data, reload, status, setStatus }: {
                         {c.name === "pve_node" && nodes.length ? (
                           // The cluster's nodes from the last connection test; empty is the default node.
                           <div className="select">
-                            <select {...common}>
+                            <select {...common} defaultValue={value}>
                               <option value="">Default{data.default_node ? ` (${data.default_node})` : ""}</option>
                               {(value && !nodes.includes(value) ? [...nodes, value] : nodes).map((n) => (
                                 <option key={n} value={n}>{n}</option>
                               ))}
                             </select>
                           </div>
+                        ) : c.kind === "choice" ? (
+                          <div className="select">
+                            <select {...common} defaultValue={value || c.default || ""}>
+                              {(c.choices ?? []).map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+                            </select>
+                          </div>
                         ) : (
-                          <input type="text" {...common}
+                          <input type="text" {...common} defaultValue={value}
                                  inputMode={c.kind === "int" ? "numeric" : undefined}
                                  placeholder={c.kind === "int" && c.default ? c.default
                                    : c.name === "pve_node" ? data.default_node || undefined : undefined}
@@ -134,9 +140,12 @@ function ServersForm({ data, reload, status, setStatus }: {
         <div className="card-body">
           <p className="help">
             Name: a host name (letters, digits, hyphens), also the VM's name in Proxmox. IP address: the static IPv4
-            address the installer configures. Node: the Proxmox node the VM is created on; the default is the node
-            on the Proxmox page{nodes.length ? "" : " (test the connection there to pick from the cluster's nodes)"}.
-            Extra firewall rules: {lastHelp}
+            address the installer configures. Address: static, or dhcp to get the address from your DHCP server; the
+            playbooks then read it from the VM's guest agent, unless you enter the address reserved for it as the IP
+            address. MAC address (optional): the first card's, for a DHCP reservation. Node: the Proxmox node the VM
+            is created on; the default is the node on the Proxmox page{nodes.length ? ""
+              : " (test the connection there to pick from the cluster's nodes)"}. Extra network
+            cards: {help("vm_extra_nics")} Extra firewall rules: {help("ufw_ports")}
           </p>
           <div aria-live="polite">{status ? <Notice notice={status} /> : null}</div>
         </div>

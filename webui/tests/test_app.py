@@ -568,7 +568,7 @@ def test_notification_values_that_could_inject_settings_are_refused(ui, name, ra
 def test_servers(ui):
     configure(ui, servers=2)
     data = get(ui, "/api/servers").json()
-    assert [c["name"] for c in data["columns"]][:3] == ["name", "ansible_host", "pve_vmid"]
+    assert [c["name"] for c in data["columns"]][:4] == ["name", "ansible_host", "net_mode", "net_mac"]
     assert data["rows"][1]["name"] == "web-01" and data["rows"][0]["ufw_ports"] == "443/tcp"
     assert data["rows"][0]["vm_cores"] == ""
     base = {"server_count": "3", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
@@ -593,6 +593,69 @@ def test_servers(ui):
     assert servers[0]["vm_cores"] == 4 and "vm_cores" not in servers[1]
     r = post(ui, "/servers", {"server_count": "lots"})
     assert r.json()["message"] == "Saved 0 server(s)."
+
+
+def test_servers_networks(ui):
+    configure(ui)
+    row = {"server_count": "1", "servers-0-name": "app-01", "servers-0-pve_vmid": "4100"}
+
+    def errors(**fields):
+        r = post(ui, "/servers", {**row, **{f"servers-0-{k}": v for k, v in fields.items()}})
+        assert r.status_code == 422
+        return r.json()["errors"]
+
+    assert "static IP address, or choose dhcp" in errors(net_mode="static")["servers-0-ansible_host"]
+    assert "Address must be one of: static, dhcp" in errors(net_mode="bootp")["servers-0-net_mode"]
+    assert "isn't in the accepted format" in errors(net_mode="dhcp", net_mac="01:00:00:00:00:01")["servers-0-net_mac"]
+    assert "remove via" in errors(net_mode="dhcp", vm_extra_nics="vmbr1 10.2.0.5/24 via 10.2.0.1")[
+        "servers-0-vm_extra_nics"]
+    assert "Only one card" in errors(ansible_host="10.0.0.9", vm_extra_nics="vmbr1 10.2.0.5/24 via 10.2.0.1, "
+                                     "vmbr2 10.3.0.5/24 via 10.3.0.1")["servers-0-vm_extra_nics"]
+    assert "its own MAC address" in errors(net_mode="dhcp", net_mac="bc:24:11:00:00:01",
+                                           vm_extra_nics="vmbr1 dhcp mac BC:24:11:00:00:01")["servers-0-vm_extra_nics"]
+    assert "vlan takes a VLAN tag" in errors(net_mode="dhcp", vm_extra_nics="vmbr1 vlan 0 dhcp")[
+        "servers-0-vm_extra_nics"]
+    two = {"server_count": "2", "servers-0-name": "a", "servers-0-pve_vmid": "4100", "servers-0-net_mode": "dhcp",
+           "servers-0-net_mac": "BC:24:11:00:00:01", "servers-1-name": "b", "servers-1-pve_vmid": "4101",
+           "servers-1-net_mode": "dhcp", "servers-1-net_mac": "bc:24:11:00:00:01"}
+    assert post(ui, "/servers", two).json()["errors"] == {"servers-1-net_mac": "Another server already uses this."}
+
+    # Saved: no address for the DHCP server, the cards as the role's list, and the gateway moved to a card.
+    r = post(ui, "/servers", {"server_count": "3", "servers-0-name": "app-01", "servers-0-pve_vmid": "4100",
+                              "servers-0-net_mode": "dhcp", "servers-0-net_mac": "bc:24:11:00:00:01",
+                              "servers-0-vm_extra_nics": "vmbr1 vlan 30 dhcp, vmbr2 none",
+                              "servers-1-name": "gw-01", "servers-1-pve_vmid": "4101", "servers-1-net_mode": "static",
+                              "servers-1-ansible_host": "10.0.0.11",
+                              "servers-1-vm_extra_nics": "vmbr1 vlan 20 10.20.0.11/24 via 10.20.0.1 mtu 9000",
+                              "servers-2-net_mode": "static"})
+    assert r.json()["message"] == "Saved 2 server(s)."
+    text = ui.app_state.settings.inventory_file.read_text()
+    hosts = load_yaml(text)["all"]["children"]["ubuntu_servers"]["hosts"]
+    assert hosts["app-01"] == {"pve_vmid": 4100, "net_mode": "dhcp", "net_mac": "BC:24:11:00:00:01",
+                               "vm_extra_nics": [{"mode": "dhcp", "bridge": "vmbr1", "vlan": 30},
+                                                 {"mode": "none", "bridge": "vmbr2"}]}
+    assert hosts["gw-01"]["net_gateway"] == "" and "net_mode" not in hosts["gw-01"]
+    assert hosts["gw-01"]["vm_extra_nics"] == [{"mode": "static", "bridge": "vmbr1", "vlan": 20,
+                                                "address": "10.20.0.11", "prefix": 24, "gateway": "10.20.0.1",
+                                                "mtu": 9000}]
+    assert "!unsafe 'vmbr1'" in text  # every typed string is tagged
+    rows = get(ui, "/api/servers").json()["rows"]
+    assert rows[0]["ansible_host"] == "" and rows[0]["net_mode"] == "dhcp"
+    assert rows[0]["vm_extra_nics"] == "vmbr1 vlan 30 dhcp, vmbr2 none"
+    assert rows[1]["vm_extra_nics"] == "vmbr1 vlan 20 10.20.0.11/24 via 10.20.0.1 mtu 9000"
+
+    gateway_step = next(s for s in get(ui, "/api/overview").json()["steps"] if "gateway" in s["label"])
+    # Without a gateway on the Defaults page, a static server needs a card with one.
+    assert post(ui, "/defaults", {"action": "save", **{**DEFAULTS, "net_gateway": ""}}).status_code == 200
+    assert "gateway on the Defaults page" in errors(ansible_host="10.0.0.9")["servers-0-vm_extra_nics"]
+    assert post(ui, "/servers", {**row, "servers-0-ansible_host": "10.0.0.9",
+                                 "servers-0-vm_extra_nics": "vmbr1 10.2.0.5/24 via 10.2.0.1"}).status_code == 200
+    def gateway_done():
+        return {s["label"]: s["done"] for s in get(ui, "/api/overview").json()["steps"]}[gateway_step["label"]]
+
+    assert gateway_step["done"] and gateway_done()  # every server has its default route without that gateway
+    post(ui, "/servers", {"server_count": "0"})
+    assert not gateway_done()
 
 
 # --- SSH key and host key ------------------------------------------------------------------------------------
@@ -667,7 +730,8 @@ def test_servers_pick_their_node_from_the_cluster(ui, monkeypatch):
     cluster_test(ui, monkeypatch, ["pve-1", "pve-2"])
     data = get(ui, "/api/servers").json()
     assert data["nodes"] == ["pve-1", "pve-2"] and data["default_node"] == "pve-1"
-    assert [c["name"] for c in data["columns"]][3] == "pve_node" and data["rows"][0]["pve_node"] == ""
+    names = [c["name"] for c in data["columns"]]
+    assert names[names.index("pve_vmid") + 1] == "pve_node" and data["rows"][0]["pve_node"] == ""
     base = {"server_count": "2", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
             "servers-0-pve_vmid": "4000", "servers-1-name": "web-01", "servers-1-ansible_host": "10.0.0.11",
             "servers-1-pve_vmid": "4001"}

@@ -277,8 +277,8 @@
     "name": "net_gateway",
     "label": "Gateway",
     "kind": "text",
-    "help": "",
-    "required": true,
+    "help": "Needed for servers with a static address (unless an extra network card has the default route).",
+    "required": false,
     "advanced": false,
     "variable": "net_gateway",
     "default": null,
@@ -799,9 +799,34 @@
     "label": "IP address",
     "kind": "text",
     "help": "",
-    "required": true,
+    "required": false,
     "advanced": false,
     "variable": "ansible_host",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "net_mode",
+    "label": "Address",
+    "kind": "choice",
+    "help": "How the first network card gets its IPv4 address: static (ansible_host, net_prefix and net_gateway) or dhcp. With dhcp and no ansible_host, the address is read from the QEMU guest agent once the installed system boots and used as ansible_host for the rest of the run; the API token needs VM.GuestAgent.Audit (PVE 9) or VM.Monitor (PVE 8). With dhcp and an ansible_host (an address reserved for net_mac), that address is used.",
+    "required": false,
+    "advanced": false,
+    "variable": "net_mode",
+    "default": "static",
+    "choices": [
+     "static",
+     "dhcp"
+    ]
+   },
+   {
+    "name": "net_mac",
+    "label": "MAC address",
+    "kind": "text",
+    "help": "MAC address of net0, for example to reserve its DHCP address on the router. Empty uses one derived from the host name and VM ID, so a VM created again gets the same one.",
+    "required": false,
+    "advanced": false,
+    "variable": "net_mac",
     "default": null,
     "choices": null
    },
@@ -861,6 +886,17 @@
     "choices": null
    },
    {
+    "name": "vm_extra_nics",
+    "label": "Extra network cards",
+    "kind": "list",
+    "help": "Comma-separated, each a bridge, then vlan and a tag, then dhcp, none or an address/prefix (optionally via a gateway), optionally mtu, model and mac. Example: vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 dhcp. More network cards (net1, net2, ...), each a mapping with these keys (only mode is needed for dhcp or none): The installed system matches each card by its MAC address. Example:.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_extra_nics",
+    "default": null,
+    "choices": null
+   },
+   {
     "name": "ufw_ports",
     "label": "Extra firewall rules",
     "kind": "list",
@@ -876,21 +912,27 @@
    {
     "name": "web-01",
     "ansible_host": "10.0.0.61",
+    "net_mode": "",
+    "net_mac": "",
     "pve_vmid": "4061",
     "pve_node": "",
     "vm_cores": "",
     "vm_memory_mb": "",
     "vm_disk_gb": "",
+    "vm_extra_nics": "",
     "ufw_ports": "443/tcp"
    },
    {
     "name": "db-01",
     "ansible_host": "10.0.0.70",
+    "net_mode": "",
+    "net_mac": "",
     "pve_vmid": "4070",
     "pve_node": "ares",
     "vm_cores": "",
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
+    "vm_extra_nics": "",
     "ufw_ports": ""
    }
   ],

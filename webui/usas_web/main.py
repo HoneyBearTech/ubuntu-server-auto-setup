@@ -543,6 +543,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return bool(used) and all(config.node_addresses.get(n) and keys.trusted(config.node_addresses[n])
                                   for n in used)
 
+    def gateway_set(config: Config) -> bool:
+        """Whether every server has its default route: the Defaults page's gateway, DHCP, or an extra card's."""
+        if config.values.get("net_gateway"):
+            return True
+        return bool(config.servers) and all(
+            srv.get("net_mode") == "dhcp" or any(nic.get("gateway") for nic in srv.get("vm_extra_nics") or [])
+            for srv in config.servers)
+
     def readiness(config: Config) -> list[dict[str, Any]]:
         v = config.values
         steps = [
@@ -553,7 +561,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ("SSH key", bool(keys.public_key()), "/ssh"),
             ("Each Proxmox node's SSH address and trusted host key", nodes_ready(config), "/ssh"),
             ("Admin password, gateway and SSH keys for the servers",
-             bool(config.secret_is_set("vault_admin_password") and v.get("net_gateway")
+             bool(config.secret_is_set("vault_admin_password") and gateway_set(config)
                   and (v.get("github_user") or v.get("admin_extra_ssh_keys") or config.authorize_ui_key)),
              "/defaults"),
             ("At least one server", bool(config.servers), "/servers"),
@@ -753,7 +761,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rows, errors = [], {}
         for i in range(count):
             raw = {c.name: form.get(f"servers-{i}-{c.name}", "") for c in schema.server_columns}
-            if not any(str(v).strip() for v in raw.values()):
+            # A row whose fields are empty (a choice left at its default) is skipped.
+            if not any(str(raw[c.name]).strip() not in ("", str(c.default) if c.kind == "choice" else "")
+                       for c in schema.server_columns):
                 continue
             row: dict[str, Any] = {}
             for c in schema.server_columns:
@@ -768,12 +778,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 row[c.name] = value
             row["_index"] = i
             rows.append(row)
-        seen: dict[str, dict[Any, int]] = {"name": {}, "ansible_host": {}, "pve_vmid": {}}
+        seen: dict[str, dict[Any, int]] = {"name": {}, "ansible_host": {}, "pve_vmid": {}, "net_mac": {}}
         # Servers and nodes are hosts of the same inventory, so their names can't be the same.
         node_names = {*(store.cluster().get("nodes") or {}), *config.node_names(),
                       *(r["pve_node"] for r in rows if r.get("pve_node"))}
         for row in rows:
             i = row["_index"]
+            network_problem(row, config, errors)
             for key in seen:
                 value = row.get(key)
                 if value in (None, ""):
@@ -787,6 +798,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if problem and f"servers-{i}-pve_node" not in errors:
                 errors[f"servers-{i}-pve_node"] = problem
         return rows, errors
+
+    def network_problem(row: dict[str, Any], config: Config, errors: dict[str, str]) -> None:
+        """The checks of roles/proxmox_vm/tasks/main.yml that involve more than one of a row's fields."""
+        i = row["_index"]
+        if row.get("net_mac"):
+            row["net_mac"] = str(row["net_mac"]).upper()  # as the role writes it, and to find it twice
+        cards = row.get("vm_extra_nics") or []
+        dhcp = row.get("net_mode") == "dhcp"
+        routes = [card for card in cards if card.get("gateway")]
+        if not dhcp and not row.get("ansible_host") and f"servers-{i}-ansible_host" not in errors:
+            errors[f"servers-{i}-ansible_host"] = "Enter the static IP address, or choose dhcp as the address."
+        if f"servers-{i}-vm_extra_nics" in errors:
+            return
+        macs = [str(m).upper() for m in [row.get("net_mac")] + [card.get("mac") for card in cards] if m]
+        if len(routes) > 1:
+            errors[f"servers-{i}-vm_extra_nics"] = "Only one card can have the default route (via)."
+        elif dhcp and routes:
+            errors[f"servers-{i}-vm_extra_nics"] = "With dhcp, the first card gets the default route: remove via."
+        elif not dhcp and not routes and not config.values.get("net_gateway"):
+            errors[f"servers-{i}-vm_extra_nics"] = ("A static address needs the gateway on the Defaults page, or an "
+                                                   "extra card with via and its gateway.")
+        elif len(set(macs)) != len(macs):
+            errors[f"servers-{i}-vm_extra_nics"] = "Each card needs its own MAC address."
 
     def server_rows(config: Config) -> list[dict[str, str]]:
         rows = []

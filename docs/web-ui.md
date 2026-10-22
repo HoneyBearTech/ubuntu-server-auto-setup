@@ -162,12 +162,23 @@ The overview lists the steps and whether each is done.
 3. **Defaults**: the GitHub user whose keys are installed (**Preview the keys** shows what GitHub returns,
    filtered exactly as the roles filter it), extra public keys, whether to authorize the UI's own key on the
    servers (on by default: the baseline logs in with it), the admin user and password, the time zone, the
-   gateway, prefix length, DNS servers and search domains, and the installer's disk layout.
-4. **Servers**: one row per VM: its name (also the VM's name in Proxmox), static IPv4 address, VM ID, and
+   gateway (needed for servers with a static address), prefix length, DNS servers and search domains, and
+   the installer's disk layout.
+4. **Servers**: one row per VM: its name (also the VM's name in Proxmox), its address, VM ID, and
    optionally its node, cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
    `5432/tcp from 10.0.0.0/24`, separated by commas). The node is a dropdown of the cluster's nodes after a
    connection test; **Default** uses the node on the Proxmox page. Empty sizes use the role defaults. A
-   server can't be named like a node: both are hosts of the same inventory.
+   server can't be named like a node: both are hosts of the same inventory. **Address** is
+   `static` (the IP address the installer configures) or `dhcp`: leave the IP address empty and the
+   playbooks read the address from the VM's guest agent after the install (the token needs
+   `VM.GuestAgent.Audit`, see [installing.md](installing.md#2-create-the-proxmox-api-token)), and the
+   **VMs** page shows it; or enter the address you reserved on the DHCP server for the row's **MAC address**.
+   **Extra network cards** become `net1`, `net2` and so on, separated by commas, each written as the bridge,
+   then `vlan` and a tag, then `dhcp`, `none` or an address/prefix (optionally `via` a gateway, which then
+   replaces the Defaults page's gateway for that server), then optionally `mtu`, `model` and `mac`:
+   `vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 vlan 30 dhcp`. Each value is checked against the
+   provisioning role's own formats, and so is the rule that exactly one card has the default route
+   ([interfaces.md](interfaces.md#networks)).
 5. **Hardening**: the SSH port, the users allowed to log in over SSH, root login, passwordless sudo, the
    firewall's SSH sources and rules for every server, and the Fail2Ban settings. Below them, off until you
    turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
