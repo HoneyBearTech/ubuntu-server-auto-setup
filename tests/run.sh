@@ -136,7 +136,8 @@ play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 play playbooks/provision-vms.yml --limit srv-01
-play --idempotent playbooks/provision-vms.yml --limit srv-01
+# Changed settings don't reach a VM that exists: it is skipped, not reconfigured.
+play --idempotent playbooks/provision-vms.yml --limit srv-01 -e vm_secure_boot=false
 
 step "provision-vms: values that could break the installer's configuration are refused before anything is created"
 play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
@@ -152,10 +153,63 @@ step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml
 
+step "provision-vms: disk encryption needs Secure Boot, the lvm layout and a usable passphrase"
+play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+  -e vm_secure_boot=false
+play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+  -e autoinstall_storage_layout=direct
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e vm_disk_passphrase=too-short
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e '{"vm_disk_passphrase": "long-enough-passphrase\n"}'
+play_fails 'vm_disk_passphrase must be 12 to 512' playbooks/provision-vms.yml --limit srv-luks \
+  -e '{"vm_disk_passphrase": "long-enough-but-{braces}"}'
+
+step "provision-vms: an encrypted VM gets a vTPM, and the passphrase stays out of the output even while debugging"
+play playbooks/provision-vms.yml --limit srv-luks -v --diff -e pve_hide_secrets=false
+if grep -lF test-disk-passphrase-4063 "$TEST_TMP"/play.*; then
+  echo "ERROR: the disk passphrase is in the output above" >&2
+  exit 1
+fi
+play --idempotent playbooks/provision-vms.yml --limit srv-luks
+play tests/verify-disk-encryption.yml
+
+step "The installer's TPM enrollment script edits only the root disk's crypttab line, and a second run changes nothing"
+docker exec "$PVE" cat /srv/seeds/seed-srv-luks/user-data >"$TEST_TMP/user-data-luks"
+python3 -c 'import sys, yaml
+files = {f["path"]: f["content"] for f in yaml.safe_load(open(sys.argv[1]))["write_files"]}
+sys.stdout.write(files["/run/usas/enroll-tpm2.sh"])' "$TEST_TMP/user-data-luks" >"$TEST_TMP/enroll-tpm2.sh"
+# blkid, systemd-cryptenroll and dracut are stubs that log their arguments.
+docker run --rm -v "$TEST_TMP/enroll-tpm2.sh:/enroll-tpm2.sh:ro" usas-test-pve:latest sh -euc '
+  mkdir -p /stubs /etc/dracut.conf.d
+  printf "#!/bin/sh\ncase \"\$*\" in *UUID*) echo 1111-2222 ;; *) echo /dev/sda3 ;; esac\n" >/stubs/blkid
+  for c in systemd-cryptenroll dracut; do printf "#!/bin/sh\necho %s \"\$*\" >>/calls\n" "$c" >/stubs/$c; done
+  chmod +x /stubs/*
+  printf "# <name> <device> <key> <options>\ndm_crypt-0 UUID=1111-2222 none luks\nscratch UUID=3333 /dev/urandom swap\n" >/etc/crypttab
+  PATH="/stubs:$PATH" sh /enroll-tpm2.sh
+  cp /etc/crypttab /crypttab.first
+  PATH="/stubs:$PATH" sh /enroll-tpm2.sh
+  cmp /etc/crypttab /crypttab.first
+  cat /etc/crypttab /calls /etc/dracut.conf.d/90-usas-tpm2.conf' >"$TEST_TMP/enroll.out"
+cat >"$TEST_TMP/enroll.expected" <<'EOF'
+# <name> <device> <key> <options>
+dm_crypt-0 UUID=1111-2222 none luks,tpm2-device=auto
+scratch UUID=3333 /dev/urandom swap
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 /dev/sda3
+dracut --regenerate-all --force
+systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 /dev/sda3
+dracut --regenerate-all --force
+# Unlock the root disk with the TPM at boot (set up by ubuntu-server-auto-setup).
+add_dracutmodules+=" tpm2-tss systemd-cryptsetup "
+install_items+=" /etc/crypttab "
+EOF
+diff -u "$TEST_TMP/enroll.expected" "$TEST_TMP/enroll.out"
+
 step "ISO storage other than local: its folder is asked from Proxmox, and the VM's CD-ROMs use it"
 play playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
 play --idempotent playbooks/build-installer.yml -e pve_iso_storage=synology-nfs
-play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs
+# It also opts out of Secure Boot.
+play playbooks/provision-vms.yml --limit srv-nfs -e pve_iso_storage=synology-nfs -e vm_secure_boot=false
 play tests/verify-iso-storage.yml
 play_fails "Storage 'backup-nfs' doesn't exist on pve-test, isn't active, or doesn't allow ISO images" \
   playbooks/build-installer.yml -e pve_iso_storage=backup-nfs

@@ -70,7 +70,8 @@
         dest: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/user-data"
         mode: "0600"
       delegate_to: "{{ pve_ssh_host }}"
-      no_log: "{{ pve_hide_secrets }}"
+      # The disk passphrase is in it in clear text: hidden even while debugging with pve_hide_secrets false.
+      no_log: "{{ pve_hide_secrets or vm_disk_encryption | bool }}"
 
     - name: Render meta-data
       ansible.builtin.template:
@@ -97,7 +98,7 @@
       changed_when: true
       delegate_to: "{{ pve_ssh_host }}"
 
-    - name: Restrict the seed ISO (it holds the password hash)
+    - name: Restrict the seed ISO (it holds the password hash and any disk passphrase)
       ansible.builtin.file:
         path: "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
         mode: "0600"
@@ -125,6 +126,8 @@
           format: "{{ pve_efidisk_format }}"
           efitype: 4m
           pre_enrolled_keys: "{{ vm_secure_boot | bool }}"
+        # A virtual TPM 2.0 for unlocking the encrypted disk. Proxmox keeps its state on the VM's storage.
+        tpmstate0: "{{ {'storage': pve_storage, 'version': '2.0'} if vm_disk_encryption | bool else omit }}"
         cpu: "{{ vm_cpu_type }}"
         sockets: "{{ vm_sockets }}"
         cores: "{{ vm_cores }}"
@@ -231,14 +234,24 @@
 - name: Wait until the installed system is booting
   ansible.builtin.include_tasks: wait_for_start.yml
 
-- name: Wait for SSH on {{ ansible_host }}
-  ansible.builtin.wait_for:
-    host: "{{ ansible_host }}"
-    port: "{{ ansible_port | default(22) | int }}"
-    search_regex: OpenSSH
-    timeout: 600
-  delegate_to: localhost
-  become: false
+- name: Wait for the installed system to answer
+  block:
+    - name: Wait for SSH on {{ ansible_host }}
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ ansible_port | default(22) | int }}"
+        search_regex: OpenSSH
+        timeout: 600
+      delegate_to: localhost
+      become: false
+  rescue:
+    - name: Stop with a hint about the console
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} didn't answer on SSH after the install. Check VM {{ pve_vmid }}'s console.
+          {% if vm_disk_encryption | bool %}If it asks for the disk passphrase, the TPM didn't release the key (the
+          Secure Boot state changed since the install): type the recovery passphrase, then see "Disk encryption" in
+          docs/security.md to enroll the TPM again.{% endif %}
 
 - name: Refresh the control node's known_hosts entry
   when: provision_manage_known_hosts | bool
@@ -273,3 +286,14 @@
 - name: Wait until the admin user can log in
   ansible.builtin.wait_for_connection:
     timeout: 300
+
+# The installer keeps root-only copies of its configuration on the new disk. With encryption they hold the
+# disk passphrase, so they go now rather than at the first baseline run (they were only ever inside the
+# encrypted volume).
+- name: Delete the installer's copies of its configuration (they hold the disk passphrase)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ provision_installer_config_copies }}"
+  become: true
+  when: vm_disk_encryption | bool

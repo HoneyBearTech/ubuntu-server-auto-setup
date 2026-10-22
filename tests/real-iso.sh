@@ -43,4 +43,8 @@ records ubuntu-26.04.1-live-server-amd64-autoinstall.iso | tee "$TEST_TMP/new.tx
 grep -q 'UEFI' "$TEST_TMP/orig.txt"
 grep -q 'BIOS' "$TEST_TMP/orig.txt"
 diff -u "$TEST_TMP/orig.txt" "$TEST_TMP/new.txt"
+# For tests/secure-boot-install.sh, which boots it.
+if [ -n "${USAS_KEEP_ISO:-}" ]; then
+  docker cp "$PVE:$ISO_DIR/ubuntu-26.04.1-live-server-amd64-autoinstall.iso" "$USAS_KEEP_ISO"
+fi
 echo "=== The real ISO remasters correctly"

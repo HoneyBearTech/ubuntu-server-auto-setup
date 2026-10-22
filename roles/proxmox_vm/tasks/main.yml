@@ -30,6 +30,35 @@
       host name (letters, digits, hyphens), ansible_host and net_gateway IPv4 addresses, and net_prefix 1-32.
     quiet: true
 
+# The TPM only releases the disk key while PCR 7 (Secure Boot state) matches, so encryption without Secure
+# Boot would bind it to nothing. Subiquity encrypts only the lvm layout.
+- name: Check the disk encryption settings
+  ansible.builtin.assert:
+    that:
+      - vm_secure_boot | bool
+      - autoinstall_storage_layout == 'lvm'
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_disk_encryption needs vm_secure_boot true (OVMF with pre-enrolled keys, which
+      the TPM binds the key to) and autoinstall_storage_layout lvm.
+    quiet: true
+  when: vm_disk_encryption | bool
+
+# The passphrase is checked into a plain true/false first, so no output of this task can hold it.
+- name: Check the disk passphrase's format
+  ansible.builtin.set_fact:
+    provision_disk_passphrase_ok: "{{ vm_disk_passphrase | string is match(provision_disk_passphrase_pattern) }}"
+  no_log: true
+  when: vm_disk_encryption | bool
+
+- name: Fail unless the disk passphrase is usable
+  ansible.builtin.assert:
+    that: provision_disk_passphrase_ok
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_disk_passphrase must be 12 to 512 printable ASCII characters without braces;
+      set it to "{{ '{{' }} vault_disk_passphrase {{ '}}' }}".
+    quiet: true
+  when: vm_disk_encryption | bool
+
 - name: Build the API auth header
   ansible.builtin.set_fact:
     pve_api_headers:

@@ -18,12 +18,16 @@
           - vm.config.bios == 'ovmf'
           - vm.config.machine == 'q35'
           - vm.config.scsihw == 'virtio-scsi-single'
-          - vm.config.efidisk0 is search('efitype=4m')
+          # Secure Boot by default: Microsoft's and the distribution keys pre-enrolled. No vTPM without encryption.
+          - vm.config.efidisk0 == 'local-lvm:vm-4061-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M'
+          - "'tpmstate0' not in vm.config"
           - vm.config.scsi0 is search('local-lvm:32')
           - vm.config.net0 is search('bridge=vmbr0')
           - "'ide2' not in vm.config and 'ide3' not in vm.config"
           - vm.config.boot == 'order=scsi0'
           - vm.config_updates[0].delete == 'ide2,ide3'
+          # The only change after the create: the rerun with other settings left the VM alone.
+          - vm.config_updates | length == 1
           # The installer ran: after its first start the VM was seen running, then powered itself off.
           - vm.installed
           - vm.starts == 2

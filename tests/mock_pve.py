@@ -105,6 +105,48 @@ def fixture_resources():
     return data
 
 
+def _parse_bool(value):
+    """A Proxmox boolean (it accepts 1/0, yes/no, on/off and true/false in any case)."""
+    lowered = str(value).lower()
+    if lowered in ("1", "yes", "on", "true"):
+        return True
+    if lowered in ("0", "no", "off", "false"):
+        return False
+    raise ValueError(f"invalid boolean value '{value}'")
+
+
+def _special_disks(config, vmid):
+    """Checks efidisk0 and tpmstate0 as Proxmox does and stores them the way it does: the allocated volume, then
+    the options (booleans as 1 or 0). Returns an error message, or None."""
+    disk_number = 0
+    for key in ("efidisk0", "tpmstate0"):
+        if key not in config:
+            continue
+        storage_size, *options = config[key].split(",")
+        storage, _, size = storage_size.partition(":")
+        opts = dict(option.partition("=")[::2] for option in options)
+        opts.pop("format", None)
+        if not storage or size != "1":
+            return f"{key}: expected <storage>:1 for a new volume, got '{storage_size}'"
+        if key == "efidisk0":
+            if config.get("bios") != "ovmf":
+                return "efidisk0: only for bios=ovmf"
+            try:
+                keys = _parse_bool(opts.get("pre-enrolled-keys", "0"))
+            except ValueError as err:
+                return f"efidisk0: pre-enrolled-keys: {err}"
+            if keys and opts.get("efitype") != "4m":
+                return "efidisk0: pre-enrolled-keys needs efitype=4m"
+            opts["pre-enrolled-keys"] = "1" if keys else "0"
+        elif opts.get("version") not in ("v1.2", "v2.0"):
+            return f"tpmstate0: version must be v1.2 or v2.0, got '{opts.get('version')}'"
+        volume = f"{storage}:vm-{vmid}-disk-{disk_number}"
+        disk_number += 1
+        opts["size"] = "4M"
+        config[key] = ",".join([volume, *(f"{k}={v}" for k, v in sorted(opts.items()))])
+    return None
+
+
 def upid(action, vmid):
     return f"UPID:{NODE}:0000AAAA:00BBBBBB:6700CCCC:{action}:{vmid}:ansible@pve!test:"
 
@@ -227,6 +269,9 @@ class PveHandler(BaseHTTPRequestHandler):
             if vmid in vms:
                 return self._reply(500, {"vmid": f"VM {vmid} already exists"})
             config = dict(form)
+            error = _special_disks(config, vmid)
+            if error:
+                return self._reply(400, {"config": error})
             if "net0" in config:  # Proxmox adds a MAC address to the NIC
                 model, _, rest = config["net0"].partition(",")
                 config["net0"] = f"{model}=BC:24:11:00:{int(vmid) // 100 % 100:02d}:{int(vmid) % 100:02d},{rest}"

@@ -21,11 +21,13 @@ ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", 
          "hardening")
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
-# doesn't edit, and the rest are file paths and package or platform lists.
+# doesn't edit, the rest are file paths and package or platform lists, and disk encryption (with its Vault
+# passphrase) is set in the inventory only for now.
 NOT_FORM_FORMATS = frozenset({
     "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file",
+    "provision_disk_passphrase_pattern", "provision_installer_config_copies",
 })
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with

@@ -29,7 +29,16 @@ vm_sockets: 1
 vm_cpu_type: host
 vm_memory_mb: 2048
 vm_disk_gb: 32
-vm_secure_boot: false          # pre-enroll Secure Boot keys in the EFI disk
+# Pre-enroll Microsoft's Secure Boot keys in the EFI disk, so the firmware boots only signed code (Ubuntu's
+# shim, GRUB and kernel). New VMs only; set false for a VM that must boot unsigned kernels or modules.
+vm_secure_boot: true
+# Encrypt the root disk with LUKS2 and unlock it at boot with a virtual TPM (Proxmox vTPM). The TPM releases
+# the key only while Secure Boot state (PCR 7) is unchanged, so this needs vm_secure_boot and the lvm layout.
+# It protects a copied disk image or backup, not a VM whose Proxmox host is compromised: see docs/security.md.
+vm_disk_encryption: false
+# The LUKS passphrase, set it to "{{ vault_disk_passphrase }}". It stays enrolled as the recovery key for
+# the console. 12 to 512 printable ASCII characters, no braces.
+vm_disk_passphrase: ""
 vm_onboot: true
 # How long to wait for the installer to finish and power off the VM.
 vm_install_timeout: 3600

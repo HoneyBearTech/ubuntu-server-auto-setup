@@ -1,0 +1,74 @@
+---
+# After tests/run.sh provisioned srv-luks (vm_disk_encryption) and srv-01 (the defaults). The node's test
+# xorriso kept a copy of each seed's user-data in /srv/seeds/ (tests/fixtures/xorriso).
+- name: Verify the encrypted VM's hardware through the API
+  hosts: localhost
+  gather_facts: false
+  vars:
+    passphrase: "{{ hostvars['srv-luks'].vm_disk_passphrase }}"
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+        return_content: true
+      register: verify_api
+
+    - name: Check its EFI disk, vTPM and install
+      vars:
+        vm: "{{ verify_api.json.data.vms['4063'] }}"
+      ansible.builtin.assert:
+        that:
+          - vm.config.bios == 'ovmf'
+          - vm.config.machine == 'q35'
+          - vm.config.efidisk0 == 'local-lvm:vm-4063-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M'
+          - vm.config.tpmstate0 == 'local-lvm:vm-4063-disk-1,size=4M,version=v2.0'
+          - vm.installed
+          - vm.starts == 2
+          - vm.config_updates | length == 1
+
+    - name: Check the passphrase never reached the API
+      ansible.builtin.assert:
+        that: verify_api.content is not search(passphrase | regex_escape)
+        quiet: true
+
+- name: Verify the installer's configuration
+  hosts: proxmox_nodes
+  gather_facts: false
+  vars:
+    passphrase: "{{ hostvars['srv-luks'].vm_disk_passphrase }}"
+  tasks:
+    - name: Read the user-data the installers got
+      ansible.builtin.slurp:
+        src: /srv/seeds/seed-{{ item }}/user-data
+      loop: [srv-luks, srv-01]
+      register: verify_seeds
+
+    - name: Check the encrypted VM's storage layout, packages and late commands
+      vars:
+        doc: "{{ verify_seeds.results[0].content | b64decode | from_yaml }}"
+        ai: "{{ doc.autoinstall }}"
+        files: "{{ doc.write_files | items2dict(key_name='path', value_name='content') }}"
+        script: "{{ files['/run/usas/enroll-tpm2.sh'] }}"
+      ansible.builtin.assert:
+        that:
+          - doc.keys() | sort == ['autoinstall', 'write_files']
+          - "ai.storage == {'layout': {'name': 'lvm', 'sizing-policy': 'all', 'password': passphrase}}"
+          - "'tpm2-tools' in ai.packages and 'qemu-guest-agent' in ai.packages"
+          - ai['late-commands'][2:] == ['curtin in-target -- sh /run/usas/enroll-tpm2.sh', 'rm -rf /run/usas']
+          - doc.write_files | map(attribute='permissions') | list == ['0600', '0700']
+          - files['/run/usas/disk-key'] == passphrase
+          - script is search('systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs=7 ')
+          - script is search('dracut --regenerate-all --force')
+        quiet: true
+
+    - name: Check the default VM's seed has no encryption
+      vars:
+        doc: "{{ verify_seeds.results[1].content | b64decode | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - doc.keys() | list == ['autoinstall']
+          - "doc.autoinstall.storage == {'layout': {'name': 'lvm', 'sizing-policy': 'all'}}"
+          - doc.autoinstall['late-commands'] | length == 2
+          - "'tpm2-tools' not in doc.autoinstall.packages"
+        quiet: true

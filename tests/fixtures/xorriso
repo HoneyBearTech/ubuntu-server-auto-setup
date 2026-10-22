@@ -1,0 +1,14 @@
+#!/bin/sh
+# Test node only, ahead of the real xorriso on PATH: keeps a copy of each seed's user-data in
+# /srv/seeds/<seed directory>/ before the seed ISO is built, so the tests can check what the installer would
+# have read after the role has deleted the seed. Everything else goes straight to the real xorriso.
+for arg in "$@"; do
+  case "$arg" in
+    */seed-*/user-data)
+      copy="/srv/seeds/$(basename "$(dirname "$arg")")"
+      mkdir -p "$copy"
+      cp "$arg" "$copy/user-data"
+      ;;
+  esac
+done
+exec /usr/bin/xorriso "$@"
