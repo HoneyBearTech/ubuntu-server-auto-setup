@@ -135,8 +135,10 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   over HTTPS. Pages can't be framed and load only the UI's own script, stylesheet and fonts, nothing inline
   (Content Security Policy). The app in the browser only shows what the server answers: every value is
   checked on the server.
-- The API token and the admin password are stored only in the Ansible Vault file; once saved they are never
-  sent back to the browser; run logs mask them. The SSH private key never leaves the data volume.
+- The API token, the admin password and the other secrets (the mail relay password, the webhook URL and the
+  disk passphrase) are stored only in the Ansible Vault file; once saved they are never sent back to the
+  browser; run logs mask them. The Defaults page refuses disk encryption without Secure Boot, the `lvm`
+  layout and a passphrase that matches the role's pattern, as the role would. The SSH private key never leaves the data volume.
 - Every value the UI writes into the inventory is validated against the roles' own allowlist patterns (or
   a stricter format of the UI's) and tagged `!unsafe`, so no value can become an Ansible template; commands
   run with argument lists, never a shell; `--limit` takes only the inventory's own host and group names.

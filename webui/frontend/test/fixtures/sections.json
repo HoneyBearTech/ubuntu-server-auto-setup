@@ -342,6 +342,29 @@
     "variable": "vm_secure_boot",
     "default": "true",
     "choices": null
+   },
+   {
+    "name": "vm_disk_encryption",
+    "label": "Encrypt the root disk",
+    "kind": "bool",
+    "help": "Only for VMs created from now on; existing VMs are left as they are. Encrypt the root disk with LUKS2 and unlock it at boot with a virtual TPM (Proxmox vTPM). The TPM releases the key only while Secure Boot state (PCR 7) is unchanged, so this needs vm_secure_boot and the lvm layout. It protects a copied disk image or backup, not a VM whose Proxmox host is compromised: see docs/security.md.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_disk_encryption",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "vm_disk_passphrase",
+    "label": "Disk passphrase",
+    "kind": "secret",
+    "help": "The recovery key: typed at the VM's console when the TPM doesn't unlock the disk. 12 to 512 printable ASCII characters, no braces. Kept in the Vault and never shown again, so keep a copy in your password manager. A new one applies to VMs created after it; existing VMs keep theirs.",
+    "required": false,
+    "advanced": false,
+    "variable": "vault_disk_passphrase",
+    "default": null,
+    "choices": null,
+    "saved": false
    }
   ],
   "values": {
@@ -356,7 +379,9 @@
    "net_dns": "10.0.0.1\n1.1.1.1",
    "net_search": "example.lan",
    "autoinstall_storage_layout": "lvm",
-   "vm_secure_boot": false
+   "vm_secure_boot": false,
+   "vm_disk_encryption": false,
+   "vm_disk_passphrase": ""
   },
   "ui_key": "",
   "authorize_ui_key": true,

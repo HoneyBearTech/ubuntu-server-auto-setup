@@ -93,6 +93,12 @@ play_says() {
   echo "said as expected: $expect"
 }
 
+# Makes the mock API drop the next call to METHOD PATH (a regex), before or after carrying it out.
+drop() {
+  curl -fsSk -X POST -H 'Content-Type: application/json' \
+    -d "{\"method\": \"$1\", \"path\": \"$2\", \"when\": \"$3\"}" https://127.0.0.1:8006/mock/drop >/dev/null
+}
+
 # Fails unless the mock API has none of the given VM IDs.
 no_vms() {
   python3 - "$@" <<'PY'
@@ -208,7 +214,21 @@ play_fails "isn't by the key 843938DF228D22F7B3742BC0D94AA3F0EFE21092" playbooks
 play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_signing_fingerprint=EFE21092
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
-play playbooks/provision-vms.yml --limit srv-01
+# With connections dropped as pveproxy restarting a worker drops them: two reads, which are retried, and the
+# creation, which Proxmox carries out without answering, so the next try finds the VM and the run carries on.
+drop GET /nodes before
+drop GET /cluster/resources before
+drop POST /nodes/pve-test/qemu after
+play_says 'Create VM 4061 (3 retries left)' playbooks/provision-vms.yml --limit srv-01
+python3 - <<'PY'
+import json, ssl, sys, urllib.request
+state = json.load(urllib.request.urlopen("https://127.0.0.1:8006/mock/state", context=ssl._create_unverified_context()))["data"]
+creates = [r for r in state["requests"] if r["method"] == "POST" and r["path"] == "/nodes/pve-test/qemu"]
+if len(state["dropped"]) != 3 or any(d["times"] for d in state["drops"]):
+    sys.exit(f"ERROR: not every dropped call was made: {state['drops']}")
+if [c["form"].get("vmid") for c in creates] != ["4061"] or "4061" not in state["vms"]:
+    sys.exit(f"ERROR: VM 4061 should have been created by one request, not {len(creates)}")
+PY
 # Changed settings don't reach a VM that exists: it is skipped, not reconfigured.
 play --idempotent playbooks/provision-vms.yml --limit srv-01 -e vm_secure_boot=false
 

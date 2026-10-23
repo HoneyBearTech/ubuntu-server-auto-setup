@@ -17,6 +17,10 @@
     validate_certs: "{{ pve_validate_certs }}"
     timeout: "{{ pve_api_timeout | int }}"
   register: pve_dhcp_vms
+  # A dropped connection (pveproxy restarting a worker) is retried; any answer from Proxmox is final.
+  until: pve_dhcp_vms.status | default(-1) | int != -1
+  retries: 3
+  delay: 5
   delegate_to: localhost
   become: false
   check_mode: false
@@ -63,6 +67,10 @@
     validate_certs: "{{ pve_validate_certs }}"
     timeout: "{{ pve_api_timeout | int }}"
   register: pve_dhcp_config
+  # A dropped connection (pveproxy restarting a worker) is retried; any answer from Proxmox is final.
+  until: pve_dhcp_config.status | default(-1) | int != -1
+  retries: 3
+  delay: 5
   delegate_to: localhost
   become: false
   check_mode: false

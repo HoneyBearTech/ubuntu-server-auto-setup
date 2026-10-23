@@ -772,6 +772,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.save(config)
         return reply(message="Saved the Proxmox settings.")
 
+    def disk_encryption_problems(config: Config, errors: dict[str, str]) -> None:
+        """What disk encryption needs that the defaults don't have, as the role's checks would find it."""
+        passphrase = "vm_disk_passphrase"  # noqa: S105 (the field's name, not a secret)
+        if passphrase in errors:
+            errors[passphrase] = ("The disk passphrase must be 12 to 512 printable ASCII characters (letters, "
+                                  "digits, spaces and punctuation), without braces.")
+        if not setting(config, "vm_disk_encryption") or "vm_disk_encryption" in errors:
+            return
+        needs = []
+        if not setting(config, "vm_secure_boot"):
+            needs.append("Secure Boot keys (under Installation, More settings)")
+        if setting(config, "autoinstall_storage_layout") != "lvm":
+            needs.append("the lvm disk layout")
+        if needs:
+            errors["vm_disk_encryption"] = "Encrypting the root disk needs " + " and ".join(needs) + "."
+        if not config.secret_is_set("vault_disk_passphrase") and passphrase not in errors:
+            errors[passphrase] = "Set a disk passphrase: it unlocks the disk when the TPM doesn't."
+
     @app.get("/api/defaults")
     async def defaults_data(request: Request):
         require_login(request)
@@ -786,6 +804,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         preview = form.get("action") == "preview"
         problems = apply_section("defaults", form, config,
                                  ("github_user", "github_keys_url", "admin_extra_ssh_keys") if preview else ())
+        if not preview:
+            disk_encryption_problems(config, problems.errors)
         if problems:
             return reply(422, errors=problems.errors)
         if preview:
