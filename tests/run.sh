@@ -126,6 +126,12 @@ wait_ssh() {
   return 1
 }
 
+step "ansible.cfg waits 30 seconds for a connection and for sudo's prompt (servers just after a reboot)"
+ansible-config dump --only-changed | grep -Eq '^DEFAULT_TIMEOUT\(.*\) = 30$' || {
+  echo "ERROR: ansible.cfg doesn't set [defaults] timeout = 30" >&2
+  exit 1
+}
+
 step "Setting up keys, the mock Proxmox API and the containers"
 ssh-keygen -q -t ed25519 -N '' -C test@ubuntu-server-auto-setup -f "$TEST_TMP/id_ed25519"
 cp "$TEST_TMP/id_ed25519.pub" "$TEST_TMP/test.keys"
