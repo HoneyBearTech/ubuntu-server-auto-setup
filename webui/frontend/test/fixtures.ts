@@ -142,4 +142,5 @@ export const account: AccountData = {
   ],
   require_passkey: false, broken: false, rp_id: "localhost", public_url: "", max_passkeys: 20, max_name: 64,
   current: "cred-laptop",
+  status_token: { exists: false, broken: false, hint: "", created: null, last_used: null, last_from: "" },
 };

@@ -221,6 +221,16 @@ export interface Passkey {
   backed_up: boolean;
 }
 
+// The status API's token for dashboards: never the token itself, which is shown once when it is made.
+export interface StatusToken {
+  exists: boolean;
+  broken: boolean; // the file can't be read: no token works until it is revoked
+  hint: string; // the first characters after usas_st_
+  created: number | null;
+  last_used: number | null;
+  last_from: string;
+}
+
 export interface AccountData {
   passkeys: Passkey[];
   require_passkey: boolean;
@@ -230,4 +240,5 @@ export interface AccountData {
   max_passkeys: number;
   max_name: number;
   current: string; // how this session signed in: "password", or the ID of the passkey it used
+  status_token: StatusToken;
 }

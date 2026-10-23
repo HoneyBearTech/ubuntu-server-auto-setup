@@ -17,6 +17,7 @@ API for other programs. What should be reachable from where is described in the
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
 | The web UI (the USAS app and its JSON API on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
+| The status API (`GET /api/status`, off by default) | dashboards such as Heimdall, with the status token | [below](#the-status-api); [web-ui.md](web-ui.md#dashboards-heimdall) |
 | The container image and its settings (environment variables, the `/data` volume) | the operator, with Docker | [below](#the-web-ui); [web-ui.md](web-ui.md#settings) |
 | `start.ps1` | the operator, on Windows | [web-ui.md](web-ui.md#starting-it); `Get-Help .\start.ps1` |
 
@@ -273,7 +274,8 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
-  uses. That API isn't a stable interface for other programs; use the inventory and `ansible-playbook`.
+  uses. That API isn't a stable interface for other programs (use the inventory and `ansible-playbook`),
+  except [the status API](#the-status-api).
 - **Look**: a dark theme by default, light or the system's choice from the theme switch (kept in the
   `usas_theme` cookie).
 - **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
@@ -285,10 +287,49 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   turn the password off ([web-ui.md](web-ui.md#passkeys)).
 - **Files in `/data`**: `inventory/hosts.yml` and `inventory/group_vars/all/vault.yml` are an ordinary
   inventory and Vault (the CLI can use them with `--vault-password-file /data/.vault-pass`); the UI also
-  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `webui.json` and `runs/` there
+  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `status-token.json`, `webui.json`
+  and `runs/` there
   ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
   (`webui_ufw_allow`, `webui_ufw_allow_host`, `webui_authorize_ui_key`).
 - **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.
+
+### The status API
+
+`GET /api/status` gives dashboards a short, read-only summary. It is off (404) until a token is made on
+the account page, and takes the token only as `Authorization: Bearer usas_st_<43 characters>`. It is the
+one stable interface of the web UI for other programs: `schema` goes up when a key changes meaning or goes
+away; new keys can appear in any release, so ignore keys you don't know.
+
+```json
+{
+  "schema": 1,
+  "version": "0.6.0",
+  "setup": {"done": 5, "total": 5},
+  "running": {"playbook": "site", "check": false, "started": 1792750000},
+  "last_run": {"playbook": "baseline", "check": false, "started": 1792740000, "status": "succeeded",
+               "finished": 1792740600},
+  "servers": {"total": 5, "pending": 1},
+  "vms": {"running": 9, "total": 12},
+  "fetched": 1792750030
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `schema` | The answer's version, `1`. |
+| `version` | The USAS version (`dev` for images built from a checkout). |
+| `setup` | The overview page's set-up steps: how many are done, of how many. |
+| `running` | The run going now, or `null`: `playbook` (`build-installer`, `provision`, `baseline`, `site` or `keys`), `check` (check mode), `started` (Unix time). |
+| `last_run` | The newest finished run, or `null`: the same keys plus `status` (`succeeded`, `failed`, `stopped` or `interrupted`) and `finished`. |
+| `servers` | `total`: the servers in the inventory; `pending`: those whose VM ID isn't on the cluster yet (a provisioning run would create them), or `null` when the cluster can't be asked. |
+| `vms` | The cluster's QEMU VMs (templates left out): `running` and `total`, or `null` until the Proxmox page has the API host and token, or when the cluster can't be listed. Counted at most once a minute. |
+| `fetched` | When the answer was made (Unix time). |
+
+It never holds host, node, cluster or VM names, addresses, VM IDs, run limits or logs, or any secret.
+Other answers: `401` with `WWW-Authenticate: Bearer` (no, a malformed, a wrong, a replaced or a revoked
+token), `404` (off), `429` with `Retry-After` (too many wrong tokens from that address, or more than 60 calls
+a minute), `405` (any method but `GET`); each with `{"error": "..."}`. The host check and the HTTPS rule of
+the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 
 ## Interfaces the project uses
 
