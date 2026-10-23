@@ -134,6 +134,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - The development requirements set a lower bound of 26.10.1 on black (installed through ansible-lint), which fixes
   GHSA-cg8m-r9f2-5wm2. Only the lint tooling is affected; the playbooks, the image and the web UI don't use black.
+- CI's Secure Boot test answers the recovery passphrase prompt reliably: it waits for the whole prompt and
+  answers the console's cursor queries (systemd 259 asks them on a serial console), falls back to typing on
+  the screen, and its passphrase check passes `--disable-external-tokens` to `cryptsetup`, without which the
+  TPM token unlocked the disk and any passphrase was accepted; it also checks that a wrong one is refused.
 
 ## [0.4.0] - 2026-10-21
 
