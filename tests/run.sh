@@ -358,6 +358,10 @@ printf '{"pve_ssh_user": "usas-build", "proxmox_node_user_ssh_keys": ["%s"],
 play_fails 'Set pve_ssh_user to the lowercase Linux user name to create' playbooks/prepare-node.yml
 play_fails "These storages don't exist on pve-test, aren't active, or don't allow ISO images: backup-nfs" \
   playbooks/prepare-node.yml -e "@$build_user" -e '{"proxmox_node_user_iso_storages": ["local", "backup-nfs"]}'
+# An NFS export that lets only root in: the ACL entry goes on, but the user can't reach the folder.
+docker exec "$PVE" sh -c 'mkdir -p /mnt/pve/squash-nfs/template/iso && chmod 0700 /mnt/pve/squash-nfs'
+play_fails "usas-build can't write to /mnt/pve/squash-nfs/template/iso (mktemp: " playbooks/prepare-node.yml \
+  -e "@$build_user" -e '{"proxmox_node_user_iso_storages": ["local", "squash-nfs"]}'
 play playbooks/prepare-node.yml -e "@$build_user"
 play --idempotent playbooks/prepare-node.yml -e "@$build_user"
 play_fails 'logs in to pve-test as root, but pve_ssh_user is usas-build' playbooks/build-installer.yml \
@@ -366,6 +370,12 @@ play_fails 'pve_ssh_user must be a lowercase Linux user name' playbooks/build-in
 play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e installer_iso_rebuild=true
 play --idempotent playbooks/build-installer.yml -e pve_ssh_user=usas-build
 play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs
+# If the export stops letting the user in, the build says so instead of "Permission denied".
+template_mode="$(docker exec "$PVE" stat -c %a /mnt/pve/synology-nfs/template)"
+docker exec "$PVE" chmod 0700 /mnt/pve/synology-nfs/template
+play_fails "/mnt/pve/synology-nfs/template/iso on pve-test can't be reached by usas-build" \
+  playbooks/build-installer.yml --limit srv-01,pve-test -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs
+docker exec "$PVE" chmod "$template_mode" /mnt/pve/synology-nfs/template
 play playbooks/provision-vms.yml --limit srv-user -e pve_ssh_user=usas-build
 play tests/verify-node-user.yml
 # usb-iso allows ISO images on pve-test (so the API check passes), but prepare-node.yml didn't record it.
