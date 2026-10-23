@@ -10,6 +10,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Disk encryption on the web UI's Defaults page** (`vm_disk_encryption`, off by default, which until now
+  had to be set in the inventory). Its passphrase goes to the Vault (`vault_disk_passphrase`), is never
+  sent back to the browser and is masked in run logs. The page refuses to save encryption without Secure
+  Boot keys, the `lvm` layout and a passphrase the role accepts. It applies to VMs created after it is saved.
+
 - **A status API for dashboards such as Heimdall** (`GET /api/status`, off by default): a short, read-only
   summary (whether a run is going and which playbook, how the last one ended, the cluster's running and total
   VMs, the servers still to install, the version and the set-up progress) with no names, addresses or
@@ -22,6 +27,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
   stream before React had opened it. It now waits for the stream, as does the log view's follow test.
+- A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0
+  checks, it failed one of three VMs created at once, though Proxmox had created it, and failed a read with
+  an SSL EOF. Provisioning and `build-installer` now retry the read-only API calls when the connection drops
+  (any answer from Proxmox is final). They also retry creating a VM; after a dropped connection they carry on
+  only with a VM that has the server's name and the role's description, and otherwise stop and say why.
 - When the "Installer ISO" workflow's remaster of the real ISO failed, its log showed only the play recap.
   `tests/real-iso.sh` now shows each failed task with its error (or the log's last 200 lines), and the job
   keeps every play's full log as a `real-iso-logs` artifact for 7 days.

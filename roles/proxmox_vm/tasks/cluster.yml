@@ -15,6 +15,10 @@
         validate_certs: "{{ pve_validate_certs }}"
         timeout: "{{ pve_api_timeout | int }}"
       register: pve_nodes
+      # A dropped connection (pveproxy restarting a worker) is retried; any answer from Proxmox is final.
+      until: pve_nodes.status | default(-1) | int != -1
+      retries: 3
+      delay: 5
       check_mode: false
       no_log: "{{ pve_hide_secrets }}"
 
@@ -43,6 +47,10 @@
         timeout: "{{ pve_api_timeout | int }}"
       loop: "{{ pve_placements | map(attribute='node') | unique | sort }}"
       register: pve_node_storage_lists
+      # A dropped connection (pveproxy restarting a worker) is retried; any answer from Proxmox is final.
+      until: pve_node_storage_lists.status | default(-1) | int != -1
+      retries: 3
+      delay: 5
       check_mode: false
       no_log: "{{ pve_hide_secrets }}"
 

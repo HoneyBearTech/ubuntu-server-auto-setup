@@ -218,7 +218,8 @@ describe("the defaults page", () => {
     renderAt("/defaults");
     await loaded();
     expect(screen.getAllByRole("group").map((g) => g.querySelector("legend")?.textContent)).toEqual(
-      expect.arrayContaining(["SSH keys for the admin user", "Admin user", "Network", "Installation"]));
+      expect.arrayContaining(["SSH keys for the admin user", "Admin user", "Network", "Installation",
+        "Disk encryption (off by default)"]));
     expect(input("Time zone").getAttribute("list")).toBe("timezones");
     expect(document.querySelectorAll("#timezones option")).toHaveLength(3);
     expect((screen.getByLabelText("Also authorize this UI's SSH key") as HTMLInputElement).checked).toBe(true);
@@ -251,6 +252,53 @@ describe("the defaults page", () => {
     expect(screen.getByText("ssh-ed25519 AAAA ui")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("The form expired.");
+  });
+
+  it("turns on disk encryption with a passphrase it never shows again, and shows what it still needs", async () => {
+    let saved = false;
+    const fields = () => fixtures.defaults.fields.map((f) => f.name === "vm_disk_passphrase" ? { ...f, saved } : f);
+    const api = new FakeApi({
+      "GET /api/defaults": () => ({ ...fixtures.defaults, fields: fields() }),
+      "POST /api/defaults": (c) => {
+        if (c.body.vm_secure_boot !== "on") {
+          return reply(422, { errors: { vm_disk_encryption: "Encrypting the root disk needs Secure Boot keys (under Installation, More settings)." } });
+        }
+        saved = true;
+        return { message: "Saved the defaults." };
+      },
+    });
+    renderAt("/defaults");
+    await loaded();
+    const group = screen.getAllByRole("group").find((g) => g.querySelector("legend")?.textContent === "Disk encryption (off by default)") as HTMLElement;
+    expect(within(group).getByRole("link", { name: "security.md" }).getAttribute("href")).toContain("docs/security.md");
+    const encrypt = within(group).getByLabelText("Encrypt the root disk") as HTMLInputElement;
+    const passphrase = within(group).getByLabelText("Disk passphrase") as HTMLInputElement;
+    expect(encrypt.checked).toBe(false);
+    expect(passphrase.type).toBe("password");
+    expect(passphrase.getAttribute("autocomplete")).toBe("new-password");
+    expect(within(group).getByText("Not set yet.")).toBeTruthy();
+    await userEvent.click(encrypt);
+    await userEvent.type(passphrase, "correct horse battery staple");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Without Secure Boot keys the server refuses, and says so by the field and in the summary.
+    await screen.findAllByText(/needs Secure Boot keys/);
+    expect(encrypt.getAttribute("aria-invalid")).toBe("true");
+    expect(encrypt.getAttribute("aria-describedby")).toContain("f-vm_disk_encryption-error");
+    await userEvent.click(screen.getByLabelText("Secure Boot keys"));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved the defaults.");
+    const body = api.posts("/api/defaults")[1].body;
+    expect(body).toMatchObject({ vm_disk_encryption: "on", vm_secure_boot: "on", vm_disk_passphrase: "correct horse battery staple" });
+    // Loaded again, the passphrase isn't in the page: it only says one is saved.
+    await waitFor(() => expect(api.calls.filter((c) => c.path === "/api/defaults" && c.method === "GET")).toHaveLength(2));
+    const reloaded = within(await waitFor(() => {
+      const field = input("Disk passphrase").closest(".field") as HTMLElement;
+      expect(within(field).getByText("A value is saved. Leave this empty to keep it.")).toBeTruthy();
+      return field;
+    }));
+    expect(input("Disk passphrase").value).toBe("");
+    expect(reloaded.getByLabelText("Remove the saved value")).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain("correct horse");
   });
 });
 

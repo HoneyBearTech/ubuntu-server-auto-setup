@@ -104,7 +104,11 @@
         mode: "0600"
       delegate_to: "{{ pve_ssh_host }}"
 
-    - name: Create the VM
+    # pveproxy restarting a worker can drop the connection while Proxmox goes on to create the VM (seen with three
+    # VMs created at once), and proxmox_kvm doesn't retry. A dropped connection is retried, and a try that finds
+    # the VM created changes nothing; any other answer from Proxmox is final. A last try that drops too isn't an
+    # error here: the check below finds out whether the VM exists.
+    - name: Create VM {{ pve_vmid }}
       community.proxmox.proxmox_kvm:
         api_host: "{{ pve_api_host }}"
         api_port: "{{ pve_api_port }}"
@@ -146,7 +150,57 @@
         timeout: 300
       delegate_to: localhost
       become: false
+      register: pve_vm_create
+      failed_when: pve_vm_create is failed and not pve_vm_create_dropped
+      until: not pve_vm_create_dropped
+      retries: 3
+      delay: 5
+      vars:
+        pve_vm_create_dropped: "{{ pve_vm_create.msg | default('') is search(pve_api_dropped_pattern) }}"
       no_log: "{{ pve_hide_secrets }}"
+
+    # After a dropped connection the VM may exist although no try reported creating it, or (if something else made
+    # one with the same ID in between) be another VM: carry on only with one that has this host's name and the
+    # role's description, once Proxmox has finished creating it.
+    - name: Check the VM after a dropped connection
+      when: pve_vm_create.attempts | default(1) | int > 1
+      block:
+        - name: Read the configuration of VM {{ pve_vmid }}
+          ansible.builtin.uri:
+            url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/config"
+            headers: "{{ pve_api_headers }}"
+            validate_certs: "{{ pve_validate_certs }}"
+            timeout: "{{ pve_api_timeout | int }}"
+            status_code: [200, 500]
+          register: pve_vm_created
+          until: >-
+            pve_vm_created.status | default(-1) | int not in [-1, 500]
+            and 'lock' not in (pve_vm_created.json.data | default({}, true))
+          retries: 12
+          delay: 5
+          failed_when: pve_vm_created.status | default(-1) | int == -1
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          no_log: "{{ pve_hide_secrets }}"
+
+        - name: Fail unless it is the VM this run created
+          vars:
+            pve_vm_created_config: "{{ pve_vm_created.json.data | default({}, true) if pve_vm_created.status == 200 else {} }}"
+          ansible.builtin.assert:
+            that:
+              - pve_vm_created_config.name | default('') == inventory_hostname_short
+              - pve_vm_created_config.description | default('') is match('Installed by ubuntu-server-auto-setup ')
+              - "'lock' not in pve_vm_created_config"
+            fail_msg: >-
+              The connection to Proxmox dropped while creating VM {{ pve_vmid }}, and
+              {{ ("VM " ~ pve_vmid ~ " doesn't exist") if not pve_vm_created_config
+              else ("VM " ~ pve_vmid ~ " is still locked (" ~ pve_vm_created_config.lock ~ ")") if 'lock' in pve_vm_created_config
+              else ("VM " ~ pve_vmid ~ " isn't the one this run creates (its name is '" ~ pve_vm_created_config.name | default('')
+                    ~ "', not '" ~ inventory_hostname_short ~ "')") }}.
+              {{ 'The last error: ' ~ pve_vm_create.msg if pve_vm_create.msg | default('') is search(pve_api_dropped_pattern)
+              and not pve_hide_secrets | bool else '' }}
+            quiet: true
 
     - name: Start the VM (the installer runs now)
       ansible.builtin.uri:

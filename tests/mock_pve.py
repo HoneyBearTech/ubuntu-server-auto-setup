@@ -19,6 +19,11 @@ their guest agents (network-get-interfaces, get-osinfo, get-host-name), includin
 running, a slow one, one the token may not ask, Debian, Windows, a template, a container, and hostile
 strings. Off by default, so the playbook tests see only the VMs they create.
 
+To stand in for pveproxy restarting a worker, POST /mock/drop with JSON {"method": "GET", "path": "<regex>",
+"when": "before" or "after", "times": 1} drops the next matching API calls: "before" closes the connection
+without answering, "after" carries the call out (a VM is created) and then closes it without answering. The
+dropped calls are listed in the state's "dropped".
+
 Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
                    [--fixture-vms]
 The state (VMs, config changes, requests) is at GET /mock/state, for the tests' assertions.
@@ -59,7 +64,7 @@ FORBIDDEN_AGENT_VMIDS = {4066}  # the token may not ask these VMs' agents (no VM
 AGENT_POLLS_BEFORE_READY = 1
 
 LOCK = threading.Lock()
-STATE = {"vms": {}, "requests": []}
+STATE = {"vms": {}, "requests": [], "drops": [], "dropped": []}
 FIXTURES = {"enabled": False}
 SLOW_AGENT_SECONDS = 7  # longer than the web UI waits for one agent call
 
@@ -203,7 +208,11 @@ class PveHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # keep test output readable
         pass
 
+    silent = False  # the answer to this call is dropped (POST /mock/drop)
+
     def _reply(self, status, data=None):
+        if self.silent:
+            return
         body = json.dumps({"data": data} if status < 400 else {"errors": data}).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json;charset=UTF-8")
@@ -224,6 +233,12 @@ class PveHandler(BaseHTTPRequestHandler):
         if path == "/mock/state" and method == "GET":
             with LOCK:
                 return self._reply(200, STATE)
+        if path == "/mock/drop" and method == "POST":
+            drop = self._form()
+            with LOCK:
+                STATE["drops"].append({"method": drop["method"], "path": drop["path"],
+                                       "when": drop.get("when", "before"), "times": int(drop.get("times", 1))})
+            return self._reply(200, None)
         if not path.startswith("/api2/json/"):
             return self._reply(404, {"path": "not found"})
         if self.headers.get("Authorization") != TOKEN:
@@ -233,11 +248,27 @@ class PveHandler(BaseHTTPRequestHandler):
         form = self._form() if method in ("POST", "PUT") else {}
         with LOCK:
             STATE["requests"].append({"method": method, "path": path, "query": query, "form": form})
+            drop = self._take_drop(method, path)
+        if drop:
+            # Like a pveproxy worker that goes away: no answer, the connection just closes.
+            self.close_connection = True
+            self.silent = True
+            if drop == "before":
+                return None
         fixture = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|agent/[a-z-]+)", path)
         if FIXTURES["enabled"] and method == "GET" and fixture and int(fixture.group(1)) in FIXTURE_VMS:
             return self._fixture(FIXTURE_VMS[int(fixture.group(1))], fixture.group(2))
         with LOCK:
             return self._dispatch(method, path, query, form)
+
+    def _take_drop(self, method, path):
+        """When the next call to drop matches this one: "before" or "after" (holding LOCK)."""
+        for drop in STATE["drops"]:
+            if drop["times"] > 0 and drop["method"] == method and re.fullmatch(drop["path"], path):
+                drop["times"] -= 1
+                STATE["dropped"].append({"method": method, "path": path, "when": drop["when"]})
+                return drop["when"]
+        return None
 
     def _fixture(self, vm, what):
         """A fixture VM's config or one of its agent's answers, as Proxmox gives them."""
@@ -283,6 +314,8 @@ class PveHandler(BaseHTTPRequestHandler):
         return self._reply(200, {"result": interfaces})
 
     def _message(self, status, message):
+        if self.silent:
+            return
         body = json.dumps({"data": None, "message": message + "\n"}).encode()
         self.send_response(status, message)
         self.send_header("Content-Type", "application/json;charset=UTF-8")
