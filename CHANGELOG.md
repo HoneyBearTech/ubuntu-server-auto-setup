@@ -8,6 +8,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- A wrong passphrase at an encrypted VM's console prompt made the unlock give up at once, and the boot
+  waited until a reset: Ubuntu 26.04's systemd-cryptsetup counts the TPM's attempt and a search for a key
+  file against crypttab's default of 3 tries. New encrypted VMs get `tries=5` in their crypttab line, which
+  leaves three passphrases. For a VM installed with 0.5.0, docs/security.md ("Recovery") gives the two
+  commands that add it.
+
 ## [0.5.0] - 2026-10-23
 
 New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their

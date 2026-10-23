@@ -231,8 +231,8 @@ and the EFI system partition stay unencrypted, as Ubuntu does). The VM gets a vi
 
 1. At the end of the install, the TPM is reachable from the installer, which runs `systemd-cryptenroll
    --tpm2-device=auto --tpm2-pcrs=` in the new system: a TPM2 key slot not yet bound to any PCR. It also adds
-   `tpm2-device=auto` to `/etc/crypttab` and rebuilds the initramfs (dracut, with its TPM2 modules), so the
-   first boot unlocks without anyone typing a passphrase. That can't wait for the baseline: until the TPM
+   `tpm2-device=auto,tries=5` to `/etc/crypttab` and rebuilds the initramfs (dracut, with its TPM2 modules),
+   so the first boot unlocks without anyone typing a passphrase. That can't wait for the baseline: until the TPM
    holds a key, nobody could answer the passphrase prompt.
 2. As soon as the VM has booted from its disk, provisioning runs `systemd-cryptenroll --unlock-tpm2-device=auto
    --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2`: the TPM itself unlocks the disk for a new slot bound to
@@ -279,17 +279,29 @@ make that hold for the disks' storage as a whole.
 
 *Recovery.* When the TPM doesn't release the key, the VM waits at "Please enter passphrase for disk" on
 its console (Proxmox's noVNC or xterm.js console). Type the Vault passphrase; the keyboard layout there is
-`autoinstall_keyboard_layout`. Once it is up, enroll the TPM again for the new Secure Boot state (it asks
-for the passphrase):
+`autoinstall_keyboard_layout`. It asks up to three times. After a third wrong passphrase,
+systemd-cryptsetup gives up and the boot waits there for good: reset the VM (Proxmox's Reset, or `qm reset
+<vmid>` on the node) for three more tries. (The crypttab line's `tries=5` makes it three: Ubuntu 26.04's
+systemd 259 counts the TPM's attempt and a search for a key file as tries, so its default of 3 left one
+passphrase. VMs installed with 0.5.0 have that default; see below to change it.) Once it is up, enroll the
+TPM again for the new Secure Boot state (it asks for the passphrase):
 
 ```sh
 sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"
 ```
 
+On a VM installed with 0.5.0, whose crypttab line has no `tries=`, add it and rebuild the initramfs:
+
+```sh
+sudo sed -i -E '/tpm2-device=auto/{/tries=/!s/tpm2-device=auto/tpm2-device=auto,tries=5/}' /etc/crypttab
+sudo dracut --regenerate-all --force
+```
+
 To change the passphrase, run `sudo cryptsetup luksChangeKey "$(sudo blkid -t TYPE=crypto_LUKS -o device)"`
 on each VM and update `vault_disk_passphrase` for the VMs you install later. CI installs an encrypted VM
 under Secure Boot with a TPM, as Proxmox sets them up, and checks the unattended boots, that no file on the
-disk holds the passphrase after provisioning, and this recovery path (see [testing.md](testing.md)).
+disk holds the passphrase after provisioning, and this recovery path, with two wrong passphrases first
+(see [testing.md](testing.md)).
 
 ## Pinning the Proxmox nodes' keys
 
