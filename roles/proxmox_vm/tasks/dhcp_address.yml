@@ -28,7 +28,7 @@
 
 # The cluster's list refreshes the VMs' status every few seconds, so right after provisioning starts the
 # installed system it can still say "stopped": ask the node, and give a VM that is starting a few seconds.
-- name: Ask the node whether VM {{ pve_vmid }} is running
+- name: Ask the node whether the VM is running, VM {{ pve_vmid }}
   ansible.builtin.uri:
     url: "{{ pve_api_url }}/nodes/{{ pve_dhcp_vm.node }}/qemu/{{ pve_vmid }}/status/current"
     headers: "{{ pve_api_headers }}"
