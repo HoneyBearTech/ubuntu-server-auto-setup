@@ -23,6 +23,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **A status API for dashboards such as Heimdall** (`GET /api/status`, off by default): a short, read-only
+  summary (whether a run is going and which playbook, how the last one ended, the cluster's running and total
+  VMs, the servers still to install, the version and the set-up progress) with no names, addresses or
+  secrets. It takes a token of its own as `Authorization: Bearer`, made on the Account page with the
+  current password, shown once and kept only as an HMAC; it can be replaced or revoked there, wrong tokens
+  are slowed down and calls are limited to 60 a minute. This adds attack surface: see
+  [docs/security.md](docs/security.md) and [docs/web-ui.md](docs/web-ui.md#dashboards-heimdall).
 - **Optional disk encryption with TPM2 unlocking** (`vm_disk_encryption`, off by default): the installer
   puts the root file system on LUKS2 (the `lvm` layout with a passphrase), the VM gets a virtual TPM 2.0
   (`tpmstate0`, on `pve_tpmstate_storage`, the VM storage by default). At the end of the install

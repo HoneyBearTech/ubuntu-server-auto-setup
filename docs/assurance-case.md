@@ -12,8 +12,9 @@ The top-level claim is:
 > for the token, the new server's installer for the password hash and any disk passphrase); and every server they harden ends up
 > reachable only with the authorized SSH keys, behind a default-deny firewall, with automatic security
 > updates, as stated in [security.md](security.md). Run from the container image, the web UI lets only the
-> person who set its password (or holds one of the passkeys they added) configure and start those runs, and
-> never hands the secrets it holds to the browser or to another site.**
+> person who set its password (or holds one of the passkeys they added) configure and start those runs, gives
+> a dashboard that holds the status token they made only a read-only summary without names, addresses or
+> secrets, and never hands the secrets it holds to the browser or to another site.**
 
 It rests on four arguments: the threat model is understood (1), every trust boundary is mediated (2),
 the design follows secure design principles (3), and the implementation counters common weaknesses and
@@ -25,7 +26,8 @@ is continuously checked (4).
 node's SSH keys and the admin user's sudo; with the optional node user, write access to the ISO storage
 instead of root on the nodes); the Proxmox API token; the admin password (and its hash); the Vault password;
 with the container image, the web UI's password, its passkeys (their public keys and counters, whose
-integrity matters: a key added by someone else is a way in) and sessions, and the data volume (which holds
+integrity matters: a key added by someone else is a way in) and sessions, the status token for dashboards
+(read-only, but a way in to the summary), and the data volume (which holds
 the key, the Vault and by default the Vault password); the integrity of the installed system (the
 ISO, the installer configuration, the authorized keys, the signed boot chain); with disk encryption, the
 data on a VM's disk and the passphrase that is its recovery key; the availability of the servers (a lockout or a
@@ -46,7 +48,9 @@ wiped disk); the project's release artifacts, including the container image.
 | Malicious contributor | Opening pull requests | Smuggle a backdoor into a role (an extra key, a weakened setting), exfiltrate CI credentials. |
 | A web page open in the operator's browser | Nothing | Drive the web UI through the browser: cross-site form posts (CSRF), DNS rebinding to reach `127.0.0.1`, framing the UI (clickjacking), injecting script through stored values (XSS). |
 | A malicious guest (whoever controls a VM on the cluster) | Their own VM | Feed the web UI false or hostile data through the VM's guest agent: another VM's address or a made-up OS to mislead the operator, markup, control or text-direction characters to inject script or disguise text, huge or slow answers to stall the UI. |
-| Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, replay or forge a passkey response, use a passkey response from another site (phishing), add a passkey of their own through an open session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
+| Someone who can reach the web UI's port | Nothing | Guess the password, set the first password before the operator does, ride or fix a session, replay or forge a passkey response, use a passkey response from another site (phishing), add a passkey of their own through an open session, guess
+a status token or make one through an open session, inject Ansible templates or extra command-line options through form values, read files through crafted run IDs. |
+| A dashboard server (such as Heimdall) and whoever can read its settings | The status token: reading the summary at `/api/status` | Use the token for more than the summary (a post, another route, a session), keep using it after it was replaced or revoked, flood the endpoint to load the UI or the Proxmox API, learn host names, addresses or secrets from the answer. Heimdall keeps the token in plain text in its database and shows it to anyone who can edit the tile, so its holders are more than the operator. |
 | Another user or process on the Docker host | Their own account | Read the data volume or the container's memory. (Treated as trusted: see "Out of scope".) |
 
 **Out of scope** (see [security.md](security.md#what-it-does-not-protect-against)): a compromised
@@ -75,6 +79,7 @@ themselves; anything on the servers beyond the baseline.
 | B12 | Guest agents (through the Proxmox API) → web UI | Each VM's addresses, OS release and host name, as the guest reports them | Read-only: `GET` calls with `VM.GuestAgent.Audit` (no command execution or file access; `VM.Monitor` on Proxmox VE 8 stays opt-in), over the verified API connection. VM IDs and node names are checked before they go into an API path. Answers are parsed by `webui/usas_web/vms.py`: IPv4 only, special-use ranges dropped, at most 16 addresses, strings stripped of control and direction characters and cut to 120 characters, host names checked against the roles' pattern. The data is display-only, labelled with its source, and shown as text by React. At most 4 agent calls at a time, 5 seconds each, 15 seconds per refresh, with caches shared by every session and negative caching of silent agents, all in a worker thread (`webui/usas_web/remote.py`). |
 | B13 | Guest agent (through the Proxmox API) → provisioning and the baseline (`net_mode: dhcp`) | The address DHCP gave `net0`, as the guest reports it | Only for servers with `net_mode: dhcp` and no `ansible_host`. Before such a VM is created, the token's own privileges on its path are read (`GET /access/permissions`), so a token that can't ask the agent is refused before anything is installed. Read-only `GET` calls (`VM.GuestAgent.Audit`) over the verified API connection; only the interface with `net0`'s MAC address (read from the VM's configuration) counts, and only an address matching `provision_ipv4_pattern` that isn't link-local is used, as the SSH target only. SSH still checks the host key: right after the install, the VM's fresh key is trusted as in B6 (nothing but the installer has run in it yet); on later runs the address must answer with a key already in `known_hosts`, so a guest that reports another address can't make Ansible talk to an unknown host (`roles/proxmox_vm/tasks/dhcp_address.yml`). |
 | B14 | Firmware → boot chain → disk (each VM) | The VM's boot code; with disk encryption, the disk key | UEFI Secure Boot with Microsoft's keys pre-enrolled (`vm_secure_boot`, on by default): only Ubuntu's signed shim, GRUB and kernel run, and the kernel loads only signed modules; the remastered ISO keeps the signed EFI image and CI installs from it under Secure Boot (`tests/secure-boot-install.sh`). With `vm_disk_encryption`, the root file system is LUKS2 and a vTPM releases its key only while PCR 7 (the Secure Boot state and the certificates that verified the boot) matches the VM's first boot (the installer's TPM slot, bound to no PCR, is replaced by one bound to PCR 7 right after that boot, `roles/proxmox_vm/tasks/first_boot.yml`); the TPM state can live on other storage than the disks (`pve_tpmstate_storage`); a changed state stops at the passphrase prompt instead of booting. |
+| B15 | Dashboard server (Heimdall) → the web UI's status API | `GET /api/status` with the status token; back, the summary (schema version, USAS version, setup progress, the running or last run's playbook and result, server and VM counts) | Off until a signed-in session that enters the password again makes a token; one token, 32 random bytes with the prefix `usas_st_`, shown once and kept only as an HMAC-SHA256 keyed from the Vault password (`status-token.json`, `0600`); taken only from `Authorization: Bearer` (never the query string), parsed by a `\Z`-anchored pattern and compared in constant time; replacing it stops the old one at once, revoking turns the API off; an unreadable token file accepts no token. Wrong tokens are slowed down per client address in their own bucket (5 free, then doubling up to 15 minutes), right ones limited to 60 calls a minute; the route makes no session and sets no cookie, the token opens no other route and no route takes it, and posts still need a session's CSRF token. The same host check and HTTPS rule as B9. The answer is built from fixed fields only (no run ID, limit or log, no host, node, cluster or VM names, addresses, VM IDs or secrets); the cluster is asked at most once a minute (failures too), in a worker thread, with the VMs page's timeout. Creation, replacement, revocation and refused calls are logged, uses once an hour per address (`webui/usas_web/status.py`, `main.py`). |
 | B11 | Registry (Docker Hub, or the GHCR mirror) → the operator's Docker | The container image | Built by the release workflow from a digest-pinned base and hash-pinned packages, scanned and smoke-tested, signed keylessly with cosign, with SBOM and SLSA provenance; `start.ps1 -Verify` and [verifying-releases.md](verifying-releases.md) check the signature. |
 | B12 | Servers → mail relay and webhook (optional, off by default) | Update reports and ban notices (host name, banned addresses), the relay password, the webhook URL's token | Only when the operator sets a relay or a URL. The relay password and URL come from the Vault and live on the server in root-only `0600` files; msmtp verifies the relay's certificate against the system's CAs (`tls_trust_file system`) unless `mail_relay_tls: "off"`; addresses, host, user and URL pass `\Z`-anchored allowlist patterns, fuzzed for injection (`roles/common/`, `roles/fail2ban/`, `tests/fuzz/`). |
 
@@ -92,6 +97,7 @@ themselves; anything on the servers beyond the baseline.
 | Proxmox API token | anything that can read the Vault or intercept the API | Vault encryption, TLS verification, least-privilege role | `inventory/vault.example.yml`, `roles/proxmox_vm/` |
 | The release pipeline | the maintainer, GitHub Actions | protected `main`, pinned actions, keyless signing, provenance | `.github/workflows/release.yml` |
 | The web UI's HTTP port | the local machine (documented); a network if the operator publishes it | sign-in (password or passkey), sessions, CSRF and Origin checks, host check, CSP, input validation | `webui/usas_web/main.py`, `auth.py`, `passkeys.py`, `schema.py` |
+| The status API (`GET /api/status`, off by default) | a dashboard holding the token, anyone who can reach the port (to guess) | token shown once, HMAC at rest, Bearer header only, constant-time check, throttled failures, rate limit, no session, read-only fixed-field answer | `webui/usas_web/status.py`, `webui/usas_web/main.py` |
 | Guest agents, through provisioning (`net_mode: dhcp`) | whoever controls that VM | read-only privilege, MAC and IPv4-pattern filter, host key checking | `roles/proxmox_vm/tasks/dhcp_address.yml` |
 | Guest agents, through the VMs page | whoever controls a VM on the cluster | read-only privilege, parsing and limits in `vms.py`, display-only, bounded fan-out and timeouts | `webui/usas_web/vms.py`, `webui/usas_web/remote.py` |
 | The data volume | the Docker host's administrators | file modes `0600`/`0700`, Vault encryption (optionally with the password outside the volume), non-root container user | `webui/usas_web/store.py`, `Dockerfile` |
@@ -110,12 +116,14 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   changed stops at the passphrase prompt rather than unlocking; disk encryption without Secure Boot is
   refused. Provisioning skips existing VMs rather than reconciling them; the ISO step stops
   if the signature, the checksum or the release is missing; the key sync stops rather than writing an empty list;
-  an unreadable passkeys file turns password sign-in off and accepts no passkey;
+  an unreadable passkeys file turns password sign-in off and accepts no passkey; the status API is off until
+  a token is made, and an unreadable token file accepts no token;
   `ssh_hardening` stops if `ssh_allow_users` would exclude the admin user; sshd configuration is validated
   before it is installed; certificate verification is on by default; secrets are hidden from output by
   default.
 - **Complete mediation.** Every API call carries the token and is checked by Proxmox against the token's
-  role; every SSH connection is authenticated by key and host key.
+  role; every SSH connection is authenticated by key and host key; every web UI request needs a session, and
+  every status API call the token, checked each time.
 - **Open design.** The playbooks, this case and the threat model are public. Security relies on keys and
   the Vault, not on the secrecy of the design.
 - **Separation of privilege.** VM management goes through the API with a token; ISO handling uses SSH on the
@@ -125,7 +133,8 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   separation; on the nodes, the optional node user (`playbooks/prepare-node.yml`) replaces root for every
   run after one setup run, with write access to the ISO folders through ACL entries and no sudo rule at all
   (root's privileges remain the default, so existing setups keep working); the token has no password-based
-  login; workflows get read-only tokens and raise permissions per job only where needed.
+  login; the web UI's status token reads one fixed summary and can't post, start a run or open another
+  route; workflows get read-only tokens and raise permissions per job only where needed.
 - **Least common mechanism.** Each VM gets its own seed ISO and seed directory, removed after its install.
 - **Psychological acceptability.** One command per task (`make provision`, `make baseline`, `make keys`),
   `--check --diff` works for the baseline, and failures say what to fix. The web UI lays out every option
@@ -133,8 +142,8 @@ The principles below are Saltzer and Schroeder's, plus the additional ones the O
   every run.
 - **Limited attack surface.** Servers expose only SSH (and what you add); the installer needs no network
   service; nothing listens on the control node. The web UI, the one listener the project adds, is
-  published on `127.0.0.1` only, has no API for other programs, and serves only its own script and
-  stylesheet.
+  published on `127.0.0.1` only, serves only its own script and stylesheet, and has one API for other
+  programs: the read-only status API for dashboards, off until the operator makes a token.
 - **Input validation with allowlists.** Required variables are asserted before provisioning starts (a
   numeric `pve_vmid`, a static IP, a gateway, keys or a password). Values that end up in configuration
   files or shell commands are checked against allowlist patterns in each role's `vars/main.yml` (the admin
@@ -172,9 +181,11 @@ this kind:
 | **Authentication weaknesses** (CWE-307, CWE-384, CWE-1390) | Failed sign-ins slowed down exponentially, with passkey failures counted alongside wrong passwords; a new session ID at sign-in; the first password only with the setup code from the container's log; at least 12 characters; argon2id hashing. Optional passkeys can replace the password entirely ("Require a passkey"), which removes guessing. |
 | **Authentication bypass by capture-replay** (CWE-294) and **by spoofing** (CWE-290, CWE-346) | Passkey challenges are 32 random bytes, kept with the session that asked for them, removed on first use whatever the outcome, and valid for 5 minutes; a response's origin must be the configured one exactly and its RP ID hash must match, so a response made on another site can't be used here; the signature is checked against the public key saved at registration, the signature counter must go up when the authenticator keeps one, the user handle must match, and user verification is required (`webui/usas_web/passkeys.py`; `webui/tests/test_passkeys.py` tests each with a software authenticator). |
 | **Improper input validation** (CWE-20) and **insufficient verification of data authenticity** (CWE-345) | What guest agents report is parsed defensively (`webui/usas_web/vms.py`): only usable IPv4 addresses, length and count limits, control and direction characters removed, VM IDs and node names checked before they reach an API path. The guest's claims are never trusted to decide anything: the OS classification is labelled as reported by the guest, every address shows its source (agent, inventory or cloud-init), and nothing on the VMs page starts a run. Unit tests and the image smoke test feed it hostile strings. |
-| **Allocation of resources without limits** (CWE-770) | The VMs page's API calls run in a pool of 4 worker threads, never on the event loop that streams the run logs, with a 10-second timeout per API call, 5 seconds per agent call and a 15-second budget per refresh; answers are cached for every session, silent agents for 2 minutes; the app polls every 30 seconds only while its tab is visible and backs off to 2 minutes after an error. |
+| **Allocation of resources without limits** (CWE-770) | The VMs page's API calls run in a pool of 4 worker threads, never on the event loop that streams the run logs, with a 10-second timeout per API call, 5 seconds per agent call and a 15-second budget per refresh; answers are cached for every session, silent agents for 2 minutes; the app polls every 30 seconds only while its tab is visible and backs off to 2 minutes after an error. The status API makes no session, allows 60 calls a minute, checks a token with one HMAC (not argon2id, which would make every call cost 64 MiB), and asks the cluster at most once a minute, in a worker thread. |
+| **Missing or weak authentication of the status API** (CWE-306, CWE-287, CWE-208, CWE-307) and **credentials in URLs** (CWE-598) | The route answers 404 until a token exists, and 401 to a missing, malformed, wrong, replaced or revoked token; the token has 256 random bits, is compared as an HMAC with `hmac.compare_digest`, and is read only from the `Authorization` header; wrong tokens are throttled per client address apart from the sign-in, so an old token in a dashboard can't lock the operator out; the token never makes a session, and no other route accepts it (`webui/usas_web/status.py`; `webui/tests/test_status.py`, and the `fuzz_status_token.py` fuzz target for the header parser). |
+| **Insufficiently protected credentials** (CWE-522, CWE-256) for the status token | Shown once, never sent back; the data volume keeps an HMAC-SHA256 keyed from the Vault password, so a copy of the volume without the Vault password can't even confirm a guess; making or replacing it needs the password again; one click revokes it. |
 | **Open redirect** (CWE-601) | The sign-in page returns only to the UI's own pages. |
-| **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never sent back (the API says only whether one is saved); run logs mask the Vault's values; pages and API answers are `Cache-Control: no-store`. |
+| **Sensitive data in responses or logs** (CWE-200, CWE-532) | Saved secrets are never sent back (the API says only whether one is saved); run logs mask the Vault's values; pages and API answers are `Cache-Control: no-store`. The status API's answer is built from fixed fields (counts, the playbook's key from the fixed table, a result word, times), never from inventory text; a test seeds distinctive names, addresses and secrets and checks none is in it. The log records the status token's use, never the token. |
 | **Memory-safety weaknesses** (CWE-787, CWE-125, CWE-416) | Not applicable: the project is YAML and Jinja run by Ansible (Python), the web UI's server is Python and its app TypeScript run by the browser, all memory-safe runtimes. |
 | **Supply chain of the app's npm packages** (CWE-1357, CWE-506) | Exact versions with integrity hashes in `package-lock.json`, `npm ci` with install scripts off, versions at least two weeks old when added; only the built files reach the image; OSV, dependency review and Dependabot watch the lock file ([dependencies.md](dependencies.md)). |
 
@@ -187,12 +198,14 @@ this kind:
 - **Web UI tests on every pull request**: unit tests (at least 80% statement coverage) of sign-in,
   passkeys (registration, sign-in and every refusal: another origin or RP ID, a replayed or expired
   challenge, a counter going back, no user verification) with a software authenticator, sessions, the CSRF
-  header and Origin checks, the host check, every form's API and its validation against
+  header and Origin checks, the host check, the status API (every refused token, the throttles, the answer's
+  fields and that it holds no name, address or secret), every form's API and its validation against
   the roles' patterns, the inventory and Vault files Ansible reads back, runs and their logs; the app's
   tests of every page against a stand-in API, with axe-core, structural accessibility checks and the
   contrast of every colour pair; browser tests in Chromium of the whole setup by keyboard only, focus on
-  every page and axe-core with real layout in every theme, and adding a passkey and signing in with it
-through Chromium's virtual authenticator; and a smoke test that builds the image and drives
+  every page and axe-core with real layout in every theme, adding a passkey and signing in with it
+  through Chromium's virtual authenticator, and making, using and revoking a status token by keyboard; and a
+  smoke test that builds the image and drives
   the UI against the mock Proxmox API through a real `ansible-playbook` run and the VMs page with fixture
   guests (a slow agent, a forbidden one, hostile strings) ([testing.md](testing.md#the-web-ui)). Release images
   are also scanned with Trivy and fail on fixable high or critical vulnerabilities.
@@ -202,7 +215,8 @@ through Chromium's virtual authenticator; and a smoke test that builds the image
   ([dependencies.md](dependencies.md)).
 - **Fuzzing on every pull request** (and ten minutes per target weekly): Atheris targets render the real
   templates and Jinja expressions from the roles with arbitrary inputs and check that nothing an accepted
-  value contains can add or change a setting ([testing.md](testing.md#fuzzing)). They found two bugs
+  value contains can add or change a setting, and that the status API's header parser accepts nothing but a
+  well-formed token ([testing.md](testing.md#fuzzing)). They found two bugs
   before release, both fixed with regression tests: validation patterns anchored with `$` accepted a
   trailing line break, and characters outside Unicode's basic plane didn't survive JSON-encoding into the
   installer configuration.
