@@ -51,6 +51,8 @@ STORAGES = {
 }
 HANG_VMIDS = {4099}
 POLLS_BEFORE_POWEROFF = 2
+# Like Proxmox, /cluster/resources shows a VM's status as pvestatd last saw it: a few seconds behind a change.
+RESOURCES_LAG_SECONDS = 3
 # The address DHCP "gives" net0. The test server is a container reached on this machine, hence 127.0.0.1.
 DHCP_LEASES = {4063: "127.0.0.1"}
 FORBIDDEN_AGENT_VMIDS = {4066}  # the token may not ask these VMs' agents (no VM.GuestAgent.Audit)
@@ -177,6 +179,18 @@ def storage_entry(name):
     if len(nodes) < len(NODES):
         entry["nodes"] = ",".join(nodes)
     return entry
+
+
+def set_status(vm, status):
+    """Changes a VM's status, remembering the old one for /cluster/resources."""
+    vm["listed"] = (vm["status"], time.time())
+    vm["status"] = status
+
+
+def listed_status(vm):
+    """A VM's status as /cluster/resources shows it: the previous one for a few seconds after a change."""
+    previous, since = vm.get("listed", (vm["status"], 0))
+    return previous if time.time() - since < RESOURCES_LAG_SECONDS else vm["status"]
 
 
 def upid(action, vmid, node=NODE):
@@ -308,7 +322,7 @@ class PveHandler(BaseHTTPRequestHandler):
                 return self._reply(200, [])
             data = [
                 {"vmid": int(v), "name": vm["config"].get("name", ""), "node": vm["node"], "type": "qemu",
-                 "status": vm["status"], "id": f"qemu/{v}"}
+                 "status": listed_status(vm), "id": f"qemu/{v}"}
                 for v, vm in vms.items()
             ]
             if FIXTURES["enabled"]:
@@ -327,7 +341,7 @@ class PveHandler(BaseHTTPRequestHandler):
                     vm["starting"] -= 1
                     return self._reply(200, {"status": "running", "upid": task})
                 del vm["starting"]
-                vm["status"] = "running"
+                set_status(vm, "running")
             return self._reply(200, {"status": "stopped", "exitstatus": "OK", "upid": task})
         m = re.fullmatch(r"/nodes/([^/]+)/qemu", path)
         if method == "POST" and m and m.group(1) in NODES:
@@ -373,7 +387,7 @@ class PveHandler(BaseHTTPRequestHandler):
             if vm["status"] == "running" and vm["starts"] == 1 and int(vmid) not in HANG_VMIDS:
                 vm["polls"] += 1
                 if vm["polls"] > POLLS_BEFORE_POWEROFF:
-                    vm["status"] = "stopped"
+                    set_status(vm, "stopped")
                     vm["installed"] = True
             return self._reply(200, {"status": vm["status"], "vmid": int(vmid), "qmpstatus": vm["status"]})
         return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
