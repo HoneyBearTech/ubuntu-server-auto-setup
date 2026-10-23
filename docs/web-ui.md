@@ -162,8 +162,13 @@ The overview lists the steps and whether each is done.
 3. **Defaults**: the GitHub user whose keys are installed (**Preview the keys** shows what GitHub returns,
    filtered exactly as the roles filter it), extra public keys, whether to authorize the UI's own key on the
    servers (on by default: the baseline logs in with it), the admin user and password, the time zone, the
-   gateway (needed for servers with a static address), prefix length, DNS servers and search domains, and
-   the installer's disk layout.
+   gateway (needed for servers with a static address), prefix length, DNS servers and search domains, the
+   installer's disk layout, and **disk encryption** (`vm_disk_encryption`, off by default) with its
+   passphrase. Encryption needs **Secure Boot keys** (under Installation, More settings) and the `lvm`
+   layout, and the page refuses to save it without them or without a passphrase. The passphrase goes to the
+   Vault as `vault_disk_passphrase`, is never shown again (keep a copy: it is the recovery key at the VM's
+   console), and applies to VMs created after it is saved; see
+   [security.md](security.md#secure-boot-and-disk-encryption).
 4. **Servers**: one row per VM: its name (also the VM's name in Proxmox), its address, VM ID, and
    optionally its node, cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
    `5432/tcp from 10.0.0.0/24`, separated by commas). The node is a dropdown of the cluster's nodes after a
@@ -273,7 +278,7 @@ directories):
 | Path | What |
 | --- | --- |
 | `inventory/hosts.yml` | The inventory: every setting you saved, the servers, the Proxmox nodes with an SSH address. |
-| `inventory/group_vars/all/vault.yml` | The admin password and the API token (and the mail relay password and webhook URL, if set), encrypted with Ansible Vault (AES-256). |
+| `inventory/group_vars/all/vault.yml` | The admin password and the API token (and the mail relay password, webhook URL and disk passphrase, if set), encrypted with Ansible Vault (AES-256). |
 | `.vault-pass` | The Vault password: 32 random bytes made on the first start (see below). |
 | `ssh/id_ed25519`, `ssh/id_ed25519.pub` | The UI's SSH key pair. |
 | `ssh/known_hosts` | The trusted host keys: each Proxmox node's, and each new VM's (added by provisioning). |

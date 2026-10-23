@@ -299,6 +299,7 @@ export function Defaults() {
     { legend: "Admin user", test: named("admin_user", "admin_password", "timezone") },
     { legend: "Network", test: named("net_gateway", "net_prefix", "net_dns", "net_search") },
     { legend: "Installation", test: named("autoinstall_storage_layout", "vm_secure_boot") },
+    { legend: "Disk encryption (off by default)", test: named("vm_disk_encryption", "vm_disk_passphrase") },
   ]);
   const render = (f: FieldMeta) => (
     <Field field={f} values={data.values} error={errors[f.name]} list={f.name === "timezone" ? "timezones" : undefined} />
@@ -312,7 +313,10 @@ export function Defaults() {
   return (
     <>
       <PageHead title="Defaults for every server" crumb="Set up · step 3" />
-      <p className="lead">Settings every new server gets. The admin password is stored in the encrypted Vault.</p>
+      <p className="lead">
+        Settings every new server gets. The admin password and the disk passphrase are stored in the encrypted
+        Vault.
+      </p>
       <ErrorSummary errors={errors} />
       <form key={page.loaded} className="card" method="post" action="/api/defaults" noValidate
             onSubmit={(e) => form.submit(e, onReply)}>
@@ -344,6 +348,14 @@ export function Defaults() {
                   )}
                 </p>
               </div>
+            ) : null}
+            {g.legend.startsWith("Disk encryption") ? (
+              <p className="help">
+                LUKS2, unlocked at boot by the VM's virtual TPM while its Secure Boot state is unchanged. It
+                protects a copied disk or backup without the TPM state, not a VM whose Proxmox host is compromised:
+                see <a href="https://github.com/HoneyBearTech/ubuntu-server-auto-setup/blob/main/docs/security.md#secure-boot-and-disk-encryption">
+                security.md</a>.
+              </p>
             ) : null}
           </FieldSet>
         ))}
