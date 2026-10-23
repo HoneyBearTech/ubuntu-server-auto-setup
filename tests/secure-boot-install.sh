@@ -75,27 +75,40 @@ for c in os.environ["DISK_PASSPHRASE"] + "\n":
     time.sleep(0.1)
 time.sleep(1)
 EOF
-# Watches the serial console for the passphrase prompt and types the passphrase (from the environment).
+# Watches the serial console for the passphrase prompt and types the passphrase (from the environment). systemd
+# writes the prompt in pieces and asks the console where its cursor is (ESC[6n) in between: the helper answers
+# like a terminal would, and types only once the whole prompt is there, or the passphrase is read as something
+# else and the unlock waits forever. It keeps logging for a few seconds after typing.
 cat >"$W/type-passphrase.py" <<'EOF'
 import os, socket, sys, time
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
 s.settimeout(1)
-seen, deadline = b"", time.time() + int(sys.argv[3])
+seen, queries, answered, typed_at = b"", 0, 0, None
+deadline = time.time() + int(sys.argv[3])
 with open(sys.argv[2], "ab") as log:
-    while time.time() < deadline:
+    while time.time() < deadline and (typed_at is None or time.time() < typed_at + 10):
         try:
             chunk = s.recv(4096)
         except socket.timeout:
             continue
+        if not chunk:
+            break
         log.write(chunk)
-        seen = (seen + chunk)[-4096:]
-        if b"assphrase for" in seen:
-            time.sleep(2)
+        log.flush()
+        seen = (seen + chunk)[-8192:]
+        queries += chunk.count(b"\x1b[6n")
+        while answered < queries:
+            s.sendall(b"\x1b[24;80R")
+            answered += 1
+        prompt = seen.rfind(b"assphrase for")
+        if typed_at is None and prompt >= 0 and (b"no echo)" in seen[prompt:] or b"): " in seen[prompt:]):
+            time.sleep(1)
             s.sendall(os.environ["DISK_PASSPHRASE"].encode() + b"\r")
             print("typed the passphrase at the prompt")
-            sys.exit(0)
-sys.exit("no passphrase prompt on the serial console")
+            typed_at = time.time()
+if typed_at is None:
+    sys.exit("no passphrase prompt on the serial console")
 EOF
 
 step "Rendering the role's user-data for an encrypted VM"
@@ -310,8 +323,13 @@ ssh_vm 'sudo lsinitrd 2>/dev/null | grep -E "etc/crypttab|libtss2-tcti-device|sy
 ssh_vm 'sudo grep -h "Secure boot" /var/log/installer/installer-journal.txt 2>/dev/null | head -2 || true'
 
 step "The passphrase is the recovery key, and after the first-boot tasks no file on the disk holds it"
-ssh_vm "sudo cryptsetup open --test-passphrase --key-file=- $DEV" <"$W/passphrase"
-echo "the passphrase unlocks its key slot"
+# Without --disable-external-tokens, cryptsetup unlocks with the TPM token first, and any passphrase "works".
+ssh_vm "sudo cryptsetup open --test-passphrase --disable-external-tokens --key-file=- $DEV" <"$W/passphrase"
+if printf 'not-the-passphrase' | ssh_vm "sudo cryptsetup open --test-passphrase --disable-external-tokens --key-file=- $DEV"; then
+  echo "ERROR: a wrong passphrase opened the disk" >&2
+  exit 1
+fi
+echo "the passphrase unlocks its key slot, and a wrong one doesn't"
 if ssh_vm 'sudo grep -rlF -f - / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev --exclude-dir=run 2>/dev/null' \
      <"$W/passphrase"; then
   echo "ERROR: the files above hold the disk passphrase" >&2
@@ -334,7 +352,13 @@ wait_off 300
 start_vm recovery -serial "unix:$W/serial.sock,server,nowait"
 sleep 2
 python3 "$W/type-passphrase.py" "$W/serial.sock" "$W/serial-recovery.log" 600
-wait_ssh 600
+# If the answer on the serial console didn't reach the prompt, type it on the screen, as for a stuck first boot.
+if ! wait_ssh 180; then
+  echo "screendump $W/screen-recovery-$SECONDS.ppm" | python3 "$W/monitor.py" "$W/monitor.sock" || true
+  echo "no SSH after typing on the serial console; typing on the screen"
+  python3 "$W/sendkeys.py" "$W/monitor.sock"
+  wait_ssh 420
+fi
 # The command docs/security.md gives (PASSWORD stands in for typing the recovery passphrase at its prompt).
 ssh_vm "sudo env PASSWORD=\"\$(cat)\" systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 $DEV" <"$W/passphrase"
 reboot_vm
