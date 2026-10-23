@@ -20,6 +20,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
+  stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0
   checks, it failed one of three VMs created at once, though Proxmox had created it, and failed a read with
   an SSL EOF. Provisioning and `build-installer` now retry the read-only API calls when the connection drops
