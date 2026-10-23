@@ -17,6 +17,11 @@ provision_nic_keys: [mode, bridge, vlan, model, mac, mtu, address, prefix, gatew
 # The disk passphrase: printable ASCII (it may have to be typed at the VM's console), without the braces Ansible
 # would read as a template.
 provision_disk_passphrase_pattern: '^[\x20-\x7a|~]{12,512}\Z'
+# What a dropped connection to the API looks like in proxmox_kvm's errors (requests, through proxmoxer): the call
+# may or may not have reached Proxmox. Answers from Proxmox, errors included, don't match.
+pve_api_dropped_pattern: >-
+  Connection aborted|RemoteDisconnected|Remote end closed|Connection reset|ConnectionResetError|BrokenPipe|EOF
+  occurred|UNEXPECTED_EOF|Max retries exceeded
 # Files in which Ubuntu's installer keeps its configuration on the installed system (root-only).
 provision_installer_config_copies:
   - /var/log/installer/autoinstall-user-data
