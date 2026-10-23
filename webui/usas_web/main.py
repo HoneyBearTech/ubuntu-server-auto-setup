@@ -31,7 +31,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, nodes, vms
+from . import __version__, nodes, status, vms
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
@@ -66,6 +66,7 @@ API_FIELDS = ("pve_api_host", "pve_api_port", "pve_api_user", "pve_api_token_id"
               "pve_validate_certs")
 ASSETS = ("favicon.svg",)
 PUBLIC_PATHS = ("/healthz", "/favicon.ico")
+STATUS_PATH = "/api/status"  # for dashboards: its own token, no session (status.py)
 THEMES = ("dark", "light", "system")  # dark is the default
 THEME_COOKIE = "usas_theme"
 FRONTEND_ENTRY = "src/main.tsx"
@@ -163,6 +164,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     runner = Runner(settings)
     keys = Keys(settings)
     lister = VmLister()
+    tokens = status.StatusTokens(settings.status_token_file, store.vault_password)
+    throttle = status.Throttle()
+    counts = status.ClusterCounts()
     plan = nodes.load_plan(settings.project_dir)
     store.vault_password()  # creates it on the first run
     try:
@@ -175,6 +179,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings, app.state.auth, app.state.store, app.state.runner = settings, auth, store, runner
     app.state.schema, app.state.keys, app.state.vm_lister = schema, keys, lister
     app.state.passkeys = passkeys
+    app.state.status_tokens, app.state.status_throttle, app.state.cluster_counts = tokens, throttle, counts
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(version=__version__, assets=asset_urls(HERE / "static"))
@@ -202,6 +207,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if path in PUBLIC_PATHS or path.startswith("/static/"):
             response = await call_next(request)
             return _headers(response, cache=path != "/healthz")
+        if path == STATUS_PATH:
+            # A dashboard's call: the route checks its token; it gets no session and no cookie.
+            return _headers(await call_next(request))
         session = auth.get_session(request.cookies.get(cookie_name(request)))
         fresh = session is None
         if session is None:
@@ -433,7 +441,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = require_login(request)
         return reply(passkeys=passkeys.listing(), require_passkey=passkeys.required(), broken=passkeys.broken(),
                      rp_id=settings.rp_id, public_url=settings.public_url, max_passkeys=MAX_PASSKEYS,
-                     max_name=MAX_NAME, current=session.signed_in_with)
+                     max_name=MAX_NAME, current=session.signed_in_with, status_token=tokens.info())
 
     @app.post("/api/passkeys/register-options")
     async def passkey_register_options(request: Request):
@@ -534,6 +542,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.state.session = auth.log_in(request.state.session, via=record["id"])
         log.info("Signed in with the passkey \"%s\" from %s", loggable(record["name"]), client(request))
         return reply(redirect=target, csrf=request.state.session.csrf)
+
+    # --- The status API for dashboards (status.py) ----------------------------------------------------------
+
+    @app.post("/api/status-token/create")
+    async def status_token_create(request: Request):
+        require_login(request)
+        form = await checked_form(request)
+        # A token reads the status from anywhere the UI can be reached: making one needs the password, as
+        # adding a passkey does.
+        wait = auth.wait_seconds(client(request))
+        if wait:
+            return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
+        if not auth.verify_password(str(form.get("status_current", ""))):
+            auth.record_failure(client(request))
+            return reply(422, errors={"status_current": "The current password is wrong."})
+        replaced = tokens.exists()
+        token = tokens.create()
+        log.info("Status API token %s from %s", "replaced" if replaced else "created", client(request))
+        what = "Replaced the token: the old one no longer works." if replaced else "Created the token."
+        return reply(token=token, message=f"{what} Copy it now: it isn't shown again.")
+
+    @app.post("/api/status-token/revoke")
+    async def status_token_revoke(request: Request):
+        require_login(request)
+        await checked_form(request)
+        if not tokens.revoke():
+            return reply(message="There is no token: the status API is off.")
+        log.info("Status API token revoked from %s", client(request))
+        return reply(message="Revoked the token. The status API is off.")
+
+    def refused(status_code: int, error: str, retry: int = 0) -> JSONResponse:
+        headers = {"Retry-After": str(retry)} if retry else {"WWW-Authenticate": 'Bearer realm="usas"'}
+        return JSONResponse({"error": error}, status_code=status_code, headers=headers)
+
+    def status_data() -> dict[str, Any]:
+        """The summary (status.summary); the cluster is asked at most once a minute, in this thread."""
+        config = store.load()
+        api = pve_api(config)
+        found = (counts.get(api.identity, lambda: vms.parse_resources(api.get("/cluster/resources?type=vm")))
+                 if api is not None else None)
+        return status.summary(__version__, runner.current(), runner.history(), readiness(config), config.servers,
+                              found, time.time())
+
+    @app.get(STATUS_PATH)
+    async def status_api(request: Request):
+        who = client(request)
+        if not tokens.exists():
+            return reply(404, error="The status API is off: create a token on the Account page.")
+        wait = throttle.wait_seconds(who)
+        if wait:
+            return refused(429, "Too many calls with a wrong token. Try again later.", wait)
+        header = request.headers.get("authorization")
+        token = status.parse_bearer(header)
+        if token is None or not tokens.verify(token):
+            throttle.record_failure(who)
+            reason = "no token" if not header else "not a status token" if token is None else "wrong token"
+            log.warning("Status API call refused from %s: %s", who, reason)
+            return refused(401, "The token is missing or wrong. Create one on the Account page.")
+        throttle.clear_failures(who)
+        wait = throttle.over_limit()
+        if wait:
+            return refused(429, f"At most {status.PER_MINUTE} calls a minute.", wait)
+        tokens.used(who)
+        if throttle.should_log(who):
+            log.info("Status API used from %s", who)
+        return reply(**await asyncio.to_thread(status_data))
 
     # --- Overview ----------------------------------------------------------------------------------------
 

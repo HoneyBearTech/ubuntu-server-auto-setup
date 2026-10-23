@@ -112,7 +112,7 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 
 **The web UI** (the container image)
 
-- Every page and action except the health check needs a sign-in. The password is stored only as an
+- Every page and action except the health check and the status API needs a sign-in. The password is stored only as an
   argon2id hash; the first one can only be set with a one-time code printed in the container's log; failed
   attempts are slowed down exponentially (up to 15 minutes between tries). Every sign-in and failed
   sign-in is logged with the client's address.
@@ -147,6 +147,19 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   address shows its source, nothing is shown as HTML, and no guest-reported value decides anything. Agent
   calls are few, short and bounded (4 at a time, 5 seconds each, 15 seconds per refresh, cached), so a
   slow or hostile guest can't stall the UI.
+- **The status API for dashboards** (`GET /api/status`, for Heimdall and the like) is off until a signed-in
+  session that enters the password again makes its token. The token (32 random bytes after `usas_st_`) is
+  shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password through scrypt. It is accepted
+  only as `Authorization: Bearer`, compared in constant time, and opens only this route: it makes no
+  session, can't post and can't start a run. Replacing it stops the old one at once; revoking it turns the
+  API off; an unreadable token file accepts no token. Wrong tokens are slowed down per client address
+  (5 free, then the wait doubles up to 15 minutes) in a bucket of their own, so a dashboard with an old token
+  can't lock the sign-in out; right ones are limited to 60 calls a minute. The answer holds only counts, the
+  playbook and result of the running or last run, the version and the setup progress: no host, node, cluster
+  or VM names, no addresses or VM IDs, no run limits or logs, no secrets. The cluster is asked for the counts
+  at most once a minute. Making, replacing and revoking the token and refused calls are logged; uses once an
+  hour per address. The host check and the HTTPS rule apply to it as to the pages
+  ([web-ui.md](web-ui.md#dashboards-heimdall)).
 - The Proxmox node's host key is trusted only after the user has compared its fingerprint, and checked on
   every connection; certificate verification for the API stays on, with the cluster's CA added to the
   trust store instead.
@@ -317,6 +330,13 @@ in the trust store, and how to do the same in the web UI's data volume.
   can't tell which kind of authenticator made a passkey: a passkey kept in a synced password manager is
   as safe as that account. Anyone who can `docker exec` into the container or write the data volume can
   delete `passkeys.json` and so turn the requirement off; that access is out of scope anyway (above).
+- **Whoever holds the status token.** A dashboard needs the token in its own settings: Heimdall keeps it in
+  plain text in its database and fills it into the tile's edit form, so anyone who can edit the dashboard's
+  tiles or read its data can read it. With it they learn what the summary says (whether a run is going, how
+  the last one ended, how many VMs run and how many servers wait to be installed, the version), nothing
+  more, and they can't change anything. Over plain HTTP beyond `localhost` the token could be read on the
+  network, which is why the UI refuses that. Revoke the token when a dashboard no longer needs it, and on any
+  doubt replace it.
 - **A compromised GitHub account.** Whoever controls `github_user` decides which keys can log in to your
   servers at the next provisioning, baseline run or `make keys`. Protect the account with two-factor
   authentication, or use `admin_extra_ssh_keys` and `ssh_keys_exclusive` to depend on it less.

@@ -214,6 +214,57 @@ The overview lists the steps and whether each is done.
 Only one run happens at a time. Each form field is a role variable: the field names it, and its default,
 help text and the format it accepts come from the role itself (see [how the forms are built](#how-the-forms-are-built)).
 
+## Dashboards (Heimdall)
+
+A dashboard such as [Heimdall](https://heimdall.site/) can show on the UI's tile whether a run is going (and
+which playbook), how the last one ended, how many of the cluster's VMs run, and how many servers in the
+inventory are still to install. It asks `GET /api/status` with a token of its own, from the dashboard's
+server. The API is **off until you make a token**, and the token only reads that summary: it holds no
+names, addresses or secrets ([the answer](interfaces.md#the-status-api)), and it can't change anything,
+start a run or sign in.
+
+To turn it on:
+
+1. On the **Account** page, under **Status for dashboards**, enter the current password and choose
+   **Create a token**. The token (`usas_st_` and 43 more characters) is shown once, with a **Copy the token**
+   button. Copy it now: the UI keeps only an HMAC of it.
+2. Make the UI reachable from the dashboard's server over HTTPS, under a host name in `USAS_ALLOWED_HOSTS`,
+   as in [exposing it beyond localhost](#exposing-it-beyond-localhost) (the reverse proxy you open the UI
+   through already does). The UI refuses other names over plain HTTP, so a token is never sent in clear
+   text. The dashboard's container must trust the proxy's certificate: use one from a public CA, or add your
+   CA to that container's trust store. Don't turn on Heimdall's "skip TLS verification" for this: anyone
+   between the two could then read the token.
+3. In Heimdall, add an application and pick **USAS** from the list (once the app is published there).
+   Enter the UI's address (such as `https://usas.example.lan/`) as the URL, paste the token as the API
+   token, choose **Test**, then save. Heimdall then asks every 30 seconds, and every 5 seconds while a run is
+   going, for each open dashboard tab.
+
+To check the token by hand:
+
+```sh
+curl -fsS -H "Authorization: Bearer usas_st_..." https://usas.example.lan/api/status
+```
+
+The Account page shows how the token starts, when it was made and when and from which address it was last
+used. **Replace the token** (with the password) makes a new one and stops the old one at once; **Revoke the
+token** turns the API off. Revoke it when you stop using the dashboard, and replace it if you think someone
+else read it: Heimdall keeps it in plain text in its database and shows it in the tile's settings, so anyone
+who can edit the dashboard or read its data volume can read it.
+
+How the UI treats the token:
+
+- It is read only from the `Authorization: Bearer` header, never from the address (query strings end up in
+  logs), is compared in constant time, and makes no session and no cookie.
+- Calls with a wrong token are slowed down per client address: 5 are free, then each one doubles the wait,
+  up to 15 minutes (answered with `429` and `Retry-After`). This is apart from the sign-in, so a dashboard
+  with an old token can't lock you out. A right token may make 60 calls a minute.
+- The cluster is asked for the VM counts at most once a minute, whatever the number of dashboards, and a
+  cluster that doesn't answer is reported as unknown (`null`) for a minute too.
+- The log says when the token is made, replaced or revoked, every refused call and why (never the token),
+  and that it was used, once an hour per address.
+- Changing the Vault password (`ansible-vault rekey` with a new `USAS_VAULT_PASSWORD_FILE`) invalidates the
+  token, because its HMAC is keyed from it: make a new one.
+
 ## What is stored where
 
 Everything is in the `/data` volume, readable only by the container's user (mode `0600` files in `0700`
@@ -229,6 +280,7 @@ directories):
 | `pve-ca.pem`, `ca-bundle.pem` | The cluster CA you saved, and that CA together with the public ones. |
 | `auth.json` | The UI password's argon2id hash. |
 | `passkeys.json` | The passkeys' public keys, IDs, names and signature counters, and whether a passkey is required. |
+| `status-token.json` | The status token's HMAC (never the token), its first 4 characters, when it was made and last used, and from which address. There is none until you make a token. |
 | `webui.json` | The cluster's name, nodes and ISO storages from the last connection test, for the node dropdowns and the ISO plan. |
 | `runs/` | The run history: one `.json` and one `.log` per run. |
 
@@ -294,7 +346,8 @@ Proxmox node.
 
 What it does to protect them:
 
-- **Sign-in required** for everything except the health check. One password, stored as an argon2id hash
+- **Sign-in required** for everything except the health check and the status API for dashboards (which
+  takes its own token, see [dashboards](#dashboards-heimdall)). One password, stored as an argon2id hash
   (`auth.json`); failed attempts are slowed down (after 5, each failure doubles the wait, up to 15
   minutes). The first password needs the setup code from the log.
 - **Passkeys** (optional, WebAuthn with py_webauthn): added only by a signed-in session that enters the
@@ -304,7 +357,8 @@ What it does to protect them:
   Failed passkey sign-ins count towards the same slow-down as wrong passwords. With **Require a passkey**,
   the password doesn't sign in at all.
 - **The log** records every sign-in and failed sign-in with the client's address (and the passkey's
-  name, or why a passkey was refused), and passkeys being added, removed or required:
+  name, or why a passkey was refused), passkeys being added, removed or required, and the status token
+  being made, replaced, revoked, refused or used (once an hour per address):
   `docker logs usas`.
 - **Sessions** are random 256-bit IDs kept in memory, in an `HttpOnly`, `SameSite=Strict` cookie (also
   `Secure` over HTTPS). Signing in issues a new ID; changing the password signs out every other session,
@@ -373,7 +427,8 @@ to the inventory, so a new release's default applies to it.
 The UI is a React app (`webui/frontend`) served by FastAPI (`webui/usas_web`). Every page URL answers with
 the same small HTML page, after the same sign-in checks; the app then asks `/api/<page>` for the page's data
 and posts its forms there, with the same field names the forms always had. The API is the UI's own, not one
-for other programs (use the inventory and `ansible-playbook` for that), so there is no OpenAPI document.
+for other programs (use the inventory and `ansible-playbook` for that), so there is no OpenAPI document;
+the one exception is `/api/status` for dashboards, specified in [interfaces.md](interfaces.md#the-status-api).
 For reference:
 
 | Path | Methods | What |
@@ -382,11 +437,13 @@ For reference:
 | `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/vms`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
 | `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version, the theme, and whether passkeys are registered or required. |
 | `/api/setup`, `/api/login`, `/api/logout`, `/api/account` | POST | First-run password, sign-in, sign-out, password change. |
-| `/api/account` | GET | The passkeys (name, when added and last used, never the key), whether one is required, and their host name. |
+| `/api/account` | GET | The passkeys (name, when added and last used, never the key), whether one is required, and their host name; whether a status token exists, how it starts, and when and from where it was last used (never the token). |
 | `/api/passkeys/register-options`, `/api/passkeys/register` | POST | Add a passkey: the options for `navigator.credentials.create()` (needs the name and the current password), then the browser's answer. |
 | `/api/passkeys/login-options`, `/api/passkeys/login` | POST | Sign in with a passkey: the options for `navigator.credentials.get()`, then the browser's answer. |
 | `/api/passkeys/remove`, `/api/passkeys/require` | POST | Remove a passkey; turn "Require a passkey" on or off. |
 | `/api/theme` | POST | Remember the theme (`dark`, `light` or `system`) for this browser. |
+| `/api/status` | GET | The summary for dashboards ([interfaces.md](interfaces.md#the-status-api)). No sign-in and no session: it needs the status token as `Authorization: Bearer`, and answers 404 until one exists. |
+| `/api/status-token/create`, `/api/status-token/revoke` | POST | Make (or replace) the status token, which needs the current password and is answered once with the token; revoke it. |
 | `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
 | `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, and whether the playbooks support them. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. Read-only. |
 | `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
@@ -399,7 +456,8 @@ For reference:
 | `/static/favicon.svg`, `/favicon.ico` | GET | The icon (SVG), linked with a hash of its contents (`?v=`). No sign-in. |
 
 Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms are sent as
-`multipart/form-data`. An API call without a sign-in answers 401 with where to sign in.
+`multipart/form-data`. An API call without a sign-in answers 401 with where to sign in (`/api/status`
+answers 401 with `WWW-Authenticate: Bearer` instead).
 
 ## Limitations
 
@@ -424,6 +482,11 @@ Every POST needs the session's CSRF token in the `X-CSRF-Token` header; forms ar
   (`docker logs usas`). Usually the address you opened isn't exactly `USAS_PUBLIC_URL` (the scheme, the
   host name and the port must all match), or the passkey was made for another host name.
 - **Locked out with "Require a passkey" on**: delete `passkeys.json` ([passkeys](#passkeys)).
+- **Heimdall's Test says "Please make sure your URL is correct"**: the status API answers 404 while there is
+  no token; make one on the Account page. **"Invalid credentials"**: the token is wrong, was replaced or
+  revoked, or the Vault password changed; paste a new one. **"Connection refused" or a TLS error**: the
+  dashboard's container can't reach the UI's host name over HTTPS, or doesn't trust its certificate
+  ([dashboards](#dashboards-heimdall)). The log says why each call was refused (`docker logs usas`).
 - **The page says "The web UI's app isn't built"**: you are running the UI from a checkout without
   building the app. Run `make app` (or `npm ci` and `npm run build` in `webui/frontend`); `make ui` does it
   for you. The container image always has it.
