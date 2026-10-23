@@ -1,7 +1,7 @@
-// Sign-in (with the password or a passkey), the first-run setup, and the account page: the password change and
-// the passkeys.
+// Sign-in (with the password or a passkey), the first-run setup, and the account page: the password change,
+// the passkeys and the status API's token for dashboards.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, InputHTMLAttributes } from "react";
 import { formData, location_, post } from "../api";
 import { fieldId } from "../components/Field";
@@ -12,7 +12,7 @@ import { isoTime, when } from "../format";
 import { createPasskey, getPasskey, passkeyError, passkeyProblem } from "../passkeys";
 import type { CreationOptionsJSON, RequestOptionsJSON } from "../passkeys";
 import { useRouter } from "../router";
-import type { AccountData, Errors, Notice as NoticeT, Passkey, SessionData } from "../types";
+import type { AccountData, Errors, Notice as NoticeT, Passkey, SessionData, StatusToken } from "../types";
 
 interface Reply {
   error?: string;
@@ -415,12 +415,193 @@ function PasskeysCard() {
   );
 }
 
+function TokenFacts({ info }: { info: StatusToken }) {
+  return (
+    <dl className="meta">
+      <div><dt>Starts with</dt><dd>usas_st_{info.hint}…</dd></div>
+      {info.created ? <div><dt>Created</dt><dd><time dateTime={isoTime(info.created)}>{when(info.created)}</time></dd></div> : null}
+      <div>
+        <dt>Last used</dt>
+        <dd>
+          {info.last_used ? (
+            <><time dateTime={isoTime(info.last_used)}>{when(info.last_used)}</time> from {info.last_from}</>
+          ) : "Not yet"}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+// The token is in the page only right after it was made: copying it is the one chance.
+function NewToken({ token }: { token: string }) {
+  const field = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, [token]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied("Copied the token.");
+    } catch {
+      field.current?.focus();
+      field.current?.select();
+      setCopied("Couldn't copy it here: it is selected, press Ctrl+C (⌘C on a Mac).");
+    }
+  };
+  return (
+    <div className="stack-sm">
+      <div className="field">
+        <label htmlFor="status-token">New token</label>
+        <input type="text" id="status-token" className="mono" value={token} readOnly spellCheck={false}
+               autoComplete="off" ref={field} aria-describedby="status-token-help" />
+        <p className="help" id="status-token-help">
+          In Heimdall, add an application, pick USAS, enter this UI&rsquo;s address as the URL and paste the token as
+          the API token. It isn&rsquo;t shown again.
+        </p>
+      </div>
+      <div className="actions">
+        <button type="button" className="button secondary" onClick={copy}>Copy the token</button>
+      </div>
+      <p aria-live="polite" className="help">{copied}</p>
+    </div>
+  );
+}
+
+function StatusTokenCard() {
+  const page = useData<AccountData>("/api/account");
+  const [errors, setErrors] = useState<Errors>({});
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeT | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const revokeButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const info = page.data?.status_token;
+
+  useEffect(() => {
+    if (confirming) confirmButton.current?.focus();
+  }, [confirming]);
+
+  const start = () => {
+    setErrors({});
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+  };
+  const done = (reply: { ok: boolean; status: number; data: Reply & { errors?: Errors } }) => {
+    setBusy(false);
+    if (reply.ok) {
+      setNotice({ kind: "ok", message: reply.data.message ?? "Saved." });
+      page.reload();
+    } else if (reply.data.errors) {
+      setErrors(reply.data.errors);
+    } else {
+      setError(errorText(reply.data, reply.status));
+    }
+    return reply.ok;
+  };
+
+  const create = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    start();
+    setToken("");
+    const reply = await post<Reply & { errors?: Errors; token?: string }>("/api/status-token/create",
+                                                                          formData(event.currentTarget));
+    if (done(reply)) {
+      setToken(reply.data.token ?? "");
+      setFormKey((k) => k + 1);
+    }
+  };
+
+  const revoke = async () => {
+    if (busy) return;
+    start();
+    setConfirming(false);
+    if (done(await post<Reply>("/api/status-token/revoke", {}))) setToken("");
+    // The buttons are gone: focus goes to the section, where the result is announced.
+    heading.current?.focus();
+  };
+
+  const cancel = () => {
+    setConfirming(false);
+    // The button is back on the next render.
+    setTimeout(() => revokeButton.current?.focus(), 0);
+  };
+
+  const title = <h2 id="status-heading" tabIndex={-1} ref={heading}>Status for dashboards</h2>;
+  if (!info) return <section className="stack" aria-labelledby="status-heading">{title}<Loading error={page.error} /></section>;
+  return (
+    <section className="stack" aria-labelledby="status-heading">
+      {title}
+      <p className="lead">
+        A dashboard such as Heimdall can show on its tile whether a run is going, how the last one ended, how many
+        VMs run and how many servers are still to install, by asking <code>/api/status</code> with a token. It is
+        off until you create one. The token only reads that summary: no names, addresses or secrets, and it
+        can&rsquo;t change anything. Anyone who can open the dashboard&rsquo;s settings can read it there, so revoke it
+        when you stop using it.
+      </p>
+      {info.broken ? (
+        <Notice notice={{ kind: "error", message: "The token file can't be read, so no token works. Revoke it, then " +
+          "create a new one." }} />
+      ) : null}
+      <ErrorMessage message={error} id="status-error" />
+      <ErrorSummary errors={errors} id="status-errors" />
+      <div aria-live="polite">{notice ? <Notice notice={notice} /> : null}</div>
+      {token ? <NewToken token={token} /> : null}
+      {info.exists && !info.broken ? <TokenFacts info={info} /> : null}
+      {info.exists ? (
+        confirming ? (
+          <div className="card narrow" role="group" aria-labelledby="revoke-question">
+            <div className="card-body">
+              <p id="revoke-question">Revoke the token? Dashboards that use it stop showing the status.</p>
+            </div>
+            <div className="card-foot actions">
+              <button type="button" className="button" ref={confirmButton} onClick={revoke}
+                      aria-disabled={busy || undefined}>
+                Revoke it
+              </button>
+              <button type="button" className="button secondary" onClick={cancel}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className="actions">
+            <button type="button" className="button secondary" ref={revokeButton} onClick={() => setConfirming(true)}
+                    aria-disabled={busy || undefined}>
+              Revoke the token
+            </button>
+          </div>
+        )
+      ) : null}
+      <form key={formKey} method="post" action="/api/status-token/create" className="card narrow" onSubmit={create}>
+        <div className="card-body">
+          <h3>{info.exists ? "Replace the token" : "Create a token"}</h3>
+          <TextField name="status_current" label="Current password" type="password" autoComplete="current-password"
+                     error={errors.status_current} required
+                     help={info.exists ? "The old token stops working at once." : undefined} />
+        </div>
+        <div className="card-foot">
+          <button type="submit" className="button" aria-disabled={busy || undefined}>
+            {info.exists ? "Replace the token" : <><Icon name="plus" />Create a token</>}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export function Account() {
   return (
     <>
       <PageHead title="Sign-in and security" crumb="Account" />
       <PasswordCard />
       <PasskeysCard />
+      <StatusTokenCard />
     </>
   );
 }
