@@ -201,6 +201,14 @@ trust or forget a key.
 - `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` from SSH: stop. Check on the node's console whether it
   was reinstalled or its keys regenerated, and compare the new fingerprint. Only then remove the old entry
   (`ssh-keygen -R 192.0.2.10`, or **Forget the host key** in the web UI) and pin the new one.
+- `No ED25519 host key is known for <address>` for a server this project installed: a run stopped after the
+  install but before it trusted the new VM's key (for example a server with `net_mode: dhcp` whose address
+  couldn't be read), and later runs skip the VM because it exists. Either delete the VM (`qm destroy <vmid>
+  --purge`, it holds nothing yet) and provision it again, or pin its key as for a node: on the VM's console in
+  Proxmox, logged in as the admin user, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`; on the control
+  node, `ssh-keyscan -t ed25519 <address> > vm.known_hosts` and `ssh-keygen -lf vm.known_hosts`; if the
+  fingerprints match, append `vm.known_hosts` to `provision_known_hosts_file` (in the web UI's container,
+  `/data/ssh/known_hosts`, as above).
 - `CERTIFICATE_VERIFY_FAILED` from the API: don't set `pve_validate_certs: false`. Check the certificate
   and the CA on the node as in step 2: a name missing from `subjectAltName`, an expired certificate or a
   new CA are the usual causes.

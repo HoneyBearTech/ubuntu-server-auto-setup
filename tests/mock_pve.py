@@ -293,6 +293,13 @@ class PveHandler(BaseHTTPRequestHandler):
                 {"storage": name, "active": 1, "enabled": 1, **STORAGES[name]}
                 for name in NODE_STORAGES[m.group(1)] if not content or content in STORAGES[name]["content"].split(",")
             ])
+        if method == "GET" and path == "/access/permissions":
+            # The token's privileges on one path, as Proxmox VE 9 answers for a role like docs/installing.md's.
+            m = re.fullmatch(r"/vms/(\d+)", query.get("path", ""))
+            privileges = ["VM.Allocate", "VM.Audit", "VM.Config.Disk", "VM.PowerMgmt", "Datastore.AllocateSpace"]
+            if not (m and int(m.group(1)) in FORBIDDEN_AGENT_VMIDS):
+                privileges.append("VM.GuestAgent.Audit")
+            return self._reply(200, {query.get("path", "/"): dict.fromkeys(privileges, 1)})
         if method == "GET" and path == "/cluster/status":
             return self._reply(200, [{"type": "cluster", "name": "mock-cluster", "nodes": len(NODES), "quorate": 1}]
                                + [{"type": "node", "name": n, "online": 1, "local": int(n == NODE)} for n in NODES])

@@ -140,8 +140,18 @@ Servers page.
   handshake timing out at releases.ubuntu.com stopped the run), with a 30-second timeout instead of 10.
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
   container image examples.
+- Provisioning checks that the API token may ask a new DHCP server's guest agent (`VM.GuestAgent.Audit` on
+  Proxmox VE 9, `VM.Monitor` on 8) before it creates the VM. Without it, the VM was installed, the run stopped
+  when it asked for the address, and later runs couldn't reach the VM because its new host key was never
+  trusted. A new DHCP server whose address can't be read (no lease) now says how to recover: delete the VM
+  and run again, or pin its key ([docs/host-keys.md](docs/host-keys.md#when-a-key-or-certificate-changes)).
 - The pre-release checklist's recovery-passphrase check passes `--disable-external-tokens` to `cryptsetup`:
   without it, cryptsetup unlocked with the TPM token and accepted any passphrase.
+
+### Security
+
+- The development requirements set a lower bound of 26.10.1 on black (installed through ansible-lint), which fixes
+  GHSA-cg8m-r9f2-5wm2. Only the lint tooling is affected; the playbooks, the image and the web UI don't use black.
 
 ## [0.4.0] - 2026-10-21
 
