@@ -129,6 +129,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   accepted the ACL entry, so the run reported success and the build failed later. That build now says the
   folder can't be reached by the node user instead of a bare "Permission denied". docs/installing.md says
   what the export needs, and that root stays the way for a share that won't let the user in.
+- A new VM with `net_mode: dhcp` could fail right after its install with "that VM is stopped: start it and run
+  again": the address lookup took the VM's status from the cluster's list, which Proxmox refreshes every few
+  seconds and still said "stopped" just after the start. It now asks the VM's node, and waits up to 30
+  seconds for a VM that is starting.
 
 ### Security
 
