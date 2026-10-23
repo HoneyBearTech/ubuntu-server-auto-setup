@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- When the "Installer ISO" workflow's remaster of the real ISO failed, its log showed only the play recap.
+  `tests/real-iso.sh` now shows each failed task with its error (or the log's last 200 lines), and the job
+  keeps every play's full log as a `real-iso-logs` artifact for 7 days.
+
 ## [0.5.0] - 2026-10-23
 
 New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their

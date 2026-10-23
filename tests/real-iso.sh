@@ -5,7 +5,8 @@
 # the CD image signing key that ships in roles/installer_iso/files/.
 # build-installer asks the Proxmox API where to build, so tests/mock_pve.py answers; only the one node container
 # this script starts is in the run (--limit pve-test).
-# Used by .github/workflows/installer-iso.yml; runs locally too (needs Docker).
+# Used by .github/workflows/installer-iso.yml; runs locally too (needs Docker). Each play's full log goes to
+# USAS_LOG_DIR if it's set (CI keeps it as an artifact); a play that fails shows its failed tasks.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +15,8 @@ TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/usas-iso.XXXXXX")"
 export TEST_TMP ANSIBLE_CONFIG="$ROOT/ansible.cfg"
 PVE=usas-test-pve
 ISO_DIR=/var/lib/vz/template/iso
+LOGS="${USAS_LOG_DIR:-$TEST_TMP/logs}"
+mkdir -p "$LOGS"
 mock_pid=""
 trap '[ -n "$mock_pid" ] && kill "$mock_pid" 2>/dev/null; docker rm -f "$PVE" >/dev/null 2>&1 || true; rm -rf "$TEST_TMP"' EXIT
 
@@ -21,7 +24,7 @@ ssh-keygen -q -t ed25519 -N '' -f "$TEST_TMP/id_ed25519"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
   -keyout "$TEST_TMP/api.key" -out "$TEST_TMP/api.crt" >/dev/null 2>&1
 python3 tests/mock_pve.py --cert "$TEST_TMP/api.crt" --key "$TEST_TMP/api.key" \
-  --keys-file "$TEST_TMP/id_ed25519.pub" >"$TEST_TMP/mock.log" 2>&1 &
+  --keys-file "$TEST_TMP/id_ed25519.pub" >"$LOGS/mock-pve.log" 2>&1 &
 mock_pid=$!
 docker build -q -t usas-test-pve:latest -f tests/images/pve-node/Dockerfile tests/fixtures >/dev/null
 docker rm -f "$PVE" >/dev/null 2>&1 || true
@@ -39,16 +42,27 @@ if [ -n "${USAS_ISO_CACHE:-}" ]; then
   done
 fi
 
+# Runs a playbook into $LOGS/NAME.log and shows its recap; if it fails, shows the failed tasks instead.
+play() {
+  local name="$1"; shift
+  if ! ansible-playbook -i tests/inventory/hosts.yml "$@" --limit pve-test >"$LOGS/$name.log" 2>&1; then
+    tests/show-failures.sh "$LOGS/$name.log"
+    echo "ERROR: ansible-playbook $* failed; the full log is $LOGS/$name.log" >&2
+    return 1
+  fi
+  sed -n '/PLAY RECAP/,$p' "$LOGS/$name.log"
+}
+
 for run in first second; do
   echo "=== build-installer against releases.ubuntu.com ($run run)"
-  ansible-playbook -i tests/inventory/hosts.yml playbooks/build-installer.yml --limit pve-test \
-    -e ubuntu_iso_base_url=https://releases.ubuntu.com/26.04 | tee "$TEST_TMP/$run.log" | sed -n '/PLAY RECAP/,$p'
+  play "build-installer-$run" playbooks/build-installer.yml -e ubuntu_iso_base_url=https://releases.ubuntu.com/26.04
 done
-if sed -n '/PLAY RECAP/,$p' "$TEST_TMP/second.log" | grep -Eq 'changed=[1-9]'; then
+if sed -n '/PLAY RECAP/,$p' "$LOGS/build-installer-second.log" | grep -Eq 'changed=[1-9]'; then
+  grep -B3 -E '^changed:' "$LOGS/build-installer-second.log" || true
   echo "ERROR: the second run changed something" >&2
   exit 1
 fi
-ansible-playbook -i tests/inventory/hosts.yml tests/verify-installer.yml --limit pve-test | sed -n '/PLAY RECAP/,$p'
+play verify-installer tests/verify-installer.yml
 
 echo "=== Boot records (original, then remastered); everything but the block addresses must match"
 records() {
