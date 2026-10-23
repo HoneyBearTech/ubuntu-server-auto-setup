@@ -354,6 +354,7 @@ describe("the account page", () => {
   it("says when the passkeys can't be loaded", async () => {
     new FakeApi({ "GET /api/account": () => reply(500, { error: "Broken." }) });
     renderAt("/account");
-    await screen.findByText("Broken.");
+    // Both sections that load it say so: the passkeys and the status token.
+    expect(await screen.findAllByText("Broken.")).toHaveLength(2);
   });
 });
