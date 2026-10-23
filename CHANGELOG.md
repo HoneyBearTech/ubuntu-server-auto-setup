@@ -8,7 +8,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-10-22
+## [0.5.0] - 2026-10-23
 
 New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their
 virtual TPM unlocks at boot (off by default). New VMs can take their address from DHCP, read back through
