@@ -12,9 +12,10 @@ git history, see the README) into Ansible playbooks: a hands-off Ubuntu Server 2
 VMs, GitHub SSH keys, and a baseline (SSH hardening, UFW, Fail2Ban, unattended upgrades) that also works on
 existing Ubuntu 24.04 and 26.04 servers. **v0.1.0** (October 2026) is the first release of the Ansible
 version, signed and with an SBOM and build provenance, and every playbook is covered by integration tests
-that run on each pull request. Since then, the releases up to **v0.5.0** have added a container image with a
+that run on each pull request. Since then, the releases up to **v0.6.0** have added a container image with a
 web UI, Secure Boot and optional disk encryption for new VMs, DHCP and more network cards, several Proxmox
-nodes per inventory, and passkey sign-in ([CHANGELOG](../CHANGELOG.md)).
+nodes per inventory, passkey sign-in, and a read-only status API for dashboards
+([CHANGELOG](../CHANGELOG.md)).
 
 ## Over the following year
 
@@ -32,7 +33,8 @@ nodes per inventory, and passkey sign-in ([CHANGELOG](../CHANGELOG.md)).
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
 - Done: Secure Boot by default for new VMs, and optional LUKS2 disk encryption unlocked by the VM's
-  virtual TPM ([security.md](security.md#secure-boot-and-disk-encryption)).
+  virtual TPM ([security.md](security.md#secure-boot-and-disk-encryption)), which the web UI's Defaults
+  page can also turn on.
 - Optional IPv6 network configuration, and more disk layouts.
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
@@ -51,6 +53,8 @@ nodes per inventory, and passkey sign-in ([CHANGELOG](../CHANGELOG.md)).
   project runs on Windows with Docker Desktop ([web-ui.md](web-ui.md)).
 - Done: passkeys (WebAuthn) as another way to sign in, or the only one with "Require a passkey", on
   `http://localhost` or under the host name in `USAS_PUBLIC_URL` ([web-ui.md](web-ui.md#passkeys)).
+- Done: an opt-in, read-only status API for dashboards such as Heimdall, with a token of its own and no
+  names, addresses or secrets in its answer ([web-ui.md](web-ui.md#dashboards-heimdall)).
 - Done: several Proxmox nodes per inventory: a node per server, picked from the cluster in the web UI,
   with the installer ISO built once per shared storage and on each node for node-local storage.
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the

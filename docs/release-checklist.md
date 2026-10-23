@@ -15,7 +15,7 @@ run (now removed by default, `admin_sudo_nopasswd: false`). The steps below chec
 
 Use a disposable VM ID and address, never a server you need: provisioning wipes the VM's disk. In the
 commands, `192.0.2.10` stands for the test VM's address, `test-01` for its inventory name, `9001` for its
-VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.5.0` for the version to
+VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.6.0` for the version to
 be tagged; replace them with yours.
 
 ## Pre-flight
@@ -24,7 +24,7 @@ be tagged; replace them with yours.
   it, with the version it will be tagged as, so the web UI shows that version:
 
   ```bash
-  docker build --build-arg USAS_VERSION=0.5.0 -t ubuntu-server-auto-setup:rc .
+  docker build --build-arg USAS_VERSION=0.6.0 -t ubuntu-server-auto-setup:rc .
   docker run -d --name usas-rc -p 127.0.0.1:8080:8080 -v usas-rc-data:/data ubuntu-server-auto-setup:rc
   ```
 
@@ -115,7 +115,10 @@ be tagged; replace them with yours.
 CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
 VMs, but not on Proxmox itself. Here the test VM (Secure Boot is the default) and a second disposable VM
 with disk encryption, `test-05` (VM ID `9005`, address `192.0.2.14`), with `vm_disk_encryption: true`
-and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real cluster.
+and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"` (set on the web UI's **Defaults** page, under
+**Disk encryption**, if the release touches it: the saved passphrase is never shown again, and the page
+refuses encryption without Secure Boot keys, the `lvm` layout or a passphrase), are checked on the real
+cluster.
 
 - [ ] Both VMs have an EFI disk with pre-enrolled keys, and only the encrypted one has a TPM state volume,
   version 2.0, on `pve_tpmstate_storage`. Note whether the EFI disks carry `ms-cert=2023k`:
@@ -341,6 +344,20 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
   macOS and with NVDA on Windows, on the image under test before its first-run setup (it starts with the
   first-run page). Add a row per screen reader to its results table in the release pull request, and an
   issue for each problem. Until a release has done this, the docs say it hasn't been run.
+- [ ] **The status API** ([web-ui.md](web-ui.md#dashboards-heimdall)): before any token exists,
+  `/api/status` answers 404. On the account page, **Create a token** (a wrong password is refused); the
+  token is shown once. A call with it as `Authorization: Bearer` answers the summary, which holds no host,
+  node or VM names, addresses or VM IDs, and its `vms` and `servers` counts match the VMs page and the
+  Servers page; no token, a wrong one, and the token in a query parameter or a cookie answer 401.
+  **Replace the token**: the old one gets 401, the new one works. **Revoke the token**: the API answers 404
+  again, with the token too. `docker logs usas-rc` records the token being made, used, refused and revoked:
+
+  ```bash
+  curl -si http://localhost:8080/api/status | head -n 1                     # 404 while off
+  curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/status   # the summary
+  curl -si -H 'Authorization: Bearer usas_st_wrong' http://localhost:8080/api/status | head -n 1   # 401
+  ```
+
 - [ ] The version in the page footer is the version being released, and the API says the same:
 
   ```bash
@@ -355,7 +372,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] The signature and the build provenance verify on Docker Hub and on GHCR:
 
   ```bash
-  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.5.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.5.0; do
+  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.6.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.6.0; do
     cosign verify "$image" \
       --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -413,7 +430,7 @@ Real Proxmox run (docs/release-checklist.md), <date>
 - Hand checks: key-only SSH, password and root refused, UFW, Fail2Ban, unattended-upgrades, hostname,
   sudo needs a password, SSH port change (or: not tested, why)
 - Web UI: setup, sign-in, passkey added and used (authenticator), cross-site and token-less posts refused,
-  run streamed, version <version>
+  run streamed, status API off (404), token made, used and revoked, version <version>
 - Screen readers: VoiceOver <version> with Safari <version>, NVDA <version> with <browser> <version>:
   steps passed, problems and their issues (or: not run, why)
 - Anything that failed, and the issue or pull request that fixes it
