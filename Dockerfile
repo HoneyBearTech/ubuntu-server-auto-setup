@@ -25,11 +25,13 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
 COPY requirements.txt requirements-webui.in requirements-webui.txt requirements.yml ./
+COPY scripts/retry.sh scripts/
 # Exact versions with hashes (requirements-webui.txt), wheels only: what the image runs was reviewed.
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --require-hashes --no-deps --only-binary=:all: -r requirements-webui.txt
-# The collections ansible.cfg looks for in collections/ (collections_path) next to it.
-RUN /opt/venv/bin/ansible-galaxy collection install -r requirements.yml -p /opt/collections \
+# The collections ansible.cfg looks for in collections/ (collections_path) next to it. Galaxy fails now and
+# then, so the install is tried up to four times (scripts/retry.sh).
+RUN scripts/retry.sh /opt/venv/bin/ansible-galaxy collection install -r requirements.yml -p /opt/collections \
  && find /opt/collections -type d -name tests -prune -exec rm -rf {} + \
  && /opt/venv/bin/ansible-galaxy collection list -p /opt/collections > /opt/collections/VERSIONS.txt
 # Nothing installs packages at run time, so the copied environment carries no pip (and none of the libraries
