@@ -12,7 +12,9 @@ git history, see the README) into Ansible playbooks: a hands-off Ubuntu Server 2
 VMs, GitHub SSH keys, and a baseline (SSH hardening, UFW, Fail2Ban, unattended upgrades) that also works on
 existing Ubuntu 24.04 and 26.04 servers. **v0.1.0** (October 2026) is the first release of the Ansible
 version, signed and with an SBOM and build provenance, and every playbook is covered by integration tests
-that run on each pull request.
+that run on each pull request. Since then, the releases up to **v0.5.0** have added a container image with a
+web UI, Secure Boot and optional disk encryption for new VMs, DHCP and more network cards, several Proxmox
+nodes per inventory, and passkey sign-in ([CHANGELOG](../CHANGELOG.md)).
 
 ## Over the following year
 
@@ -29,7 +31,9 @@ that run on each pull request.
   fingerprint, before the ISO's checksum is trusted.
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
-- Optional IPv6 network configuration, and more disk layouts (including LUKS encryption).
+- Done: Secure Boot by default for new VMs, and optional LUKS2 disk encryption unlocked by the VM's
+  virtual TPM ([security.md](security.md#secure-boot-and-disk-encryption)).
+- Optional IPv6 network configuration, and more disk layouts.
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 

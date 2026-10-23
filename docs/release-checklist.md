@@ -15,7 +15,7 @@ run (now removed by default, `admin_sudo_nopasswd: false`). The steps below chec
 
 Use a disposable VM ID and address, never a server you need: provisioning wipes the VM's disk. In the
 commands, `192.0.2.10` stands for the test VM's address, `test-01` for its inventory name, `9001` for its
-VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.4.0` for the version to
+VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.5.0` for the version to
 be tagged; replace them with yours.
 
 ## Pre-flight
@@ -24,7 +24,7 @@ be tagged; replace them with yours.
   it, with the version it will be tagged as, so the web UI shows that version:
 
   ```bash
-  docker build --build-arg USAS_VERSION=0.4.0 -t ubuntu-server-auto-setup:rc .
+  docker build --build-arg USAS_VERSION=0.5.0 -t ubuntu-server-auto-setup:rc .
   docker run -d --name usas-rc -p 127.0.0.1:8080:8080 -v usas-rc-data:/data ubuntu-server-auto-setup:rc
   ```
 
@@ -148,13 +148,14 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
   ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
   ```
 
-- [ ] The recovery passphrase works: it opens the LUKS volume, and after the TPM slot is wiped the VM stops
+- [ ] The recovery passphrase works: it opens the LUKS volume (with `--disable-external-tokens`, or cryptsetup
+  unlocks with the TPM token and accepts any passphrase), and after the TPM slot is wiped the VM stops
   at the passphrase prompt on its console, where the Vault passphrase unlocks it; the command in
   [security.md](security.md#secure-boot-and-disk-encryption) enrolls the TPM again, and the next reboot is
   unattended again:
 
   ```bash
-  ssh -t sysadmin@192.0.2.14 'sudo cryptsetup open --test-passphrase "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
+  ssh -t sysadmin@192.0.2.14 'sudo cryptsetup open --test-passphrase --disable-external-tokens "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
   ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
   ssh sysadmin@192.0.2.14 sudo systemctl reboot   # type the passphrase on the console, then:
   ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
@@ -312,6 +313,13 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
 
 - [ ] First run: the setup code from `docker logs usas-rc` sets the password; signing out and in again
   works, and a wrong password is refused.
+- [ ] **Passkeys**, by hand with a real authenticator (Touch ID, a password manager or a security key; CI
+  only uses a virtual one), at `http://localhost:<port>`: on the account page, add a passkey (a name and
+  the current password; a wrong password is refused), sign out, and **Sign in with a passkey**. The account
+  page shows when it was added and last used. **Require a passkey** hides the password form and refuses a
+  password post; deleting `passkeys.json` from the data volume brings password sign-in back. Remove the
+  passkey from the account page and from the authenticator afterwards. `docker logs usas-rc` records each
+  sign-in and the passkey being added, required and removed.
 - [ ] Posts from another site, and posts without the session's CSRF token, are refused (each answers
   403):
 
@@ -346,7 +354,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] The signature and the build provenance verify on Docker Hub and on GHCR:
 
   ```bash
-  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.4.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.4.0; do
+  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.5.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.5.0; do
     cosign verify "$image" \
       --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -403,7 +411,8 @@ Real Proxmox run (docs/release-checklist.md), <date>
 - build-installer, provision-vms, baseline: failed=0; second runs changed=0
 - Hand checks: key-only SSH, password and root refused, UFW, Fail2Ban, unattended-upgrades, hostname,
   sudo needs a password, SSH port change (or: not tested, why)
-- Web UI: setup, sign-in, cross-site and token-less posts refused, run streamed, version <version>
+- Web UI: setup, sign-in, passkey added and used (authenticator), cross-site and token-less posts refused,
+  run streamed, version <version>
 - Screen readers: VoiceOver <version> with Safari <version>, NVDA <version> with <browser> <version>:
   steps passed, problems and their issues (or: not run, why)
 - Anything that failed, and the issue or pull request that fixes it
