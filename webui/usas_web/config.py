@@ -85,6 +85,11 @@ class Settings:
         return self.data_dir / "passkeys.json"
 
     @property
+    def status_token_file(self) -> Path:
+        """The status API's token, as an HMAC (never the token itself)."""
+        return self.data_dir / "status-token.json"
+
+    @property
     def rp_id(self) -> str:
         """The WebAuthn relying party ID: the host name passkeys are made for."""
         return urlsplit(self.public_url).hostname or "localhost"
