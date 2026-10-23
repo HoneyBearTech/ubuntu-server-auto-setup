@@ -328,9 +328,13 @@ play playbooks/provision-vms.yml --limit srv-vlan
 play tests/verify-network.yml
 
 step "provision-vms: no DHCP lease, or a guest agent the token may not ask, stops with what to do"
-play_fails 'VM 4065 (srv-nolease) reported no DHCP address on net0' playbooks/provision-vms.yml --limit srv-nolease
-play_fails 'add VM.GuestAgent.Audit (Proxmox VE 9) or VM.Monitor (Proxmox VE 8)' playbooks/provision-vms.yml \
+# A VM installed but never reached says how to recover: later runs skip it, and its host key isn't trusted.
+play_fails 'VM 4065 (srv-nolease) reported no DHCP address on net0.*its SSH host key was never trusted' \
+  playbooks/provision-vms.yml --limit srv-nolease
+# A token without the privilege is refused before the VM is created, not after its install.
+play_fails "role, as docs/installing.md describes. VM 4066 wasn't created." playbooks/provision-vms.yml \
   --limit srv-forbidden
+no_vms 4066
 
 step "provision-vms: network settings that could add options to a card, or a second default route, are refused"
 play_fails 'pve_bridge must be a bridge name' playbooks/provision-vms.yml --limit srv-vlan -e 'pve_bridge=vmbr0,firewall=0'

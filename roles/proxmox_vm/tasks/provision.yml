@@ -236,6 +236,8 @@
 - name: Find the address DHCP gave the new VM
   ansible.builtin.include_tasks: dhcp_address.yml
   when: net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]
+  vars:
+    pve_dhcp_new_vm: true
 
 - name: Wait for the installed system to answer
   block:
