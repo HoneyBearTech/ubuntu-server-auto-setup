@@ -4,8 +4,8 @@ The inventory (inventory/hosts.yml) is an ordinary Ansible inventory: the same p
 command line (with the Vault password file). Every value a user typed is written with the ``!unsafe`` tag, so
 Ansible never treats it as a template, whatever it contains; only the few templates the UI itself writes
 (such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings. The secrets (the admin password,
-the API token, and the mail relay password and webhook URL when set) are in inventory/group_vars/all/vault.yml,
-encrypted with Ansible Vault.
+the API token, and the mail relay password, webhook URL and disk passphrase when set) are in
+inventory/group_vars/all/vault.yml, encrypted with Ansible Vault.
 """
 
 import json
@@ -23,10 +23,11 @@ from .config import Settings
 from .schema import Schema
 
 VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_token_secret",
-               "vault_mail_relay_password", "vault_fail2ban_webhook_url")
+               "vault_mail_relay_password", "vault_fail2ban_webhook_url", "vault_disk_passphrase")
 # Secrets a server may go without: the inventory refers to them only once they are saved.
 OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
-                    "fail2ban_webhook_url": "vault_fail2ban_webhook_url"}
+                    "fail2ban_webhook_url": "vault_fail2ban_webhook_url",
+                    "vm_disk_passphrase": "vault_disk_passphrase"}
 SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics")
 # Host variables that hold text the user typed (written as !unsafe).
 SERVER_TEXT_VARS = ("pve_node",)

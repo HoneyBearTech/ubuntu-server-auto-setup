@@ -10,6 +10,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Disk encryption on the web UI's Defaults page** (`vm_disk_encryption`, off by default, which until now
+  had to be set in the inventory). Its passphrase goes to the Vault (`vault_disk_passphrase`), is never
+  sent back to the browser and is masked in run logs. The page refuses to save encryption without Secure
+  Boot keys, the `lvm` layout and a passphrase the role accepts. It applies to VMs created after it is saved.
+
 - **A status API for dashboards such as Heimdall** (`GET /api/status`, off by default): a short, read-only
   summary (whether a run is going and which playbook, how the last one ended, the cluster's running and total
   VMs, the servers still to install, the version and the set-up progress) with no names, addresses or
