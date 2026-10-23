@@ -231,6 +231,10 @@
   vars:
     pve_ssh_check_host: "{{ '' if pve_vm_exists else pve_ssh_host }}"
 
+- name: Check that the API token may ask a new DHCP VM's guest agent
+  ansible.builtin.include_tasks: agent_check.yml
+  when: not pve_vm_exists and net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]
+
 - name: Install Ubuntu on a new VM
   ansible.builtin.include_tasks: provision.yml
   when: not pve_vm_exists

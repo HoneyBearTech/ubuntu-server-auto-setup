@@ -1,0 +1,30 @@
+---
+# A new VM with net_mode dhcp and no ansible_host is found through its QEMU guest agent once the installed system
+# boots, and only then is its new SSH host key trusted. So before anything is created, ask Proxmox whether the API
+# token may ask that agent: a VM installed without it can't be reached on later runs (its host key was never
+# trusted) until it is deleted and created again.
+- name: Ask Proxmox what the API token may do on VM {{ pve_vmid }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/access/permissions?path=/vms/{{ pve_vmid | int }}"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_token_permissions
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
+# The answer maps the path to the privileges granted there (the value only says whether they propagate).
+- name: Fail unless the API token may ask the guest agent for the new VM's address
+  ansible.builtin.assert:
+    that: pve_token_privileges | intersect(['VM.GuestAgent.Audit', 'VM.Monitor']) | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} gets its address from DHCP (net_mode: dhcp), which is read from the guest agent of
+      VM {{ pve_vmid }}, but the API token may not ask it: add VM.GuestAgent.Audit (Proxmox VE 9) or VM.Monitor
+      (Proxmox VE 8) to the token's role, as docs/installing.md describes. VM {{ pve_vmid }} wasn't created.
+    quiet: true
+  vars:
+    pve_token_privileges: >-
+      {{ ((pve_token_permissions.json.data | default({}, true))['/vms/' ~ (pve_vmid | int)] | default({}, true))
+         | list }}
