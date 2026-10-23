@@ -57,12 +57,15 @@ if [ "$(echo "$device" | wc -w)" -ne 1 ]; then
   exit 1
 fi
 systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= "$device"
-# Its crypttab line (curtin writes "<name> UUID=<uuid> none luks") gets tpm2-device=auto.
+# Its crypttab line (curtin writes "<name> UUID=<uuid> none luks") gets tpm2-device=auto, and tries=5:
+# systemd-cryptsetup (259) spends one try on the TPM and one more after the first wrong passphrase, so its
+# default of 3 would give one chance at the console; 5 gives three.
 awk -v source="UUID=$(blkid -s UUID -o value "$device")" '
   /^[[:space:]]*(#|$)/ || $2 != source { print; next }
   { found = 1
     if ($3 == "") $3 = "none"
     if ($4 !~ /(^|,)tpm2-device=/) $4 = ($4 == "" ? "luks" : $4) ",tpm2-device=auto"
+    if ($4 !~ /(^|,)tries=/) $4 = $4 ",tries=5"
     print }
   END { exit !found }' /etc/crypttab >/etc/crypttab.usas
 cat /etc/crypttab.usas >/etc/crypttab

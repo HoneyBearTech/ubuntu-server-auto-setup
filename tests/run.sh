@@ -308,7 +308,7 @@ docker run --rm -v "$TEST_TMP/enroll-tpm2.sh:/enroll-tpm2.sh:ro" usas-test-pve:l
   cat /etc/crypttab /calls /etc/dracut.conf.d/90-usas-tpm2.conf' >"$TEST_TMP/enroll.out"
 cat >"$TEST_TMP/enroll.expected" <<'EOF'
 # <name> <device> <key> <options>
-dm_crypt-0 UUID=1111-2222 none luks,tpm2-device=auto
+dm_crypt-0 UUID=1111-2222 none luks,tpm2-device=auto,tries=5
 scratch UUID=3333 /dev/urandom swap
 systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= /dev/sda3
 dracut --regenerate-all --force
