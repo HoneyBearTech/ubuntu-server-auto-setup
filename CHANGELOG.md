@@ -145,8 +145,17 @@ Servers page.
   when it asked for the address, and later runs couldn't reach the VM because its new host key was never
   trusted. A new DHCP server whose address can't be read (no lease) now says how to recover: delete the VM
   and run again, or pin its key ([docs/host-keys.md](docs/host-keys.md#when-a-key-or-certificate-changes)).
+- `prepare-node.yml` writes a test file as the node user in each ISO folder and stops, naming the folder and
+  the user's UID, if it can't: an NFS export that doesn't let that UID write (Synology's defaults, for example)
+  accepted the ACL entry, so the run reported success and the build failed later. That build now says the
+  folder can't be reached by the node user instead of a bare "Permission denied". docs/installing.md says
+  what the export needs, and that root stays the way for a share that won't let the user in.
 - The pre-release checklist's recovery-passphrase check passes `--disable-external-tokens` to `cryptsetup`:
   without it, cryptsetup unlocked with the TPM token and accepted any passphrase.
+- CI's Secure Boot test answers the recovery passphrase prompt reliably: it waits for the whole prompt and
+  answers the console's cursor queries (systemd 259 asks them on a serial console), falls back to typing on
+  the screen, and its passphrase check passes `--disable-external-tokens` to `cryptsetup`, without which the
+  TPM token unlocked the disk and any passphrase was accepted; it also checks that a wrong one is refused.
 
 ### Security
 

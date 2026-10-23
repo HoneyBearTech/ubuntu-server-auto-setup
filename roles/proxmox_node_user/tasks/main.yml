@@ -157,18 +157,38 @@
   failed_when: false
   when: proxmox_node_user_exists
 
-- name: Fail if a folder doesn't take the ACL entry
+# An NFS server can accept the ACL entry (or report it as already there) and still refuse the user, so write a
+# file as the user to be sure.
+- name: Write a test file to each ISO folder as {{ pve_ssh_user }}
+  ansible.builtin.command:
+    argv: [runuser, -u, "{{ pve_ssh_user }}", --, sh, -c, 'f=$(mktemp -p "$1" .usas-write-test.XXXXXX) && rm -f -- "$f"',
+           sh, "{{ item.value }}"]
+  loop: "{{ proxmox_node_user_iso_dirs | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}: {{ item.value }}"
+  register: proxmox_node_user_writes
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: proxmox_node_user_exists
+
+- name: Fail unless the user can write to every ISO folder
   vars:
-    proxmox_node_user_failed: "{{ proxmox_node_user_acls.results | default([]) | selectattr('failed', 'defined')
-                                  | selectattr('failed') | list }}"
+    proxmox_node_user_failed: >-
+      {{ (proxmox_node_user_acls.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list)
+         + (proxmox_node_user_writes.results | default([]) | selectattr('rc', 'defined') | rejectattr('rc', 'equalto', 0)
+            | list) }}
   ansible.builtin.assert:
     that: proxmox_node_user_failed | length == 0
     fail_msg: >-
-      {{ pve_ssh_user }} couldn't be given write access to
-      {{ proxmox_node_user_failed | map(attribute='item') | map(attribute='value') | join(', ') }}
-      ({{ proxmox_node_user_failed | map(attribute='msg') | first | default('') }}). An NFS or CIFS storage's
-      permissions are set on the file server: give the user's UID write access there (or mount it so it has),
-      or leave that storage out of proxmox_node_user_iso_storages.
+      {{ pve_ssh_user }} can't write to
+      {{ proxmox_node_user_failed | map(attribute='item') | map(attribute='value') | unique | join(', ') }}
+      ({{ ((proxmox_node_user_failed | map(attribute='stderr', default='') | select | list)
+           + (proxmox_node_user_failed | map(attribute='msg', default='') | select | list)) | first | default('')
+          | trim }}). An NFS or CIFS storage's permissions are set on the file server: its export must let the
+      user's UID ({{ proxmox_node_user_account.uid | default('see id -u ' ~ pve_ssh_user) }}) write (or map it to a
+      user that may), or leave that storage out of
+      proxmox_node_user_iso_storages and keep pve_ssh_user root for it.
     quiet: true
 
 - name: Create the configuration folder
