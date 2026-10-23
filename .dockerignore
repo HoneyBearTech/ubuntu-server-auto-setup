@@ -6,6 +6,7 @@
 !requirements-webui.in
 !requirements-webui.txt
 !requirements.yml
+!scripts/retry.sh
 !playbooks/
 !roles/
 !inventory/hosts.example.yml

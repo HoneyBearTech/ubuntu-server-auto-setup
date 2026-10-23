@@ -43,6 +43,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - When the "Installer ISO" workflow's remaster of the real ISO failed, its log showed only the play recap.
   `tests/real-iso.sh` now shows each failed task with its error (or the log's last 200 lines), and the job
   keeps every play's full log as a `real-iso-logs` artifact for 7 days.
+- Ansible Galaxy downloads failed now and then in CI and stopped the job. CI and the Dockerfile now install
+  the collections through `scripts/retry.sh`, which tries up to four times with a growing wait. The versions
+  `requirements.yml` allows are unchanged.
 
 ## [0.5.0] - 2026-10-23
 

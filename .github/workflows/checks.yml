@@ -37,7 +37,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements-ci.txt
 
       - name: Install the Ansible collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
 
       # Coding standards (CONTRIBUTING.md#coding-standards). Any finding fails the build.
       - name: Lint YAML (yamllint)
@@ -88,7 +88,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements-ci.txt
 
       - name: Install the Ansible collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
 
       # Builds the test images, runs every playbook against them (installer, provisioning through the mock
       # Proxmox API, baseline), checks the results and idempotence, and fails below 80% task coverage.
@@ -171,7 +171,7 @@ jobs:
 
       # The browser tests start a provisioning run, and the playbook needs the collections.
       - name: Install the Ansible collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
 
       # Chromium, at the build the lock file's Playwright expects: the download is cached by that version; the
       # system libraries it needs come from Ubuntu's archive on every run.
