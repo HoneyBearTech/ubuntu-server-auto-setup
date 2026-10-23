@@ -26,12 +26,33 @@
   ansible.builtin.set_fact:
     pve_dhcp_vm: "{{ pve_dhcp_vms.json.data | selectattr('vmid', 'equalto', pve_vmid | int) | first | default({}) }}"
 
+# The cluster's list refreshes the VMs' status every few seconds, so right after provisioning starts the
+# installed system it can still say "stopped": ask the node, and give a VM that is starting a few seconds.
+- name: Ask the node whether the VM is running, VM {{ pve_vmid }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_dhcp_vm.node }}/qemu/{{ pve_vmid }}/status/current"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs }}"
+    timeout: "{{ pve_api_timeout | int }}"
+  register: pve_dhcp_status
+  until: pve_dhcp_status.json.data.status | default('') == 'running'
+  retries: 6
+  delay: 5
+  failed_when: false
+  when: pve_dhcp_vm | length > 0
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  no_log: "{{ pve_hide_secrets }}"
+
 - name: Fail unless the VM is running
+  vars:
+    pve_dhcp_vm_status: "{{ pve_dhcp_status.json.data.status | default(pve_dhcp_vm.status | default('unknown')) }}"
   ansible.builtin.assert:
-    that: pve_dhcp_vm.status | default('') == 'running'
+    that: pve_dhcp_vm_status == 'running'
     fail_msg: >-
       {{ inventory_hostname }} gets its address from DHCP (net_mode: dhcp), which is read from the guest agent of
-      VM {{ pve_vmid }}, but that VM {{ ('is ' ~ pve_dhcp_vm.status ~ ': start it and run again') if pve_dhcp_vm
+      VM {{ pve_vmid }}, but that VM {{ ('is ' ~ pve_dhcp_vm_status ~ ': start it and run again') if pve_dhcp_vm
       else "doesn't exist: run playbooks/provision-vms.yml first" }}.
     quiet: true
 
