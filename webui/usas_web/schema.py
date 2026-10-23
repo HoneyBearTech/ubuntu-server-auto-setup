@@ -28,6 +28,8 @@ NOT_FORM_FORMATS = frozenset({
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
     "pve_iso_dirs_file",
+    # What a dropped API connection looks like in proxmox_kvm's errors, for retrying it: not a value anyone types.
+    "pve_api_dropped_pattern",
     # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
     "provision_nic_keys",
     "provision_disk_passphrase_pattern", "provision_installer_config_copies",
