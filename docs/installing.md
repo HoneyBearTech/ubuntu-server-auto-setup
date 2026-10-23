@@ -310,6 +310,10 @@ To go back to root, set `pve_ssh_user: root` again. To remove the user: `userdel
   or CIFS storage, see [step 6](#6-optional-a-node-user-other-than-root).
 - **"... can't install packages, and xorriso or gpgv isn't installed"**: run `make prepare-node`, or
   `apt install xorriso gpgv` as root on the node.
+- **"Timeout (32s) waiting for privilege escalation prompt"** or **"Connection timed out"** right after a
+  reboot or a restart of SSH: the server was still starting. `ansible.cfg` waits 30 seconds (`timeout`
+  under `[defaults]`); run it again (the playbooks are idempotent), or raise the timeout for a
+  slow server with `ARGS="-T 60"`.
 - **Locked out after the baseline**: log in on the Proxmox console as the admin user with the Vault
   password, fix `/etc/ssh/sshd_config.d/00-hardening.conf` or `ufw`, then correct the inventory.
 

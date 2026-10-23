@@ -122,8 +122,8 @@ template for an encrypted disk. It installs unattended, then:
 
 - the installed system reports Secure Boot enabled (the shim, GRUB and kernel from the remastered ISO, and
   then the installed ones, were verified by the firmware);
-- the root disk is LUKS2 with two key slots, the passphrase's and a TPM2 token, and crypttab has
-  `tpm2-device=auto`; the first boot needs nobody to type a passphrase;
+- the root disk is LUKS2 with two key slots, the passphrase's and a TPM2 token, and crypttab (and the
+  initrd's copy) has `tpm2-device=auto` and `tries=5`; the first boot needs nobody to type a passphrase;
 - the role's `first_boot.yml`, run by Ansible as provisioning runs it, binds the TPM slot to PCR 7 alone,
   and two reboots after that stay unattended;
 - the passphrase opens the volume, and after `first_boot.yml` no file on the disk holds it;
@@ -131,8 +131,9 @@ template for an encrypted disk. It installs unattended, then:
   what the system says about its crypttab, initramfs, LUKS header, PCR 7 (also as the installer measured
   it) and boot log, then fails;
 - recovery as [security.md](security.md#secure-boot-and-disk-encryption) describes it: with the TPM slot
-  wiped, the VM stops at the passphrase prompt (on the serial console here, where the test types the
-  passphrase), comes up, and enrolling the TPM again brings back unattended boots.
+  wiped, the VM stops at the passphrase prompt (on the serial console here, where the test types two
+  wrong passphrases, each of which must bring the prompt back, then the right one), comes up, and
+  enrolling the TPM again brings back unattended boots.
 
 The VM's serial logs, screen dumps and the LUKS header dump are kept as a workflow artifact when it fails.
 It needs about 3 GB for the ISO and up to 8 GB for the VM's disk, and takes 20 to 30 minutes.

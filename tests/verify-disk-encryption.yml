@@ -59,6 +59,7 @@
           - doc.write_files | map(attribute='permissions') | list == ['0600', '0700']
           - files['/run/usas/disk-key'] == passphrase
           - script is search('systemd-cryptenroll --unlock-key-file=/run/usas/disk-key --tpm2-device=auto --tpm2-pcrs= ')
+          - "'$4 = $4 \",tries=5\"' in script"
           - script is search('dracut --regenerate-all --force')
         quiet: true
 
