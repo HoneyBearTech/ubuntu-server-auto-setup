@@ -20,6 +20,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
+  stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - A wrong passphrase at an encrypted VM's console prompt made the unlock give up at once, and the boot
   waited until a reset: Ubuntu 26.04's systemd-cryptsetup counts the TPM's attempt and a search for a key
   file against crypttab's default of 3 tries. New encrypted VMs get `tries=5` in their crypttab line, which
