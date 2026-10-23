@@ -37,6 +37,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   file against crypttab's default of 3 tries. New encrypted VMs get `tries=5` in their crypttab line, which
   leaves three passphrases. For a VM installed with 0.5.0, docs/security.md ("Recovery") gives the two
   commands that add it.
+- Runs right after a server rebooted or restarted SSH sometimes stopped with "Timeout waiting for privilege
+  escalation prompt". `ansible.cfg` (the image uses the same file) now waits 30 seconds for a connection and
+  for sudo's prompt instead of Ansible's 10.
 
 ## [0.5.0] - 2026-10-23
 

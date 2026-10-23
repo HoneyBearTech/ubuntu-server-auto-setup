@@ -68,6 +68,9 @@ python3 tests/webui_smoke.py --url "http://localhost:$APP_PORT" --setup-code "$c
   --mock "https://127.0.0.1:$MOCK_PORT" --ca "$TMP/api.crt" --keys "$TMP/test.keys" \
   --version "${EXPECT_VERSION:-}"
 
+# The image runs the playbooks with the repository's ansible.cfg, and its 30-second connection timeout.
+docker exec "$APP" ansible-config dump --only-changed | grep -Eq '^DEFAULT_TIMEOUT\(/app/ansible.cfg\) = 30$'
+
 # What the UI left in the volume: an encrypted Vault, private files, and a process that isn't root.
 test "$(docker exec "$APP" id -u)" != 0
 docker exec "$APP" sh -c 'head -c 14 /data/inventory/group_vars/all/vault.yml' | grep -q '^\$ANSIBLE_VAULT'
