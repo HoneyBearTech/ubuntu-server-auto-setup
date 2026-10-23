@@ -78,13 +78,15 @@ EOF
 # Watches the serial console for the passphrase prompt and types the passphrase (from the environment). systemd
 # writes the prompt in pieces and asks the console where its cursor is (ESC[6n) in between: the helper answers
 # like a terminal would, and types only once the whole prompt is there, or the passphrase is read as something
-# else and the unlock waits forever. It keeps logging for a few seconds after typing.
+# else and the unlock waits forever. With a fourth argument N it first types N wrong passphrases, each at a new
+# prompt, so a run fails unless systemd asks again after each. It keeps logging for a few seconds after typing.
 cat >"$W/type-passphrase.py" <<'EOF'
 import os, socket, sys, time
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
 s.settimeout(1)
-seen, queries, answered, typed_at = b"", 0, 0, None
+seen, queries, answered, typed_at, after = b"", 0, 0, None, 0
+wrong = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 deadline = time.time() + int(sys.argv[3])
 with open(sys.argv[2], "ab") as log:
     while time.time() < deadline and (typed_at is None or time.time() < typed_at + 10):
@@ -96,19 +98,25 @@ with open(sys.argv[2], "ab") as log:
             break
         log.write(chunk)
         log.flush()
-        seen = (seen + chunk)[-8192:]
+        seen += chunk
         queries += chunk.count(b"\x1b[6n")
         while answered < queries:
             s.sendall(b"\x1b[24;80R")
             answered += 1
-        prompt = seen.rfind(b"assphrase for")
+        prompt = seen.find(b"assphrase for", after)
         if typed_at is None and prompt >= 0 and (b"no echo)" in seen[prompt:] or b"): " in seen[prompt:]):
             time.sleep(1)
+            if wrong:
+                s.sendall(b"not-the-passphrase\r")
+                print("typed a wrong passphrase at the prompt")
+                wrong -= 1
+                after = len(seen)
+                continue
             s.sendall(os.environ["DISK_PASSPHRASE"].encode() + b"\r")
             print("typed the passphrase at the prompt")
             typed_at = time.time()
 if typed_at is None:
-    sys.exit("no passphrase prompt on the serial console")
+    sys.exit("no passphrase prompt on the serial console" + (" after a wrong passphrase" if after else ""))
 EOF
 
 step "Rendering the role's user-data for an encrypted VM"
@@ -319,6 +327,8 @@ check_luks '[7]'
 # shellcheck disable=SC2016 # expanded on the VM
 ssh_vm 'cat /etc/crypttab; for m in $(sudo dmsetup ls --target crypt | cut -f1); do sudo cryptsetup status "$m"; done'
 ssh_vm 'grep -E "^[^#].*tpm2-device=auto" /etc/crypttab' >/dev/null
+# The initrd's copy, which the boot reads, allows three passphrases (see the recovery step).
+ssh_vm 'sudo lsinitrd -f etc/crypttab | grep -E "^[^#].*,tries=5"' >/dev/null
 ssh_vm 'sudo lsinitrd 2>/dev/null | grep -E "etc/crypttab|libtss2-tcti-device|systemd-cryptsetup$" || true'
 ssh_vm 'sudo grep -h "Secure boot" /var/log/installer/installer-journal.txt 2>/dev/null | head -2 || true'
 
@@ -343,7 +353,7 @@ reboot_vm 300
 check_luks '[7]'
 echo "rebooted twice unattended"
 
-step "Recovery: without the TPM key slot the passphrase unlocks at the console; enrolling the TPM again restores unattended boots"
+step "Recovery: without the TPM key slot the passphrase unlocks at the console, also after two wrong ones; enrolling the TPM again restores unattended boots"
 # The kernel and the passphrase prompt go to the serial console too, where the test can answer it.
 ssh_vm 'sudo sed -i -E "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"(.*)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 console=tty0 console=ttyS0,115200\"/" /etc/default/grub && sudo update-grub'
 ssh_vm "sudo systemd-cryptenroll --wipe-slot=tpm2 $DEV"
@@ -351,7 +361,9 @@ ssh_vm sudo poweroff || true
 wait_off 300
 start_vm recovery -serial "unix:$W/serial.sock,server,nowait"
 sleep 2
-python3 "$W/type-passphrase.py" "$W/serial.sock" "$W/serial-recovery.log" 600
+# Two wrong passphrases first: crypttab's tries=5 must leave three prompts (systemd 259 spends two of its tries
+# on the TPM and on looking for a key file).
+python3 "$W/type-passphrase.py" "$W/serial.sock" "$W/serial-recovery.log" 600 2
 # If the answer on the serial console didn't reach the prompt, type it on the screen, as for a stuck first boot.
 if ! wait_ssh 180; then
   echo "screendump $W/screen-recovery-$SECONDS.ppm" | python3 "$W/monitor.py" "$W/monitor.sock" || true

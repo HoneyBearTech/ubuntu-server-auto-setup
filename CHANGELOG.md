@@ -32,6 +32,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   an SSL EOF. Provisioning and `build-installer` now retry the read-only API calls when the connection drops
   (any answer from Proxmox is final). They also retry creating a VM; after a dropped connection they carry on
   only with a VM that has the server's name and the role's description, and otherwise stop and say why.
+- A wrong passphrase at an encrypted VM's console prompt made the unlock give up at once, and the boot
+  waited until a reset: Ubuntu 26.04's systemd-cryptsetup counts the TPM's attempt and a search for a key
+  file against crypttab's default of 3 tries. New encrypted VMs get `tries=5` in their crypttab line, which
+  leaves three passphrases. For a VM installed with 0.5.0, docs/security.md ("Recovery") gives the two
+  commands that add it.
 - Runs right after a server rebooted or restarted SSH sometimes stopped with "Timeout waiting for privilege
   escalation prompt". `ansible.cfg` (the image uses the same file) now waits 30 seconds for a connection and
   for sudo's prompt instead of Ansible's 10.

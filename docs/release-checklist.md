@@ -133,7 +133,7 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
   ```
 
 - [ ] `test-05`'s root file system is on LUKS2, with a TPM2 token bound to PCR 7 and two key slots (the
-  passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto`:
+  passphrase's and the TPM's), and its crypttab line has `tpm2-device=auto,tries=5`:
 
   ```bash
   ssh sysadmin@192.0.2.14 'lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; cat /etc/crypttab'
@@ -150,14 +150,15 @@ and `vm_disk_passphrase: "{{ vault_disk_passphrase }}"`, are checked on the real
 
 - [ ] The recovery passphrase works: it opens the LUKS volume (with `--disable-external-tokens`, or cryptsetup
   unlocks with the TPM token and accepts any passphrase), and after the TPM slot is wiped the VM stops
-  at the passphrase prompt on its console, where the Vault passphrase unlocks it; the command in
+  at the passphrase prompt on its console, which asks again after a wrong passphrase (type one wrong one
+  first, then the Vault passphrase, which unlocks it); the command in
   [security.md](security.md#secure-boot-and-disk-encryption) enrolls the TPM again, and the next reboot is
   unattended again:
 
   ```bash
   ssh -t sysadmin@192.0.2.14 'sudo cryptsetup open --test-passphrase --disable-external-tokens "$(sudo blkid -t TYPE=crypto_LUKS -o device)" && echo passphrase works'
   ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
-  ssh sysadmin@192.0.2.14 sudo systemctl reboot   # type the passphrase on the console, then:
+  ssh sysadmin@192.0.2.14 sudo systemctl reboot   # on the console: a wrong passphrase, then the right one; then:
   ssh -t sysadmin@192.0.2.14 'sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$(sudo blkid -t TYPE=crypto_LUKS -o device)"'
   ssh sysadmin@192.0.2.14 sudo systemctl reboot; sleep 60; ssh sysadmin@192.0.2.14 uptime
   ```
