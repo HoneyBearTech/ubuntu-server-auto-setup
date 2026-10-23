@@ -317,7 +317,7 @@ def test_the_answer_with_servers_runs_and_the_cluster(ui, token, monkeypatch):
 
 def test_the_answer_while_a_run_is_going(ui, token, monkeypatch):
     configure(ui)
-    monkeypatch.setenv("FAKE_DELAY", "30")
+    monkeypatch.setitem(ui.app_state.settings.run_env, "FAKE_DELAY", "30")  # the run's own environment
     run_id = post(ui, "/run", {"playbook": "site"}).json()["run"]["id"]
     try:
         data = call(ui, token).json()

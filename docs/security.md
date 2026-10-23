@@ -149,7 +149,7 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   slow or hostile guest can't stall the UI.
 - **The status API for dashboards** (`GET /api/status`, for Heimdall and the like) is off until a signed-in
   session that enters the password again makes its token. The token (32 random bytes after `usas_st_`) is
-  shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password. It is accepted
+  shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password through scrypt. It is accepted
   only as `Authorization: Bearer`, compared in constant time, and opens only this route: it makes no
   session, can't post and can't start a run. Replacing it stops the old one at once; revoking it turns the
   API off; an unreadable token file accepts no token. Wrong tokens are slowed down per client address

@@ -3,7 +3,7 @@ with its own token instead of a sign-in.
 
 It is off until a token is made on the account page. The token is 32 random bytes, shown once; the data
 directory keeps only an HMAC-SHA256 of it (status-token.json), keyed with a key derived from the Vault
-password, so the file alone can't confirm a guess. The token is accepted only as "Authorization: Bearer", is
+password with scrypt, so the file alone can't confirm a guess. The token is accepted only as "Authorization: Bearer", is
 compared in constant time, opens this one read-only route, and never makes a session. Wrong tokens are slowed
 down per client address (in a bucket of their own, so a dashboard with an old token can't lock the sign-in
 out), and right ones are limited per minute. The summary holds no host names, addresses, node or cluster
@@ -37,6 +37,7 @@ PER_MINUTE = 60  # successful calls per minute: Heimdall asks every 5 s per open
 SAVE_EVERY = 5 * 60  # how often the last use is written to the file
 LOG_EVERY = 3600  # how often a successful use from the same address is logged
 CLUSTER_TTL = 60  # how long the VM counts are kept (failures too)
+KEY_SALT = b"usas status token"  # scrypt's salt for the HMAC key: fixed, the Vault password is random already
 RESULTS = ("succeeded", "failed", "stopped", "interrupted")
 
 
@@ -65,10 +66,19 @@ class StatusTokens:
         self._lock = threading.Lock()
         self._used: tuple[float, str] | None = None  # the last use not written to the file yet
         self._saved = 0.0
+        self._key: tuple[bytes, bytes] | None = None  # (the Vault password, the key derived from it)
+
+    def _hmac_key(self) -> bytes:
+        """The HMAC key, derived from the Vault password with scrypt (16 MiB, once per password: the token
+        itself is random, so each call needs only the HMAC)."""
+        password = self.vault_password()
+        with self._lock:
+            if self._key is None or not hmac.compare_digest(self._key[0], password):
+                self._key = (password, hashlib.scrypt(password, salt=KEY_SALT, n=2**14, r=8, p=1, dklen=32))
+            return self._key[1]
 
     def _digest(self, token: str) -> str:
-        key = hashlib.sha256(b"usas status token\0" + self.vault_password()).digest()
-        return hmac.new(key, token.encode(), hashlib.sha256).hexdigest()
+        return hmac.new(self._hmac_key(), token.encode(), hashlib.sha256).hexdigest()
 
     def _read(self) -> dict[str, Any] | None:
         """The record, None if there is no token, or {"broken": True} if the file can't be read."""
