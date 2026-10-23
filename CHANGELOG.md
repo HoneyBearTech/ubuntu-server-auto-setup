@@ -140,6 +140,8 @@ Servers page.
   handshake timing out at releases.ubuntu.com stopped the run), with a 30-second timeout instead of 10.
 - The release-file, provenance and tag examples in docs/verifying-releases.md use v0.4.0, like the
   container image examples.
+- The pre-release checklist's recovery-passphrase check passes `--disable-external-tokens` to `cryptsetup`:
+  without it, cryptsetup unlocked with the TPM token and accepted any passphrase.
 
 ## [0.4.0] - 2026-10-21
 
