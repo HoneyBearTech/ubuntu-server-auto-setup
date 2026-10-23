@@ -20,6 +20,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
+  stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - When the "Installer ISO" workflow's remaster of the real ISO failed, its log showed only the play recap.
   `tests/real-iso.sh` now shows each failed task with its error (or the log's last 200 lines), and the job
   keeps every play's full log as a `real-iso-logs` artifact for 7 days.

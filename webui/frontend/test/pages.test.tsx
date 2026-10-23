@@ -12,6 +12,14 @@ async function loaded(): Promise<void> {
   await waitFor(() => expect(document.querySelector(".loading")).toBeNull());
 }
 
+// The log view opens its stream in an effect, which React may run after the page has drawn: wait for it.
+async function streamSource(): Promise<FakeEventSource> {
+  return waitFor(() => {
+    expect(FakeEventSource.instances).toHaveLength(1);
+    return FakeEventSource.instances[0];
+  });
+}
+
 function input(label: string | RegExp): HTMLInputElement {
   return screen.getByLabelText(label) as HTMLInputElement;
 }
@@ -599,7 +607,7 @@ describe("the run history and a run", () => {
     expect(screen.getByText("Running")).toBeTruthy();
     expect(screen.getByText("Elapsed")).toBeTruthy();
     expect(screen.getByText("9 lines")).toBeTruthy();
-    const [source] = FakeEventSource.instances;
+    const source = await streamSource();
     expect(source.url).toBe(`/runs/${fixtures.running.id}/stream?offset=512`);
     act(() => {
       source.emit("TASK [common : Set the hostname] ***");
@@ -660,7 +668,8 @@ describe("the log", () => {
     const pre = document.getElementById("log") as HTMLPreElement;
     Object.defineProperty(pre, "scrollHeight", { value: 1000, configurable: true });
     Object.defineProperty(pre, "clientHeight", { value: 200, configurable: true });
-    act(() => FakeEventSource.instances[0].emit("three"));
+    const source = await streamSource();
+    act(() => source.emit("three"));
     await screen.findByText("3 lines");
     expect(pre.scrollTop).toBe(1000);
     const follow = screen.getByLabelText("Follow the output") as HTMLInputElement;
