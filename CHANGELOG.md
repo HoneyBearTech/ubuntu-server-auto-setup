@@ -18,6 +18,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   are slowed down and calls are limited to 60 a minute. This adds attack surface: see
   [docs/security.md](docs/security.md) and [docs/web-ui.md](docs/web-ui.md#dashboards-heimdall).
 
+### Fixed
+
+- A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0
+  checks, it failed one of three VMs created at once, though Proxmox had created it, and failed a read with
+  an SSL EOF. Provisioning and `build-installer` now retry the read-only API calls when the connection drops
+  (any answer from Proxmox is final). They also retry creating a VM; after a dropped connection they carry on
+  only with a VM that has the server's name and the role's description, and otherwise stop and say why.
+
 ## [0.5.0] - 2026-10-23
 
 New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their
