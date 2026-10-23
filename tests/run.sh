@@ -25,6 +25,7 @@ SRV=usas-test-srv
 NFS=usas-test-nfs
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
 mock_pid=""
+last_log=""
 
 cleanup() {
   status=$?
@@ -63,6 +64,7 @@ play() {
 play_fails() {
   local expect="$1"; shift
   local log; log="$(mktemp "$TEST_TMP/play.XXXXXX")"
+  last_log="$log"
   if ansible-playbook "${INV[@]}" "$@" >"$log" 2>&1; then
     cat "$log"
     echo "ERROR: ansible-playbook $* should have failed" >&2
@@ -218,6 +220,15 @@ play_fails "Couldn't fetch http://127.0.0.1:8080/unsigned/SHA256SUMS.gpg" playbo
 play_fails "isn't by the key 843938DF228D22F7B3742BC0D94AA3F0EFE21092" playbooks/build-installer.yml \
   -e installer_signing_fingerprint=843938DF228D22F7B3742BC0D94AA3F0EFE21092
 play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_signing_fingerprint=EFE21092
+# What tests/real-iso.sh shows of a failed play: the failed task and its message, not the tasks that passed.
+failures="$(tests/show-failures.sh "$last_log")"
+grep -q "^TASK \[" <<<"$failures"
+grep -q "must be the signing key" <<<"$failures"
+if grep -Eq "^PLAY RECAP|^TASK \[Gathering Facts\]" <<<"$failures" || [ "$(wc -l <<<"$failures")" -ge "$(wc -l <"$last_log")" ]; then
+  printf '%s\n' "$failures"
+  echo "ERROR: tests/show-failures.sh showed more than the failed task" >&2
+  exit 1
+fi
 
 step "provision-vms: a VM the installer powers off, then a rerun that skips it"
 # With connections dropped as pveproxy restarting a worker drops them: two reads, which are retried, and the

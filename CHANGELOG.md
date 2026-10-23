@@ -40,6 +40,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - Runs right after a server rebooted or restarted SSH sometimes stopped with "Timeout waiting for privilege
   escalation prompt". `ansible.cfg` (the image uses the same file) now waits 30 seconds for a connection and
   for sudo's prompt instead of Ansible's 10.
+- When the "Installer ISO" workflow's remaster of the real ISO failed, its log showed only the play recap.
+  `tests/real-iso.sh` now shows each failed task with its error (or the log's last 200 lines), and the job
+  keeps every play's full log as a `real-iso-logs` artifact for 7 days.
 
 ## [0.5.0] - 2026-10-23
 
