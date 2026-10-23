@@ -172,6 +172,32 @@ test.describe("keyboard", () => {
     await checkAxe(page, "/servers with a network card error");
   });
 
+  test("disk encryption by keyboard: a passphrase the role would refuse is explained, and nothing is saved", async ({ page }) => {
+    await page.goto("/defaults");
+    await settled(page);
+    const encrypt = page.getByRole("checkbox", { name: "Encrypt the root disk" });
+    await tabTo(page, encrypt);
+    await page.keyboard.press("Space");
+    await expect(encrypt).toBeChecked();
+    const passphrase = page.getByLabel("Disk passphrase", { exact: true });
+    await expect(passphrase).toHaveAttribute("type", "password");
+    await tabTo(page, passphrase);
+    await page.keyboard.type("too short");
+    // Enter in this form previews the GitHub keys (its first button), so go to Save.
+    await tabTo(page, page.getByRole("button", { name: "Save" }));
+    await page.keyboard.press("Enter");
+    const summary = page.locator("#error-summary");
+    await expect(summary).toBeFocused();
+    await expect(summary).toContainText("12 to 512 printable ASCII characters");
+    await expect(passphrase).toHaveAttribute("aria-invalid", "true");
+    await checkAxe(page, "/defaults with a disk passphrase error");
+    // Refused: the page loaded again shows encryption still off and no passphrase saved.
+    await page.reload();
+    await settled(page);
+    await expect(page.getByRole("checkbox", { name: "Encrypt the root disk" })).not.toBeChecked();
+    await expect(page.locator("#f-vm_disk_passphrase-saved")).toHaveText("Not set yet.");
+  });
+
   test("the theme switch: arrow keys choose, the page follows at once", async ({ page }) => {
     await page.goto("/");
     await settled(page);

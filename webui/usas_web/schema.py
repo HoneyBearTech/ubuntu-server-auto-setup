@@ -21,8 +21,7 @@ ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", 
          "hardening")
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
-# doesn't edit, the rest are file paths and package or platform lists, and disk encryption (with its Vault
-# passphrase) is set in the inventory only for now.
+# doesn't edit, the rest are file paths and package or platform lists.
 NOT_FORM_FORMATS = frozenset({
     "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
@@ -30,7 +29,7 @@ NOT_FORM_FORMATS = frozenset({
     "pve_iso_dirs_file",
     # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
     "provision_nic_keys",
-    "provision_disk_passphrase_pattern", "provision_installer_config_copies",
+    "provision_installer_config_copies",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
@@ -217,6 +216,13 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           help="Each part of a domain (between dots) must be a valid host name."),
         S("autoinstall_storage_layout", "Disk layout", "choice", "proxmox_vm", ui_choices=("lvm", "direct", "zfs")),
         S("vm_secure_boot", "Secure Boot keys", "bool", "proxmox_vm", advanced=True),
+        S("vm_disk_encryption", "Encrypt the root disk", "bool", "proxmox_vm",
+          help="Only for VMs created from now on; existing VMs are left as they are."),
+        S("vm_disk_passphrase", "Disk passphrase", "secret", pattern_var="provision_disk_passphrase_pattern",
+          vault="vault_disk_passphrase", default="",
+          help="The recovery key: typed at the VM's console when the TPM doesn't unlock the disk. 12 to 512 "
+               "printable ASCII characters, no braces. Kept in the Vault and never shown again, so keep a copy in "
+               "your password manager. A new one applies to VMs created after it; existing VMs keep theirs."),
     ),
     "hardening": (
         S("ssh_port", "SSH port", "int", "ssh_hardening", minimum=PORT_RANGE[0], maximum=PORT_RANGE[1],

@@ -502,6 +502,59 @@ def test_defaults_errors(ui):
     assert "Gateway isn't" in errors["net_gateway"] and "Admin user isn't" in errors["admin_user"]
 
 
+ENCRYPTION = {**DEFAULTS, "vm_secure_boot": "on", "vm_disk_encryption": "on",
+              "vm_disk_passphrase": "correct horse battery staple"}
+
+
+def test_disk_encryption(ui, settings):
+    r = post(ui, "/defaults", {"action": "save", **ENCRYPTION})
+    assert r.json()["message"] == "Saved the defaults."
+    store = ui.app_state.store
+    assert store.load().values["vm_disk_encryption"] is True
+    assert store.read_secrets()["vault_disk_passphrase"] == ENCRYPTION["vm_disk_passphrase"]
+    text = settings.inventory_file.read_text()
+    assert "vm_disk_encryption: true" in text and "vm_disk_passphrase: '{{ vault_disk_passphrase }}'" in text
+    assert ENCRYPTION["vm_disk_passphrase"] not in text
+    # Never sent back: the page only says a value is saved.
+    data = get(ui, "/api/defaults").json()
+    assert ENCRYPTION["vm_disk_passphrase"] not in json.dumps(data) and data["values"]["vm_disk_passphrase"] == ""
+    fields = {f["name"]: f for f in data["fields"]}
+    assert fields["vm_disk_passphrase"]["saved"] is True and fields["vm_disk_encryption"]["advanced"] is False
+    # Leaving it empty keeps it; removing it while encryption is on is refused.
+    assert post(ui, "/defaults", {"action": "save", **ENCRYPTION, "vm_disk_passphrase": ""}).status_code == 200
+    assert store.read_secrets()["vault_disk_passphrase"] == ENCRYPTION["vm_disk_passphrase"]
+    r = post(ui, "/defaults", {"action": "save", **ENCRYPTION, "vm_disk_passphrase": "",
+                               "vm_disk_passphrase__clear": "on"})
+    assert r.status_code == 422 and "Set a disk passphrase" in r.json()["errors"]["vm_disk_passphrase"]
+    # Turned off, the passphrase can go, and the inventory no longer refers to it.
+    off = {k: v for k, v in ENCRYPTION.items() if k != "vm_disk_encryption"}
+    r = post(ui, "/defaults", {"action": "save", **off, "vm_disk_passphrase": "", "vm_disk_passphrase__clear": "on"})
+    assert r.status_code == 200 and "vault_disk_passphrase" not in store.read_secrets()
+    assert "vm_disk_encryption" not in settings.inventory_file.read_text()
+    assert "vm_disk_passphrase" not in settings.inventory_file.read_text()
+
+
+def test_disk_encryption_needs_secure_boot_lvm_and_a_passphrase(ui):
+    form = {**ENCRYPTION, "autoinstall_storage_layout": "direct", "vm_disk_passphrase": ""}
+    form.pop("vm_secure_boot")
+    r = post(ui, "/defaults", {"action": "save", **form})
+    assert r.status_code == 422
+    errors = r.json()["errors"]
+    assert errors["vm_disk_encryption"] == ("Encrypting the root disk needs Secure Boot keys (under Installation, "
+                                            "More settings) and the lvm disk layout.")
+    assert "Set a disk passphrase" in errors["vm_disk_passphrase"]
+    assert "vm_disk_encryption" not in ui.app_state.store.load().values  # nothing was saved
+
+
+@pytest.mark.parametrize("passphrase", ["too short", "has {{ braces }} in it", "tab\there is not ok",
+                                        "ünïcödé passphrase", "x" * 513])
+def test_disk_passphrases_the_role_would_refuse_are_refused(ui, passphrase):
+    r = post(ui, "/defaults", {"action": "save", **ENCRYPTION, "vm_disk_passphrase": passphrase})
+    assert r.status_code == 422 and set(r.json()["errors"]) == {"vm_disk_passphrase"}
+    assert "12 to 512 printable ASCII" in r.json()["errors"]["vm_disk_passphrase"]
+    assert "vault_disk_passphrase" not in ui.app_state.store.read_secrets()
+
+
 def test_hardening(ui):
     r = post(ui, "/hardening", {**HARDENING, "ssh_port": "2222", "ufw_allow": "443/tcp\n9100/tcp from 10.0.0.0/8"})
     assert r.json()["message"] == "Saved the hardening settings."
