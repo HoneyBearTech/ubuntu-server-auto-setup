@@ -125,6 +125,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   trusted. A new DHCP server whose address can't be read (no lease) now says how to recover: delete the VM
   and run again, or pin its key ([docs/host-keys.md](docs/host-keys.md#when-a-key-or-certificate-changes)).
 
+### Security
+
+- The development requirements set a lower bound of 26.10.1 on black (installed through ansible-lint), which fixes
+  GHSA-cg8m-r9f2-5wm2. Only the lint tooling is affected; the playbooks, the image and the web UI don't use black.
+
 ## [0.4.0] - 2026-10-21
 
 The first baseline run on Ubuntu 26.04 completes again (sudo-rs), and provisioning no longer detaches the
