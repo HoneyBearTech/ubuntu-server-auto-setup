@@ -20,6 +20,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
+  stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - Runs right after a server rebooted or restarted SSH sometimes stopped with "Timeout waiting for privilege
   escalation prompt". `ansible.cfg` (the image uses the same file) now waits 30 seconds for a connection and
   for sudo's prompt instead of Ansible's 10.
