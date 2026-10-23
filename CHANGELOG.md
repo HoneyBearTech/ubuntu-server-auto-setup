@@ -18,6 +18,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   are slowed down and calls are limited to 60 a minute. This adds attack surface: see
   [docs/security.md](docs/security.md) and [docs/web-ui.md](docs/web-ui.md#dashboards-heimdall).
 
+### Fixed
+
+- The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
+  stream before React had opened it. It now waits for the stream, as does the log view's follow test.
+
 ## [0.5.0] - 2026-10-23
 
 New VMs boot with Secure Boot by default, and can have their root disk encrypted with LUKS2 that their
