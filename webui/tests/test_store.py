@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from usas_web.main import create_app
 from usas_web.schema import Schema
 from usas_web.store import Config, Store, Unsafe, dump_yaml, load_yaml, write_private
 
@@ -111,6 +112,37 @@ def test_ansible_reads_the_inventory_without_templating_user_values(store, setti
     assert not Path("/tmp/pwned").exists()
 
 
+@pytest.mark.skipif(not Path(ANSIBLE).exists(), reason="ansible isn't installed")
+def test_ansible_reads_text_that_looks_like_a_number_as_text(store, settings, tmp_path):
+    # Ansible types an !unsafe scalar as if it had no quotes: an all-digit admin password became an int, and
+    # provisioning stopped at "admin_password | length".
+    config = sample(store)
+    config.values["timezone"] = "0123"
+    config.secrets["vault_admin_password"] = "123456"
+    store.save(config)
+    env = {**os.environ, "ANSIBLE_CONFIG": str(REPO / "ansible.cfg")}
+    result = subprocess.run(
+        [ANSIBLE, "-i", str(settings.inventory_file), "--vault-password-file", str(settings.vault_password_file),
+         "web-01", "-c", "local", "-m", "ansible.builtin.debug",
+         "-a", "msg={{ [admin_password, admin_password | type_debug, ansible_become_password | type_debug,"
+               " timezone, timezone | type_debug] | join(',') }}"],
+        capture_output=True, text=True, env=env, cwd=tmp_path, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"msg": "123456,str,str,0123,str"' in result.stdout
+
+
+def test_a_vault_with_values_ansible_would_misread_is_written_again(store, settings):
+    old = "---\nvault_admin_password: !unsafe '123456'\nvault_pve_api_token_id: !unsafe 'automation'\n"
+    write_private(settings.vault_file, store._vault().encrypt(old.encode()))
+    assert store.repair_secrets() is True
+    plain = store._vault().decrypt(settings.vault_file.read_bytes()).decode()
+    assert "vault_admin_password: '123456'" in plain and "vault_pve_api_token_id: !unsafe 'automation'" in plain
+    assert store.read_secrets() == {"vault_admin_password": "123456", "vault_pve_api_token_id": "automation"}
+    assert store.repair_secrets() is False  # nothing left to repair
+    settings.vault_file.unlink()
+    assert store.repair_secrets() is False
+
+
 def test_a_configured_vault_password_file_must_exist(settings, tmp_path):
     custom = replace(settings, vault_password_file=tmp_path / "secret")
     custom.data_dir.mkdir(parents=True)
@@ -133,6 +165,13 @@ def test_yaml_helpers(tmp_path):
     text = dump_yaml({"a": Unsafe("{{ x }}"), "b": "{{ y }}", "c": [Unsafe("z")]})
     assert "a: !unsafe '{{ x }}'" in text and "b: '{{ y }}'" in text
     assert load_yaml(text) == {"a": "{{ x }}", "b": "{{ y }}", "c": ["z"]}
+    # Text that would load as an int, an octal int, a float, a bool or null can't hold Jinja: plain strings.
+    looks_typed = {"n": Unsafe("123456"), "o": Unsafe("0123"), "f": Unsafe("1.5"), "t": Unsafe("true"),
+                   "y": Unsafe("yes"), "z": Unsafe("null"), "s": Unsafe("10.0.0.1")}
+    text = dump_yaml(looks_typed)
+    assert "n: '123456'" in text and "o: '0123'" in text and "f: '1.5'" in text and "t: 'true'" in text
+    assert "y: 'yes'" in text and "z: 'null'" in text and "s: !unsafe '10.0.0.1'" in text
+    assert load_yaml(text) == {k: str(v) for k, v in looks_typed.items()}
     path = tmp_path / "sub" / "f"
     write_private(path, "one")
     write_private(path, b"two")
@@ -156,3 +195,12 @@ def test_servers_on_several_nodes(store):
     assert loaded.nodes_in_use() == ["pve-1", "pve-2"]
     assert loaded.node_names() == ["pve-1", "pve-2", "pve-old"]
     assert {"pve-1", "pve-2", "pve-old"} <= store.host_names()
+
+
+def test_the_app_repairs_the_vault_when_it_starts(store, settings, caplog):
+    old = "---\nvault_admin_password: !unsafe '123456'\n"
+    write_private(settings.vault_file, store._vault().encrypt(old.encode()))
+    with caplog.at_level("INFO", logger="usas_web"):
+        create_app(settings)
+    assert "Rewrote the Vault" in caplog.text
+    assert "vault_admin_password: '123456'" in store._vault().decrypt(settings.vault_file.read_bytes()).decode()

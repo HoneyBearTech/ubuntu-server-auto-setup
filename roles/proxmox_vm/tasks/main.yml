@@ -10,7 +10,7 @@
       - net_mode in provision_net_modes
       - net_mode == 'dhcp' or (ansible_host is defined and ansible_host != inventory_hostname)
       - github_user | length > 0 or admin_extra_ssh_keys | length > 0
-      - admin_password | length > 0
+      - admin_password | string | length > 0
     fail_msg: >-
       Set pve_api_host, the API token, pve_node, a numeric pve_vmid, net_mode (static or dhcp), ansible_host
       (the static IP, unless net_mode is dhcp), github_user (or admin_extra_ssh_keys) and admin_password for

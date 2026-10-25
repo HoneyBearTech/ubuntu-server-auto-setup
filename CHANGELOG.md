@@ -8,19 +8,23 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-10-23
+## [0.6.0] - 2026-10-25
 
 An opt-in, read-only status API lets a dashboard such as Heimdall show whether a run is going, how the last
 one ended and how many of the cluster's VMs run, with a token of its own and no names, addresses or secrets.
 Disk encryption for new VMs can now be set on the web UI's Defaults page. The rest are fixes for what the
 v0.5.0 checks on real Proxmox VE turned up: runs carry on when a connection to the Proxmox API drops, wait
-longer for SSH and sudo after a reboot, and an encrypted VM's console prompt takes three passphrases.
+longer for SSH and sudo after a reboot, and an encrypted VM's console prompt takes three passphrases. An
+all-digit admin password set in the web UI no longer stops every run.
 
 ### Upgrading
 
 - No step is needed. The status API stays off until a token is made on the Account page; it needs no new
   Proxmox privilege, opens no port, and a dashboard reaches it only through the HTTPS name the UI already
   serves ([docs/web-ui.md](docs/web-ui.md#dashboards-heimdall)).
+- If your admin password (or another Vault value) is all digits, nothing to do: the web UI writes its
+  Vault again when 0.6.0 starts, and logs "Rewrote the Vault". With your own Vault and the CLI, quote such a
+  value (`vault_admin_password: '123456'`).
 - Optional, for VMs installed with 0.5.0 and disk encryption: their crypttab line keeps the old default,
   so one wrong passphrase at the console still leaves the boot waiting until a reset. The two commands in
   [docs/security.md](docs/security.md#secure-boot-and-disk-encryption) ("Recovery") give them three tries.
@@ -42,6 +46,12 @@ longer for SSH and sudo after a reboot, and an encrypted VM's console prompt tak
 
 ### Fixed
 
+- An all-digit admin password set in the web UI stopped every provisioning and baseline run with "object of
+  type '_AnsibleTaggedInt' has no len()": the UI wrote it as `!unsafe '123456'`, which Ansible 2.19 and later
+  load as a number (as they do `'0123'`, octal 83, and `'true'`). The UI now writes such values as plain quoted
+  strings, which can't hold a template anyway, and writes an existing Vault again when it starts; inventory
+  values are written the new way at the next save. The roles also read `admin_password` as text, for a Vault
+  written by hand with an unquoted number.
 - The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
   stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0

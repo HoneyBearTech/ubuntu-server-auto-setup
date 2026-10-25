@@ -102,7 +102,7 @@
     groups: [sudo]
     append: true
     create_home: true
-    password: "{{ (admin_password | password_hash('sha512')) if admin_password | length > 0 else omit }}"
+    password: "{{ (admin_password | string | password_hash('sha512')) if admin_password | string | length > 0 else omit }}"
     update_password: on_create
   register: common_admin_user
   no_log: true
@@ -120,7 +120,7 @@
 # Without a password the admin user couldn't use sudo at all once passwordless sudo is gone.
 - name: Check that sudo will still work with a password
   ansible.builtin.assert:
-    that: admin_password | length > 0 or (ansible_become_password | default('')) | length > 0
+    that: admin_password | string | length > 0 or (ansible_become_password | default('') | string) | length > 0
     fail_msg: >-
       admin_sudo_nopasswd is false, so passwordless sudo is about to be removed, but neither admin_password
       nor ansible_become_password is set: {{ admin_user }} couldn't use sudo afterwards. Set the admin password

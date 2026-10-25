@@ -45,7 +45,17 @@ class _Loader(yaml.SafeLoader):
     pass
 
 
-_Dumper.add_representer(Unsafe, lambda dumper, data: dumper.represent_scalar("!unsafe", str(data), style="'"))
+def _represent_unsafe(dumper: yaml.SafeDumper, data: Unsafe) -> yaml.ScalarNode:
+    """!unsafe, except for text that would load as another type. Ansible types an !unsafe scalar as if it had
+    no quotes, so !unsafe '123456' loads as an int ('0123' as 83, 'true' as a bool, 'null' as None). Such text
+    can't hold Jinja, so it is written as a plain quoted string, which loads as the string it is."""
+    text = str(data)
+    if dumper.resolve(yaml.ScalarNode, text, (True, False)) != "tag:yaml.org,2002:str":
+        return dumper.represent_scalar("tag:yaml.org,2002:str", text, style="'")
+    return dumper.represent_scalar("!unsafe", text, style="'")
+
+
+_Dumper.add_representer(Unsafe, _represent_unsafe)
 _Loader.add_constructor("!unsafe", lambda loader, node: loader.construct_scalar(node))
 
 
@@ -143,9 +153,24 @@ class Store:
         data = load_yaml(self._vault().decrypt(path.read_bytes()).decode()) or {}
         return {k: str(v) for k, v in data.items() if k in VAULT_NAMES and v is not None}
 
+    def _secrets_text(self, values: dict[str, str]) -> str:
+        return dump_yaml({k: Unsafe(values[k]) for k in VAULT_NAMES if values.get(k)})
+
     def write_secrets(self, values: dict[str, str]) -> None:
-        plain = dump_yaml({k: Unsafe(values[k]) for k in VAULT_NAMES if values.get(k)})
-        write_private(self.settings.vault_file, self._vault().encrypt(plain.encode()))
+        write_private(self.settings.vault_file, self._vault().encrypt(self._secrets_text(values).encode()))
+
+    def repair_secrets(self) -> bool:
+        """Writes the Vault again if an earlier version wrote a value Ansible loads as another type (an
+        all-digit password as !unsafe '123456' became an int, and the playbooks stopped). True if it did."""
+        path = self.settings.vault_file
+        if not path.exists():
+            return False
+        plain = self._vault().decrypt(path.read_bytes()).decode()
+        values = self.read_secrets()
+        if not values or plain == self._secrets_text(values):
+            return False
+        self.write_secrets(values)
+        return True
 
     # --- UI-only settings (webui.json) ---------------------------------------------------------------------
 

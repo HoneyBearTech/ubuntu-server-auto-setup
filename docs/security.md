@@ -140,7 +140,9 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   browser; run logs mask them. The Defaults page refuses disk encryption without Secure Boot, the `lvm`
   layout and a passphrase that matches the role's pattern, as the role would. The SSH private key never leaves the data volume.
 - Every value the UI writes into the inventory is validated against the roles' own allowlist patterns (or
-  a stricter format of the UI's) and tagged `!unsafe`, so no value can become an Ansible template; commands
+  a stricter format of the UI's) and tagged `!unsafe`, so no value can become an Ansible template (text that
+  would load as a number, boolean or null, which can't hold a template, is written as a plain quoted string, so
+  it stays text); commands
   run with argument lists, never a shell; `--limit` takes only the inventory's own host and group names.
 - The VMs page only reads: it lists the cluster's VMs and asks their guest agents, through the Proxmox API,
   for addresses, the OS and the host name with the read-only `VM.GuestAgent.Audit` privilege (on Proxmox
