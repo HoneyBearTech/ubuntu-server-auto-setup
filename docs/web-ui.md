@@ -296,7 +296,9 @@ point `USAS_VAULT_PASSWORD_FILE` at it. Set it before the first start, or re-enc
 switch (`ansible-vault rekey`).
 
 The inventory is a normal Ansible inventory. Values you type are written with Ansible's `!unsafe` tag, so
-Ansible never treats them as templates. To run something the UI doesn't offer, use the image's own
+Ansible never treats them as templates. Values that look like a number, `true` or `null` are written as plain
+quoted strings instead, since Ansible would otherwise load an `!unsafe` one as a number (an all-digit password
+as an int). To run something the UI doesn't offer, use the image's own
 Ansible:
 
 ```sh

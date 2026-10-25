@@ -169,6 +169,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     counts = status.ClusterCounts()
     plan = nodes.load_plan(settings.project_dir)
     store.vault_password()  # creates it on the first run
+    if store.repair_secrets():
+        log.info("Rewrote the Vault so that values such as an all-digit password load as text")
     try:
         timezones = sorted(zoneinfo.available_timezones())
     except OSError:  # pragma: no cover (no tz database)
