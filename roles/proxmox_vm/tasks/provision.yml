@@ -50,7 +50,7 @@
 
 - name: Hash the admin password
   ansible.builtin.set_fact:
-    provision_password_hash: "{{ admin_password | password_hash('sha512') }}"
+    provision_password_hash: "{{ admin_password | string | password_hash('sha512') }}"
   no_log: "{{ pve_hide_secrets }}"
 
 # Everything from the seed ISO to its deletion runs in one block, so a failure part-way

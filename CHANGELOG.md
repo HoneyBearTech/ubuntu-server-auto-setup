@@ -25,6 +25,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- An all-digit admin password set in the web UI stopped every provisioning and baseline run with "object of
+  type '_AnsibleTaggedInt' has no len()": the UI wrote it as `!unsafe '123456'`, which Ansible 2.19 and later
+  load as a number (as they do `'0123'`, octal 83, and `'true'`). The UI now writes such values as plain quoted
+  strings, which can't hold a template anyway, and writes an existing Vault again when it starts; inventory
+  values are written the new way at the next save. The roles also read `admin_password` as text, for a Vault
+  written by hand with an unquoted number.
 - The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
   stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0
