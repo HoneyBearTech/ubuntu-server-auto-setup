@@ -17,6 +17,13 @@ class _QuietHealthChecks(logging.Filter):
 
 
 def main() -> None:
+    # Sign-ins (and failed ones), passkey changes and what create_app does at start-up (such as rewriting
+    # the Vault), next to uvicorn's own lines; set up first, so the start-up messages are kept too.
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    ui_log = logging.getLogger("usas_web")
+    ui_log.addHandler(handler)
+    ui_log.setLevel(logging.INFO)
     settings = from_env()
     app = create_app(settings)
     auth = app.state.auth
@@ -28,12 +35,6 @@ def main() -> None:
             flush=True,
         )
     logging.getLogger("uvicorn.access").addFilter(_QuietHealthChecks())
-    # Sign-ins (and failed ones) and passkey changes, next to uvicorn's own lines.
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
-    ui_log = logging.getLogger("usas_web")
-    ui_log.addHandler(handler)
-    ui_log.setLevel(logging.INFO)
     uvicorn.run(
         app,
         host=settings.host,

@@ -31,6 +31,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   strings, which can't hold a template anyway, and writes an existing Vault again when it starts; inventory
   values are written the new way at the next save. The roles also read `admin_password` as text, for a Vault
   written by hand with an unquoted number.
+- What the web UI logged while it started, such as "Rewrote the Vault", never reached `docker logs`: the
+  log handler was set up after the app. It is now set up first.
 - The web UI test "streams a running run's log" sometimes failed in CI: it looked for the log's event
   stream before React had opened it. It now waits for the stream, as does the log view's follow test.
 - A dropped connection to the Proxmox API (pveproxy restarting a worker) stopped a run. In the v0.5.0

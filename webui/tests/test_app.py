@@ -1044,6 +1044,27 @@ def test_module_entry_point(monkeypatch, settings, capsys):
     assert not entry._QuietHealthChecks().filter(record)
 
 
+def test_the_entry_point_logs_what_happens_at_start_up(monkeypatch, settings, capsys):
+    # The Vault repair (and anything else create_app logs) used to go nowhere: the handler came after it.
+    import usas_web.__main__ as entry
+
+    def create_app(s):
+        entry.logging.getLogger("usas_web").info("Rewrote the Vault")
+        return m.create_app(s)
+
+    monkeypatch.setattr(entry, "from_env", lambda: settings)
+    monkeypatch.setattr(entry, "create_app", create_app)
+    monkeypatch.setattr(entry.uvicorn, "run", lambda app, **kw: None)
+    ui_log = entry.logging.getLogger("usas_web")
+    before = list(ui_log.handlers)
+    try:
+        entry.main()
+    finally:
+        for handler in ui_log.handlers[len(before):]:
+            ui_log.removeHandler(handler)
+    assert "INFO:     Rewrote the Vault" in capsys.readouterr().err
+
+
 def test_the_node_is_picked_from_the_cluster(ui, monkeypatch):
     # Before a connection test there is no node list.
     assert get(ui, "/api/proxmox").json()["cluster"] == {}
