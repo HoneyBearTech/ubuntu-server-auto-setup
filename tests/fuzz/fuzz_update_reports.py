@@ -170,6 +170,23 @@ def one_input(data):
                for s in running)
     assert U.usas_health_problems(running, services) == []
 
+    results = [{"host": fdp.PickValueInList(NAMES), "status": fdp.PickValueInList(list(U.STATUSES) + ["weird"]),
+                "reason": text[:300], "upgraded": [1] * fdp.ConsumeIntInRange(0, 2)}
+               for _ in range(fdp.ConsumeIntInRange(0, 4))]
+    summary = U.usas_updates_summary(results)
+    assert summary["total"] == len(results) and sum(summary["counts"].values()) == len(results)
+    mode = fdp.PickValueInList(["check", "apply"])
+    message = U.usas_notify_message(summary, {"id": text[:50], "mode": mode, "started": text[:30]})
+    clean(message["subject"], 150)
+    for body_line in message["body"].splitlines():
+        clean(body_line, 300)
+    errors = summary["counts"]["failed"] + summary["counts"]["unreachable"]
+    changed = summary["counts"]["pending" if mode == "check" else "updated"]
+    assert U.usas_notify_due(summary, mode, "always")
+    assert U.usas_notify_due(summary, mode, "only-on-error") == (errors > 0)
+    assert U.usas_notify_due(summary, mode, "on-change") == (errors > 0 or changed > 0)
+    assert not U.usas_notify_due(summary, mode, "sometimes")
+
     w = window(fdp)
     problems = U.usas_window_problems(w)
     if fdp.ConsumeBool():

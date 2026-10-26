@@ -194,6 +194,10 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - What servers report (package names, versions, services) is checked against the role's patterns, stripped
   of control characters and capped at 5,000 entries per list before it reaches the report, which is
   readable only by the control node's user.
+- Its notifications go from the control node to the mail relay with STARTTLS or TLS and the relay's
+  certificate checked (not with Ansible's mail module, which doesn't check it), and to the webhook with
+  its certificate checked; they carry a summary only, and the webhook's URL and the relay password stay out
+  of the output.
 - With `safe` (the default) apt never removes a package; an update that would need a package you excluded
   skips the server instead of upgrading that package. One failed server, or a failed health check, stops
   the servers not yet started.

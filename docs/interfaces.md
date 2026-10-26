@@ -221,6 +221,9 @@ example shows a typical value.
 | `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
 | `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
 | `updates_serial` | `25%` | The batch size (with `-e` only). |
+| `updates_notify` | `on-change` | When to notify: `on-change`, `always` or `only-on-error`. |
+| `updates_notify_mail` | `unattended_upgrades_mail` | Mail the run's summary here, through `mail_relay_host` (with `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`, `mail_relay_user`, `mail_relay_password`) from the control node, with the relay's certificate checked. |
+| `updates_webhook_url`, `updates_webhook_format` | `""`, `text` | POST the summary to this http(s) URL (normally from the Vault), as `text` or `json`, as for Fail2Ban. |
 | `updates_report_dir` | `reports/updates` in the checkout | Where `<run id>.json` and `<run id>.txt` are written on the control node (`0600`, in a `0700` folder). |
 
 ### Networks

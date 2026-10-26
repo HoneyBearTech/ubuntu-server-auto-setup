@@ -461,6 +461,39 @@ def usas_updates_summary(results):
     return {"counts": counts, "lines": lines, "failed": failed, "total": sum(counts.values())}
 
 
+NOTIFY_POLICIES = ("always", "only-on-error", "on-change")
+
+
+def usas_notify_due(summary, mode="apply", policy="on-change"):
+    """Whether a run's summary calls for a notification: always; only-on-error when a server failed or couldn't
+    be reached; on-change also when an apply updated or rebooted a server, or a check found updates waiting."""
+    counts = (summary or {}).get("counts") or {}
+    errors = counts.get("failed", 0) + counts.get("unreachable", 0)
+    if policy == "always":
+        return True
+    if policy == "only-on-error":
+        return errors > 0
+    if policy == "on-change":
+        return errors > 0 or counts.get("pending" if mode == "check" else "updated", 0) > 0
+    return False
+
+
+def usas_notify_message(summary, run, host_name=""):
+    """The notification: {"subject", "body"}. A summary only: counts and one line per server, no package lists."""
+    counts = (summary or {}).get("counts") or {}
+    run = run or {}
+    mode = "check" if run.get("mode") == "check" else "apply"
+    shown = ", ".join(f"{n} {s}" for s, n in counts.items() if n)
+    errors = (summary or {}).get("failed", 0)
+    subject = usas_clean_text(f"USAS updates {mode}{' FAILED' if errors else ''}: {shown or 'no servers'}", 150)
+    started = usas_clean_text(run.get("started"), 30)
+    lines = [f"Updates run {usas_clean_text(run.get('id'), 40)} ({mode}), started {started}"]
+    if host_name:
+        lines.append(f"Control node: {usas_clean_text(host_name, 64)}")
+    lines += [""] + [usas_clean_text(line, 300) for line in (summary or {}).get("lines", [])[:500]]
+    return {"subject": subject, "body": "\n".join(lines) + "\n"}
+
+
 class FilterModule:
     def filters(self):
         return {
@@ -482,4 +515,6 @@ class FilterModule:
             "usas_window_text": usas_window_text,
             "usas_finish_results": usas_finish_results,
             "usas_updates_summary": usas_updates_summary,
+            "usas_notify_due": usas_notify_due,
+            "usas_notify_message": usas_notify_message,
         }

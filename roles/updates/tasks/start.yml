@@ -87,6 +87,42 @@
       {{ updates_window | usas_window_problems('updates_window')
       + updates_reboot_window | usas_window_problems('updates_reboot_window') }}
 
+# The notification settings share the servers' patterns: the mail relay's (roles/common) and the webhook's
+# (roles/fail2ban), read from those roles so there is one definition of each.
+- name: Load the mail and webhook formats
+  ansible.builtin.include_vars:
+    file: "{{ role_path | dirname }}/{{ item }}/vars/main.yml"
+  loop: [common, fail2ban]
+  when: updates_notify_mail | length > 0 or updates_webhook_url | length > 0
+
+- name: Check the notification settings
+  ansible.builtin.assert:
+    that:
+      - updates_notify in common_mail_report_values | default(['always', 'only-on-error', 'on-change'])
+      - updates_notify_mail | length == 0 or (updates_notify_mail is match(common_email_pattern)
+        and mail_relay_host | default('') is match(common_mail_host_pattern)
+        and mail_relay_port | default(587) | string is match('^[0-9]+\Z') and 1 <= (mail_relay_port | default(587) | int) <= 65535
+        and mail_relay_tls | default('starttls') in common_mail_tls_values
+        and mail_relay_from | default('') is match(common_email_pattern)
+        and mail_relay_user | default('') is match(common_mail_user_pattern))
+      - updates_webhook_url | length == 0 or (updates_webhook_url is match(fail2ban_webhook_url_pattern)
+        and updates_webhook_format in fail2ban_webhook_formats)
+    fail_msg: >-
+      updates_notify must be always, only-on-error or on-change. With updates_notify_mail, it and mail_relay_from
+      must be plain mail addresses, mail_relay_host a host name or address, mail_relay_port a port, mail_relay_tls
+      starttls, tls or off, and mail_relay_user a user name without spaces, quotes or line breaks.
+      updates_webhook_url must be an http(s) URL without spaces, quotes or line breaks, and
+      updates_webhook_format text or json.
+    quiet: true
+
+- name: Check the mail relay password
+  ansible.builtin.assert:
+    that: mail_relay_password | default('') is match(common_mail_password_pattern)
+    fail_msg: mail_relay_password can't contain line breaks.
+    quiet: true
+  when: updates_notify_mail | length > 0
+  no_log: true
+
 # dist may remove packages to install others: with packages left out, apt could remove what depends on them.
 - name: Refuse dist upgrades of part of the updates
   ansible.builtin.assert:

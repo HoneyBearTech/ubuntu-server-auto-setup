@@ -27,6 +27,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   as its sudo password (unless `updates_allow_shared_become_password`), host keys are checked strictly,
   and reported data is checked, stripped and capped before it reaches the report
   ([docs/security.md](docs/security.md), assurance case boundaries B17 and B18).
+- **Notifications from the updates playbook** ([docs/updates.md](docs/updates.md#notifications)): once per
+  run, the control node mails the summary through the servers' relay settings (`mail_relay_*`) to
+  `updates_notify_mail` (default `unattended_upgrades_mail`) and/or posts it to `updates_webhook_url`
+  (`text` or `json`, as for Fail2Ban), `on-change` by default, or `always` or `only-on-error`. The relay's
+  certificate is checked (a small module of the role, since Ansible's mail module doesn't check it).
+  A notification that can't be sent fails the run after the report is written.
 
 ### Changed
 

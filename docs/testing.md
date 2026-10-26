@@ -136,8 +136,11 @@ nothing; on an encrypted VM, the Secure Boot stand-in holds the reboot; windows,
 releases skip servers; settings that can't be honoured are refused; a busy dpkg lock makes the server
 `busy`, then it is updated; a server without Python is skipped and one that doesn't answer fails the run;
 a service the update breaks fails its server's health check and keeps the other server from starting
-(`updates_serial=1`); and a `dist` upgrade installs all but the held package. Each checks the run's JSON
-report. Last, at least 80% of the updates role's tasks must have run. It takes about 6 minutes per release.
+(`updates_serial=1`); a `dist` upgrade installs all but the held package; and notifications reach a
+stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
+`SSL_CERT_FILE`, sign-in checked) and a stand-in webhook, only when something changed, while a relay whose
+certificate isn't trusted fails the run and neither the relay password nor the webhook's token appears in
+the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. It takes about 6 minutes per release.
 
 ## Secure Boot and disk encryption in a VM
 
@@ -182,7 +185,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each node-local storage is built by its node when in the run, each shared storage exactly once by a node that uses it, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
-| `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
+| `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 
 `make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it
@@ -289,7 +292,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342 and 2349 for `make test-updates`). The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2347 and 2349 for `make test-updates`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install

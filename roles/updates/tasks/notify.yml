@@ -1,0 +1,54 @@
+---
+# On the control node, once per run, after the report is written: a summary by mail through the relay and/or to
+# the webhook, when updates_notify says so. Check runs notify too (a schedule's check finding updates waiting
+# is news). A notification that can't be sent fails the run at the end, after the report.
+- name: Decide whether to notify
+  ansible.builtin.set_fact:
+    updates_notify_due: >-
+      {{ (updates_notify_mail | length > 0 or updates_webhook_url | length > 0)
+      and usas_updates_summary | usas_notify_due(usas_updates_run.mode, updates_notify) }}
+    updates_notify_message: "{{ usas_updates_summary | usas_notify_message(usas_updates_run) }}"
+
+- name: Mail the summary
+  usas_mail:
+    host: "{{ mail_relay_host }}"
+    port: "{{ mail_relay_port | default(587) | int }}"
+    tls: "{{ mail_relay_tls | default('starttls') }}"
+    username: "{{ mail_relay_user | default('') }}"
+    password: "{{ mail_relay_password | default('') }}"
+    sender: "{{ mail_relay_from }}"
+    to: ["{{ updates_notify_mail }}"]
+    subject: "{{ updates_notify_message.subject }}"
+    body: "{{ updates_notify_message.body }}"
+  check_mode: false
+  register: updates_mail_sent
+  ignore_errors: true
+  when: updates_notify_due and updates_notify_mail | length > 0
+
+# The URL usually holds a token, so the task's output stays hidden.
+- name: Post the summary to the webhook
+  ansible.builtin.uri:
+    url: "{{ updates_webhook_url }}"
+    method: POST
+    headers: "{{ {'Title': updates_notify_message.subject} if updates_webhook_format == 'text' else {} }}"
+    body_format: "{{ 'json' if updates_webhook_format == 'json' else 'raw' }}"
+    body: >-
+      {{ {'title': updates_notify_message.subject, 'text': updates_notify_message.body,
+      'message': updates_notify_message.body, 'content': updates_notify_message.body[:1900]}
+      if updates_webhook_format == 'json' else updates_notify_message.body }}
+    status_code: [200, 201, 202, 204]
+    validate_certs: true
+    timeout: 30
+  check_mode: false
+  register: updates_webhook_sent
+  ignore_errors: true
+  no_log: true
+  when: updates_notify_due and updates_webhook_url | length > 0
+
+- name: Note what couldn't be sent
+  ansible.builtin.set_fact:
+    updates_notify_problems: >-
+      {{ (['the mail: ' ~ (updates_mail_sent.msg | default('') | usas_clean_text(300))] if updates_mail_sent is failed else [])
+      + (['the webhook: HTTP ' ~ (updates_webhook_sent.status | default('?')) ~ ' '
+      ~ (updates_webhook_sent.msg | default('') | regex_replace('https?://\S+', '<url>') | usas_clean_text(200))]
+      if updates_webhook_sent is failed else []) }}

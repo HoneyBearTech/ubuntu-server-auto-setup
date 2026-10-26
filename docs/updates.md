@@ -110,6 +110,35 @@ The playbook doesn't fight them: it waits for them, and then reports the server 
 masks or reconfigures their timers; on the servers this project installed, the baseline sets them up. The
 report shows what each server does on its own as one line, such as "Automatic: security daily, no reboot".
 
+## Notifications
+
+Once per run, after the report, the control node can send its summary by mail and to a webhook. The summary
+has the counts and one line per server, never package lists. Set these for all servers
+(`inventory/group_vars/all`), since one run sends one message:
+
+```yaml
+updates_notify: on-change            # or always, or only-on-error
+updates_notify_mail: ops@example.com # default: unattended_upgrades_mail
+mail_relay_host: smtp.example.com    # the same relay settings as the servers' mail
+mail_relay_port: 587
+mail_relay_tls: starttls             # tls (implicit, usually 465) or "off"
+mail_relay_from: usas@example.com
+mail_relay_user: usas@example.com
+mail_relay_password: "{{ vault_mail_relay_password }}"
+updates_webhook_url: "{{ vault_fail2ban_webhook_url }}"   # or a URL of its own, from the Vault
+updates_webhook_format: text         # text (ntfy) or json (Slack, Mattermost, Gotify, Discord)
+```
+
+- `on-change` notifies when an apply updated or rebooted a server, when a check found updates waiting, and
+  when a server failed or couldn't be reached. `only-on-error` notifies only on those failures.
+- The mail goes from the control node (your machine, or the container) straight to the relay, with
+  STARTTLS or TLS and the relay's certificate checked against the CAs the control node trusts. A relay
+  with a certificate from your own CA needs that CA trusted: add it to the system's store, or set
+  `SSL_CERT_FILE` for the run (the web UI does this with the cluster CA bundle).
+- The webhook is posted with its certificate checked; its URL stays out of the output.
+- A notification that can't be sent fails the run, after the report is written. The servers' own mail
+  (`mail_relay_enabled`, unattended-upgrades' reports) is separate and unchanged.
+
 ## Servers this project didn't install
 
 Add them to the `other_servers` group, with their own login:
