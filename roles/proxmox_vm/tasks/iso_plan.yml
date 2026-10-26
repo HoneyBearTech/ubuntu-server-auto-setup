@@ -1,10 +1,11 @@
 ---
-# Works out where the installer ISO must be built, for the first play of playbooks/build-installer.yml (over
-# ubuntu_servers and proxmox_nodes). Each server in the run needs it in the ISO storage (pve_iso_storage) of its
-# node (pve_node); with no server in the run, each node in the run needs it in its own pve_iso_storage. A storage
-# the cluster shares, such as NFS, gets it once, from one node that uses it; a node-local storage gets it on
-# every node that uses it. The nodes that build join the group pve_iso_build, each with its storages in
-# installer_iso_storages. Nothing here connects to a host: the API answers for every node.
+# Works out where the installer ISOs must be built, for the first play of playbooks/build-installer.yml (over
+# servers and proxmox_nodes). Each server in the run that installs with autoinstall needs its release's ISO (from
+# vm_os) in the ISO storage (pve_iso_storage) of its node (pve_node); with no server in the run, each node in the
+# run needs its own default release's in its own pve_iso_storage. A storage the cluster shares, such as NFS, gets
+# each ISO once, from one node that uses it; a node-local storage gets it on every node that uses it. The nodes
+# that build join the group pve_iso_build, each with its ISOs in installer_isos. Nothing here connects to a host:
+# the API answers for every node.
 - name: Check that the Proxmox API is set
   ansible.builtin.assert:
     that:
@@ -23,19 +24,30 @@
       Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
   no_log: "{{ pve_hide_secrets }}"
 
+- name: Find each server's OS in the OS catalog
+  ansible.builtin.include_role:
+    name: os_catalog
+    tasks_from: select
+  when: inventory_hostname in pve_plan_server_group
+
 - name: Note where this host needs the installer ISO
   vars:
-    pve_is_server: "{{ inventory_hostname in groups['ubuntu_servers'] | default([]) }}"
+    pve_is_server: "{{ inventory_hostname in pve_plan_server_group }}"
   ansible.builtin.set_fact:
     pve_placement:
       host: "{{ inventory_hostname }}"
       node: "{{ pve_node if pve_is_server else inventory_hostname }}"
       ssh_host: "{{ pve_ssh_host if pve_is_server else inventory_hostname }}"
       storage: "{{ pve_iso_storage }}"
+      # The installer ISO this host needs, as the installer_iso role builds it; none for a cloud-image install.
+      isos: >-
+        {{ [{'name': ubuntu_iso_name, 'release': ubuntu_release | string, 'point_release': ubuntu_point_release | string,
+             'base_url': ubuntu_iso_base_url}]
+           if not pve_is_server or os_catalog_selected.method == 'autoinstall' else [] }}
 
 - name: Gather the placements of the run
   vars:
-    pve_plan_servers: "{{ ansible_play_hosts | select('in', groups['ubuntu_servers'] | default([])) | list }}"
+    pve_plan_servers: "{{ ansible_play_hosts | select('in', pve_plan_server_group) | list }}"
   ansible.builtin.set_fact:
     pve_plan_placements: "{{ (pve_plan_servers or ansible_play_hosts) | map('extract', hostvars, 'pve_placement') | list }}"
   run_once: true
@@ -83,9 +95,9 @@
   ansible.builtin.add_host:
     name: "{{ item.host }}"
     groups: pve_iso_build
-    installer_iso_storages: "{{ item.storages }}"
+    installer_isos: "{{ item.isos }}"
   loop: "{{ pve_iso_plan.builds }}"
   loop_control:
-    label: "{{ item.node }}: {{ item.storages | join(', ') }}"
+    label: "{{ item.node }}: {{ item.isos | map(attribute='name') | join(', ') }}"
   changed_when: false
   run_once: true

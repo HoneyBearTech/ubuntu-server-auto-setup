@@ -50,6 +50,24 @@ Upgrading never touches existing VMs' disks: `make provision` skips every VM ID 
 check out the previous tag and run the baseline again; settings the newer version added stay on the server
 until you change them.
 
+## To 0.7.0: new names
+
+0.7.0 prepares for operating systems other than Ubuntu, so some names lose "Ubuntu" or "UFW". The old names
+still work until 1.0, and every run says which ones your inventory still uses ("DEPRECATED (still read until
+1.0): ..."). Rename them when it suits you:
+
+| Before 0.7.0 | From 0.7.0 |
+| --- | --- |
+| group `ubuntu_servers` | group `servers` (the playbooks read both) |
+| `ubuntu_release` (and `ubuntu_point_release`) | `vm_os: ubuntu-<release>`, for example `vm_os: ubuntu-24.04`; the OS catalog pins the point release |
+| `ufw_allow`, `ufw_ssh_sources`, `ufw_ssh_limit`, `ufw_default_incoming`, `ufw_logging` | `firewall_allow`, `firewall_ssh_sources`, `firewall_ssh_limit`, `firewall_default_incoming`, `firewall_logging` (`ufw_default_outgoing` keeps its name) |
+| `apt_upgrade` | `pkg_upgrade` |
+| role `ubuntu_release` (in playbooks of your own) | role `os_catalog` |
+
+A new name set in the inventory wins over the old one. Rename the group together with its `vars:`: a server in
+`ubuntu_servers` doesn't get what's set for `servers`, and the other way round. Set `vm_os` per server to install different Ubuntu LTS
+releases on one cluster: `make build-installer` builds each release's installer on the nodes that need it.
+
 ## A new Ubuntu point release
 
 The OS catalog (`roles/os_catalog/vars/catalog.yml`) pins the point release each project release installs,

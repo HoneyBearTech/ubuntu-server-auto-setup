@@ -88,7 +88,7 @@ recorded, because `pvesm` runs for root only.
    (BIOS and UEFI). Without the `autoinstall` argument, Ubuntu's installer stops and asks before it wipes a
    disk, even when it has an autoinstall configuration.
 
-### 2. The VM (`provision-vms.yml`, on `ubuntu_servers`, from the control node)
+### 2. The VM (`provision-vms.yml`, on `servers`, from the control node)
 
 For each host, after checking that the required variables are set, and for all hosts at once that each
 node is in the cluster and each ISO storage allows ISO images on its node:
@@ -116,15 +116,15 @@ node is in the cluster and each ISO storage allows ISO images on its node:
    key (scanned once, trust on first use), and wait until Ansible can log in as the admin user (cloud-init
    finishes creating the user and keys on first boot).
 
-### 3. The baseline (`baseline.yml`, on `ubuntu_servers`, as the admin user with sudo)
+### 3. The baseline (`baseline.yml`, on `servers`, as the admin user with sudo)
 
 1. If `ssh_port` isn't 22, probe it; connect on whichever of `ssh_port` and 22 answers, so the same
    inventory works before and after the port change.
-2. `common`: wait for cloud-init, run the upgrade (`apt_upgrade`), install base packages, set the hostname,
+2. `common`: wait for cloud-init, run the upgrade (`pkg_upgrade`), install base packages, set the hostname,
    `/etc/hosts` and timezone, create or update the admin user (the password only when the user is
    created), set passwordless sudo (or remove it), install the GitHub keys (exclusive by default, refusing
    to write an empty list), configure unattended upgrades, and reboot or report a pending reboot.
-3. `firewall`: allow (rate-limit) SSH on `ssh_port` from `ufw_ssh_sources` and add `ufw_allow` rules
+3. `firewall`: allow (rate-limit) SSH on `ssh_port` from `firewall_ssh_sources` and add `firewall_allow` rules
    **before** enabling UFW, so the running session survives; then set the default policies and enable it.
 4. `ssh_hardening`: refuse to continue if `ssh_allow_users` would lock out the admin user; install
    `/etc/ssh/sshd_config.d/00-hardening.conf` (validated with `sshd -t`), and for a custom port enable
