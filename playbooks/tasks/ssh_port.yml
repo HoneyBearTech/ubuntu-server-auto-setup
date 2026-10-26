@@ -1,0 +1,21 @@
+---
+# After ssh_hardening moves SSH off port 22, later runs connect on ssh_port; a fresh server still listens on 22.
+# Probe so the same inventory works for both. A host with ansible_port set in the inventory is left alone.
+# Shared by the baseline and the updates playbook; runs before facts are gathered.
+- name: Probe the configured SSH port
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ ssh_port | int }}"
+    timeout: 5
+  delegate_to: localhost
+  become: false
+  register: ssh_port_probe
+  ignore_errors: true
+  when: ssh_port is defined and ssh_port | int != 22 and ansible_port is not defined
+  tags: [always]
+
+- name: Connect on whichever SSH port answers
+  ansible.builtin.set_fact:
+    ansible_port: "{{ (ssh_port | int) if ssh_port_probe is succeeded else 22 }}"
+  when: ssh_port_probe is not skipped
+  tags: [always]

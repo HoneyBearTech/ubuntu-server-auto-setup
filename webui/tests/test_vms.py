@@ -164,3 +164,14 @@ UBUNTU = v.OsInfo("ubuntu", "26.04", "Ubuntu 26.04 LTS")
 def test_classify(machine, config, os, support, words):
     found, reason = v.classify(machine, config, os)
     assert found == support and words in reason
+
+
+def test_the_page_uses_the_playbooks_parser():
+    """vms.py offers the names of plugins/module_utils/usas_vms.py itself, not a copy, and nothing it imported."""
+    import sys
+
+    shared = sys.modules["usas_vms"]
+    assert v.SHARED.name == "usas_vms.py" and v.SHARED.parent.name == "module_utils"
+    assert v.parse_resources is shared.parse_resources and v.Vm is shared.Vm and v.VMID_PATTERN is shared.VMID_PATTERN
+    assert "parse_resources" in v.__all__
+    assert not {"re", "ipaddress", "dataclass", "field", "Any", "_number"} & set(v.__all__)
