@@ -26,8 +26,7 @@ from .store import Unsafe, dump_yaml
 
 MAX_HOSTS = 25
 MAX_RULES = 20
-GROUP = "usas_vms"  # the VMs that aren't servers in the inventory
-FOREIGN_NAME = "vm-{vmid}"
+GROUP = "usas_vms"  # the VMs that aren't servers in the inventory (named v.FOREIGN_NAME)
 # The baseline's tags a VMs page run may use, and the presets. "full" passes no --tags: every role runs.
 TAGS = ("ssh_keys", "common", "firewall", "ssh", "fail2ban", "hardening")
 PRESETS = {
@@ -176,16 +175,10 @@ def ssh_args(known_hosts: str, alias: str) -> str:
     return f"-o UserKnownHostsFile={known_hosts} -o StrictHostKeyChecking=yes -o HostKeyAlias={alias}"
 
 
-def control_path(vmid: int) -> str:
-    """Each VM gets its own SSH master connection: one opened for another VM at the same address and port would
-    otherwise be reused, without checking this VM's host key."""
-    return f"%(directory)s/v{int(vmid)}-%%C"
-
-
 def host_vars(target: Target, settings: Settings) -> dict[str, Any]:
     """The run inventory's variables for one host."""
     common: dict[str, Any] = {"ansible_ssh_common_args": ssh_args(settings.known_hosts, target.alias),
-                              "ansible_control_path": control_path(target.vmid)}
+                              "ansible_control_path": v.control_path(target.vmid)}
     if target.static:
         return common  # a server keeps its own address, user, sudo and settings
     host: dict[str, Any] = {"ansible_host": Unsafe(target.address)}
@@ -274,7 +267,6 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         raise PlanProblem({"selection": "Select at least one VM."})
     if len(selected) > MAX_HOSTS:
         raise PlanProblem({"selection": f"Select at most {MAX_HOSTS} VMs for one run."})
-    static_by_vmid = {int(s["pve_vmid"]): s for s in servers if str(s.get("pve_vmid") or "").isdigit()}
     static_names = {str(s["name"]) for s in servers}
     static_addresses = {str(s.get("ansible_host")): str(s["name"]) for s in servers if s.get("ansible_host")}
     removes_keys = not tags or bool({"common", "ssh_keys"} & set(tags))
@@ -293,7 +285,7 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
             errors[prefix + "address"] = f"VM {vmid} can't be selected: {why}"
             continue
         override = form.get(prefix + "override") == "on"
-        server = static_by_vmid.get(vmid)
+        name, server = v.host_name(vmid, servers)
         # A server on the Servers page runs like it does from the Run page: whose OS the guest didn't report
         # needs no confirmation. An untested release always does.
         needs = (v.NEEDS_OVERRIDE,) if server is not None else (v.NEEDS_OVERRIDE, v.UNKNOWN)
@@ -304,11 +296,10 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         if server is not None:
             address = str(server.get("ansible_host") or "")
             targets.append(Target(
-                vmid=vmid, name=str(server["name"]), pve_name=pve_name, node=v.text(row.get("node"), 64), static=True,
+                vmid=vmid, name=name, pve_name=pve_name, node=v.text(row.get("node"), 64), static=True,
                 address=address, source="inventory" if address else "dhcp", port=None, user=settings.admin_user,
                 alias=alias, fingerprints=pins.get(alias, []), override=override))
         else:
-            name = FOREIGN_NAME.format(vmid=vmid)
             if name in static_names:
                 errors[prefix + "address"] = f"A server on the Servers page is called {name} but has another VM ID."
                 continue

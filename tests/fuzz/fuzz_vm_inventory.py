@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Fuzz target: the VMs page's run plans (webui/usas_web/vmplan.py), the run's inventory, --limit and --tags
-(webui/usas_web/runner.py) and the VMs' host-key names in known_hosts (webui/usas_web/sshkeys.py).
+(webui/usas_web/runner.py), and the VMs' names and host-key names in known_hosts (vm_alias, ALIAS_PATTERN and
+host_name in plugins/module_utils/usas_vms.py, shared with the fleet updates; Keys.pins in
+webui/usas_web/sshkeys.py).
 
 Properties, for any cluster listing and any posted settings:
 - vmplan.build either refuses with PlanProblem or returns a plan; nothing else is raised.
@@ -145,6 +147,7 @@ def one_input(data):
         assert not 100 <= vmid <= 999_999_999
     else:
         assert sshkeys.ALIAS.match(alias) and alias.endswith(f"-{vmid}")
+        assert vmplan.v.ALIAS_PATTERN is sshkeys.ALIAS
     KEYS.settings.known_hosts.parent.mkdir(parents=True, exist_ok=True)
     KEYS.settings.known_hosts.write_text(text(fdp, 300))
     for name, found in KEYS.pins().items():

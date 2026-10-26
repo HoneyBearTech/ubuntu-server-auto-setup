@@ -23,6 +23,7 @@ from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 
+from . import vms
 from .config import Settings
 from .problems import Problem
 from .schema import API_HOST
@@ -35,10 +36,8 @@ PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
 # A Linux user name, as roles/ubuntu_release/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
 NODE_USER = r"^[a-z_][a-z0-9_-]{0,31}\Z"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
-# The known_hosts name of a VM's pinned host keys: usas-<cluster>-<vmid>.
-ALIAS = re.compile(r"^usas-[a-z0-9][a-z0-9-]{0,31}-[0-9]{3,9}\Z")
-CLUSTER = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
-DEFAULT_CLUSTER = "pve"  # when the cluster's name isn't known (a single node, or no Sys.Audit)
+# The known_hosts name of a VM's pinned host keys: usas-<cluster>-<vmid> (plugins/module_utils/usas_vms.py).
+ALIAS = vms.ALIAS_PATTERN
 
 
 def _why(exc: Exception) -> str:
@@ -105,15 +104,11 @@ def check_port(port: int) -> int:
 
 
 def vm_alias(cluster: str, vmid: int) -> str:
-    """The known_hosts name a VM's host keys are pinned under: usas-<cluster>-<vmid>. cluster is the cluster's
-    name (lowercased; "pve" when it isn't known or isn't a plain name)."""
-    name = cluster.strip().lower()
-    if not CLUSTER.match(name):
-        name = DEFAULT_CLUSTER
-    alias = f"usas-{name}-{int(vmid)}"
-    if not ALIAS.match(alias):
-        raise KeyProblem("That isn't a VM ID.")
-    return alias
+    """The known_hosts name a VM's host keys are pinned under (usas_vms.vm_alias)."""
+    try:
+        return vms.vm_alias(cluster, vmid)
+    except ValueError:
+        raise KeyProblem("That isn't a VM ID.") from None
 
 
 def check_alias(alias: str) -> str:
