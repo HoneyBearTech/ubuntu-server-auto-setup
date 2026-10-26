@@ -33,6 +33,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`text` or `json`, as for Fail2Ban), `on-change` by default, or `always` or `only-on-error`. The relay's
   certificate is checked (a small module of the role, since Ansible's mail module doesn't check it).
   A notification that can't be sent fails the run after the report is written.
+- VMs page: select running Ubuntu VMs (up to 25) and run the baseline against them in check mode, with a
+  preset (SSH keys only, SSH hardening and Fail2Ban, the full baseline, or chosen parts) and each VM's
+  address, SSH port, login user and extra firewall rules. Each VM's host key is pinned by cluster and VM ID
+  after you compare the fingerprints, the plan is reviewed with what it would change on a server already in
+  use, and the run's page shows each host's result. **New attack surface:** the web UI now connects over SSH
+  to VMs it didn't create. A VM that isn't a server in the inventory is named `vm-<vmid>`, gets none of the
+  Vault's secrets (no admin, sudo or relay password, no webhook URL) and keeps passwordless sudo; credentials
+  follow the inventory's `pve_vmid`, never a VM's tags or description. Real runs follow in a later release.
 
 ### Changed
 
