@@ -95,7 +95,8 @@ const vmBase: Vm = {
   tags: ["ubuntu", "ansible"], cpu: 0.12, maxcpu: 4, mem: 1610612736, maxmem: 4294967296, uptime: 86400,
   agent: "ok", addresses: ["10.0.0.21", "192.168.50.21"], ip: "10.0.0.21", ip_source: "agent",
   os: "Ubuntu 26.04 LTS", hostname: "web-01", support: "supported", reason: "Ubuntu 26.04 LTS (reported by the guest).",
-  inventory_name: "web-01", ours: true, name_ok: true,
+  inventory_name: "web-01", ours: true, name_ok: true, selectable: true, why_not: "", alias: "usas-olympus-101",
+  pinned: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:pinned101" }],
 };
 
 export const vmList: Vm[] = [
@@ -103,21 +104,24 @@ export const vmList: Vm[] = [
   { ...vmBase, vmid: 102, name: "db-01", node: "ares", cpu: 0.53, maxcpu: 2, mem: 3221225472, addresses: [],
     ip: "10.0.0.22", ip_source: "inventory", agent: "forbidden", os: "", hostname: "", support: "unknown",
     reason: "The guest agent didn't report the OS: confirm it is Ubuntu before running a playbook.", ours: false,
-    inventory_name: "database", tags: [] },
+    inventory_name: "database", tags: [], alias: "usas-olympus-102", pinned: [] },
   { ...vmBase, vmid: 103, name: "jammy", status: "stopped", cpu: 0, mem: 0, agent: "stopped", addresses: [],
     ip: "10.0.0.23", ip_source: "ipconfig0", os: "", hostname: "", support: "override",
     reason: "Ubuntu 22.04 LTS (reported by the guest): only 26.04 and 24.04 are tested.", ours: false,
-    inventory_name: "", tags: [] },
+    inventory_name: "", tags: [], selectable: false, why_not: "It isn't running.", alias: "usas-olympus-103", pinned: [] },
   { ...vmBase, vmid: 104, name: "win-11", status: "paused", agent: "ok", addresses: [], ip: "", ip_source: null,
     os: "Windows 11 Pro", hostname: "WIN-11", support: "unsupported",
     reason: "Windows: the playbooks set up Ubuntu Server only.", ours: false, inventory_name: "", tags: [],
-    lock: "backup" },
+    lock: "backup", selectable: false, why_not: "Windows: the playbooks set up Ubuntu Server only.",
+    alias: "usas-olympus-104", pinned: [] },
   { ...vmBase, vmid: 200, name: "ct-dns", type: "lxc", agent: "none", addresses: [], ip: "", ip_source: null,
     os: "", hostname: "", support: "unsupported", reason: "A container (LXC), not a VM: the playbooks set up whole servers.",
-    ours: false, inventory_name: "", tags: ["dns"] },
+    ours: false, inventory_name: "", tags: ["dns"], selectable: false,
+    why_not: "Only VMs can be selected, not containers or templates.", alias: "usas-olympus-200", pinned: [] },
   { ...vmBase, vmid: 105, name: "golden", template: true, status: "stopped", agent: "none", addresses: [], ip: "",
     ip_source: null, os: "", hostname: "", support: "unsupported", reason: "A template: clone it into a VM first.",
-    ours: false, inventory_name: "", tags: [] },
+    ours: false, inventory_name: "", tags: [], selectable: false,
+    why_not: "Only VMs can be selected, not containers or templates.", alias: "usas-olympus-105", pinned: [] },
 ];
 
 export const vms: VmsData = {
@@ -128,6 +132,21 @@ export const vms: VmsData = {
   notes: [{ kind: "warning", message: "The token may not ask the guest agents of 1 VM(s) for their addresses: add VM.GuestAgent.Audit to its role (see docs/installing.md)." }],
   cluster: "olympus",
   fetched: 1792591331,
+  run: {
+    presets: [
+      { key: "keys", label: "SSH keys only", tags: ["ssh_keys"] },
+      { key: "ssh", label: "SSH hardening and Fail2Ban", tags: ["ssh", "fail2ban"] },
+      { key: "full", label: "Full baseline", tags: [] },
+      { key: "custom", label: "Custom", tags: null },
+    ],
+    default_preset: "full",
+    tags: ["ssh_keys", "common", "firewall", "ssh", "fail2ban", "hardening"],
+    max_hosts: 25,
+    user: "sysadmin",
+    ssh_port: 22,
+    busy: false,
+    key: true,
+  },
 };
 
 export const session: SessionData = {

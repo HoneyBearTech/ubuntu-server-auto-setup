@@ -1,6 +1,6 @@
 ---
 - name: Apply the server baseline
-  hosts: ubuntu_servers
+  hosts: ubuntu_servers:usas_vms
   become: true
   gather_facts: false
   pre_tasks:

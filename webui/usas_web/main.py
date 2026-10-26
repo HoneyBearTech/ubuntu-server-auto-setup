@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import time
 import zoneinfo
 from dataclasses import asdict, dataclass
@@ -31,14 +32,23 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, nodes, status, vms
+from . import __version__, nodes, status, vmplan, vms
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
 from .runner import PLAYBOOKS, Run, RunError, Runner
 from .schema import Field, Invalid, Schema, display_value, parse_value
-from .sshkeys import KeyProblem, Keys, check_host, describe_public_key, remove_ca, save_ca, saved_ca
+from .sshkeys import (
+    KeyProblem,
+    Keys,
+    check_host,
+    describe_public_key,
+    remove_ca,
+    save_ca,
+    saved_ca,
+    vm_alias,
+)
 from .store import Config, Store
 
 HERE = Path(__file__).parent
@@ -71,6 +81,7 @@ THEMES = ("dark", "light", "system")  # dark is the default
 THEME_COOKIE = "usas_theme"
 FRONTEND_ENTRY = "src/main.tsx"
 VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
+PLAN_TTL = 600  # a reviewed plan can be run for 10 minutes
 # Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
 log = logging.getLogger("usas_web")
 
@@ -1080,6 +1091,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                                         "Proxmox page)."})
         return notes
 
+    def vm_servers(config: Config) -> dict[int, dict[str, str]]:
+        return {int(s["pve_vmid"]): {"name": str(s["name"]), "ansible_host": str(s.get("ansible_host") or "")}
+                for s in config.servers if s.get("pve_vmid")}
+
+    def alias_of(vmid: int) -> str:
+        return vm_alias(str(store.cluster().get("name") or ""), vmid)
+
+    async def vm_listing(config: Config, api: PveApi) -> dict[str, Any]:
+        """The cluster listing, with what selecting a VM needs: whether it can be, and its pinned host keys."""
+        network = vms.subnet(config.values.get("net_gateway"), setting(config, "net_prefix"))
+        # The calls block (and wait for the guest agents), so they run in a thread.
+        data = await asyncio.to_thread(lister.list, api, vm_servers(config), network)
+        pins = keys.pins()
+        for row in data["vms"]:
+            ok, why = vmplan.selectable(row)
+            alias = alias_of(row["vmid"])
+            row.update(selectable=ok, why_not=why, alias=alias,
+                       pinned=[hostkey(k) for k in pins.get(alias, [])])
+        return data
+
+    def plan_settings(config: Config) -> vmplan.Settings:
+        rules = [vmplan.rule_text(r) for r in config.values.get("ufw_allow") or [] if isinstance(r, dict)]
+        return vmplan.Settings(
+            admin_user=str(setting(config, "admin_user")), ssh_port=int(setting(config, "ssh_port")),
+            github_user=str(config.values.get("github_user") or ""),
+            # The form doesn't set these: the roles' defaults apply.
+            ssh_keys_exclusive=bool(schema.roles.default_for("ssh_keys_exclusive", "common")),
+            ui_key_authorized=config.authorize_ui_key and bool(keys.public_key()),
+            apt_upgrade=str(schema.roles.default_for("apt_upgrade", "common")),
+            ufw_default_incoming=str(schema.roles.default_for("ufw_default_incoming", "firewall")),
+            ufw_rules=rules, known_hosts=str(settings.known_hosts))
+
     @app.get("/api/vms")
     async def vms_data(request: Request):
         require_login(request)
@@ -1087,16 +1130,133 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         api = pve_api(config)
         if api is None:
             return reply(409, error="Set up the Proxmox API first: the host and the token.", setup="/proxmox")
-        servers = {int(s["pve_vmid"]): {"name": str(s["name"]), "ansible_host": str(s.get("ansible_host") or "")}
-                   for s in config.servers if s.get("pve_vmid")}
-        network = vms.subnet(config.values.get("net_gateway"), setting(config, "net_prefix"))
         try:
-            # The calls block (and wait for the guest agents), so they run in a thread.
-            data = await asyncio.to_thread(lister.list, api, servers, network)
+            data = await vm_listing(config, api)
         except RemoteProblem as exc:
             return reply(502, error=exc.message)
         return reply(**data, notes=vm_notes(data, api.verify is not False), cluster=store.cluster().get("name", ""),
-                     fetched=int(time.time()))
+                     fetched=int(time.time()),
+                     run={"presets": [{"key": k, "label": label, "tags": list(tags) if tags is not None else None}
+                                      for k, (label, tags) in vmplan.PRESETS.items()],
+                          "default_preset": vmplan.DEFAULT_PRESET, "tags": list(vmplan.TAGS),
+                          "max_hosts": vmplan.MAX_HOSTS, "user": str(setting(config, "admin_user")),
+                          "ssh_port": int(setting(config, "ssh_port")), "busy": runner.current() is not None,
+                          "key": bool(keys.public_key())})
+
+    HOSTKEY_ACTIONS = ("scan", "trust", "forget", "test")
+
+    @app.post("/api/vms/hostkey")
+    async def vm_hostkey(request: Request):
+        """Scans a VM's host keys, pins the ones the user compared (by cluster and VM ID), forgets them, or tests
+        the login."""
+        session = require_login(request)
+        form = await checked_form(request)
+        action, vmid_text = str(form.get("action", "")), str(form.get("vmid", ""))
+        if action not in HOSTKEY_ACTIONS or not vms.VMID_PATTERN.match(vmid_text):
+            raise Forbidden()
+        vmid = int(vmid_text)
+        alias = alias_of(vmid)
+        try:
+            if action == "forget":
+                keys.forget(alias)
+                session.pending_vm_keys.pop(vmid, None)
+                return reply(message=f"Forgot VM {vmid}'s host keys.", vmid=vmid)
+            if action == "trust":
+                pending = session.pending_vm_keys.pop(vmid, None)
+                if not pending or pending[0].host != alias or form.get("confirm") is None:
+                    return reply(422, vmid=vmid, error="Scan again, compare the fingerprints and tick the box.")
+                keys.trust(alias, pending)
+                return reply(message=f"Pinned VM {vmid}'s host keys.", vmid=vmid,
+                             pinned=[hostkey(k) for k in pending])
+            address = check_host(str(form.get("address", "")))
+            port = vmplan.parse_port(str(form.get("port", ""))) or 22
+            if action == "scan":
+                found = await asyncio.to_thread(keys.scan, address, port, alias)
+                session.pending_vm_keys[vmid] = found
+                return reply(vmid=vmid, scanned=[hostkey(k) for k in found], address=address, port=port)
+            user = vmplan.check_user(str(form.get("user", "")),
+                                     vmplan.Formats(ipv4="", users=schema.by_name["admin_user"].patterns))
+            message = await asyncio.to_thread(keys.test_login, address, user, port, alias)
+            return reply(message=message, vmid=vmid)
+        except (KeyProblem, Invalid) as exc:
+            return reply(422, vmid=vmid, error=exc.message)
+
+    def stored_plan(session, plan_id: str) -> vmplan.Plan | None:
+        now = time.time()
+        for key in [k for k, (made, _) in session.vm_plans.items() if now - made > PLAN_TTL]:
+            del session.vm_plans[key]
+        found = session.vm_plans.get(plan_id)
+        return found[1] if found else None
+
+    @app.post("/api/vms/plan")
+    async def vm_plan(request: Request):
+        """Checks the selection and each VM's settings and returns the plan to review: the hosts, what the run
+        would change, and a plan ID to run it with."""
+        session = require_login(request)
+        form = await checked_form(request)
+        config = store.load()
+        api = pve_api(config)
+        if api is None:
+            return reply(409, error="Set up the Proxmox API first: the host and the token.", setup="/proxmox")
+        selected_text = [str(x) for x in form.getlist("vmid")]
+        if not all(vms.VMID_PATTERN.match(x) for x in selected_text):
+            raise Forbidden()
+        selected = list(dict.fromkeys(int(x) for x in selected_text))
+        values = {k: str(val) for k, val in form.items() if isinstance(val, str) and k.startswith("vm-")}
+        preset = str(form.get("preset", ""))
+        try:
+            tags = vmplan.preset_tags(preset, [str(t) for t in form.getlist("tags")])
+        except vmplan.PlanProblem as exc:
+            return reply(422, errors=exc.errors)
+        if len(selected) > vmplan.MAX_HOSTS:
+            return reply(422, errors={"selection": f"Select at most {vmplan.MAX_HOSTS} VMs for one run."})
+        if not keys.public_key():
+            return reply(422, errors={"selection": "Create or upload the web UI's SSH key first (SSH key page): "
+                                                   "the runs log in with it."})
+        try:
+            data = await vm_listing(config, api)
+        except RemoteProblem as exc:
+            return reply(502, error=exc.message)
+        rows = {row["vmid"]: row for row in data["vms"]}
+        static = vm_servers(config)
+        # A server this project installed was trusted when it was installed: its pin starts from that key.
+        for vmid in selected:
+            row = rows.get(vmid)
+            if vmid in static and row is not None:
+                address = static[vmid]["ansible_host"] or str(row.get("ip") or "")
+                if address:
+                    keys.adopt(alias_of(vmid), address)
+        pins = {alias: [k.fingerprint for k in found] for alias, found in keys.pins().items()}
+        formats = vmplan.Formats(ipv4=str(next(c for c in schema.server_columns if c.name == "ansible_host").pattern),
+                                 users=schema.by_name["admin_user"].patterns)
+        try:
+            plan = vmplan.build(rows, selected, values, servers=config.servers, pins=pins,
+                                aliases={vmid: alias_of(vmid) for vmid in selected}, formats=formats,
+                                settings=plan_settings(config), tags=tags, preset=preset)
+        except vmplan.PlanProblem as exc:
+            return reply(422, errors=exc.errors)
+        plan_id = secrets.token_urlsafe(16)
+        stored_plan(session, "")  # drops expired plans
+        session.vm_plans[plan_id] = (time.time(), plan)
+        return reply(plan_id=plan_id, plan=vmplan.plan_json(plan), expires=int(time.time()) + PLAN_TTL)
+
+    @app.post("/api/vms/run")
+    async def vm_run(request: Request):
+        """Runs a reviewed plan in check mode (--check --diff): nothing on the VMs changes."""
+        session = require_login(request)
+        form = await checked_form(request)
+        plan = stored_plan(session, str(form.get("plan_id", "")))
+        if plan is None:
+            return reply(422, error="That plan has expired (plans last 10 minutes). Review it again.")
+        if form.get("mode") != "check":
+            return reply(422, error="Only check runs are possible from the VMs page so far.")
+        try:
+            started = runner.start("baseline", True, True, plan.limit, store.host_names(), secret_values(),
+                                   kind="vms", inventory=plan.inventory, tags=plan.tags, targets=plan.summary(),
+                                   plan=plan.digest)
+        except RunError as exc:
+            return reply(422, error=exc.message)
+        return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     # --- Runs ---------------------------------------------------------------------------------------------
 
@@ -1140,7 +1300,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(404, error="There is no such run.", redirect="/runs")
         path = runner.log_path(run.id)
         log = path.read_bytes() if path.exists() else b""
-        return reply(run=run_json(run), log=log.decode("utf-8", "replace"), offset=len(log))
+        return reply(run=run_json(run), log=log.decode("utf-8", "replace"), offset=len(log),
+                     hosts=runner.hosts(run.id, secret_values()))
+
+    @app.get("/api/runs/{run_id}/hosts")
+    async def run_hosts(request: Request, run_id: str):
+        """The per-host results so far (the run's page asks again while the run goes)."""
+        require_login(request)
+        run = runner.get(run_id)
+        if run is None:
+            return reply(404, error="There is no such run.")
+        return reply(hosts=runner.hosts(run.id, secret_values()), done=run.done)
 
     def get_run(run_id: str):
         run = runner.get(run_id)

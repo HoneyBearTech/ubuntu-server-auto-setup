@@ -59,6 +59,7 @@ COPY --from=build /opt/collections /app/collections
 COPY ansible.cfg LICENSE requirements.txt requirements.yml /app/
 COPY playbooks /app/playbooks
 COPY roles /app/roles
+COPY callback_plugins /app/callback_plugins
 COPY inventory/hosts.example.yml inventory/vault.example.yml /app/inventory/
 COPY webui/usas_web /app/webui/usas_web
 COPY --from=frontend /build/webui/usas_web/static/app /app/webui/usas_web/static/app

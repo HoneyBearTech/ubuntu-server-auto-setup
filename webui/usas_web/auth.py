@@ -10,7 +10,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -52,6 +52,9 @@ class Session:
     signed_in_with: str = ""
     # The passkey challenge this session was given, if any (passkeys.Challenge): used once, then gone.
     passkey_challenge: object | None = None
+    # VMs page: host keys scanned per VM ID but not pinned yet, and the plans reviewed (plan ID -> (time, plan)).
+    pending_vm_keys: dict = field(default_factory=dict)
+    vm_plans: dict = field(default_factory=dict)
 
 
 class Auth:

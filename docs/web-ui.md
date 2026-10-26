@@ -189,7 +189,7 @@ The overview lists the steps and whether each is done.
    turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
    (mail addresses, a webhook), and a mail relay. The relay password and the webhook URL are kept in the
    Vault; tick **Remove the saved value** to delete one.
-6. **VMs**: every VM and container on the cluster, read-only: its node, status (an icon and a word), CPU and
+6. **VMs**: every VM and container on the cluster: its node, status (an icon and a word), CPU and
    memory use (as bars with the numbers beside them), the address the playbooks would use and where it
    came from, and whether the playbooks support it. The address comes from the VM's QEMU guest agent if it
    runs (IPv4 only, loopback, link-local and container interfaces left out, an address in the servers'
@@ -201,8 +201,30 @@ The overview lists the steps and whether each is done.
    address, OS or tag, node, status or support. The list refreshes every 30 seconds while the page is
    visible, without reordering the rows; **Refresh** asks at once. The guest agents need
    `VM.GuestAgent.Audit` on Proxmox VE 9 ([installing.md](installing.md#2-create-the-proxmox-api-token));
-   on Proxmox VE 8 the page works without them. Selecting VMs and running the baseline against them is
-   planned for a later release; for now, add a VM to the Servers page to run playbooks against it.
+   on Proxmox VE 8 the page works without them.
+
+   **Running the baseline on VMs.** Tick running Ubuntu VMs (or **Select all VMs shown**; up to 25 per run;
+   a row that can't be ticked says why). Below the table, choose what to run: **SSH keys only**, **SSH
+   hardening and Fail2Ban**, the **Full baseline** (the default), or **Custom** parts. For each VM:
+   - A VM whose VM ID is on the Servers page runs as that server, with its address, user and sudo password,
+     as from the Run page.
+   - Any other VM runs as `vm-<vmid>` with the **Address** you pick (one its guest agent or cloud-init
+     reports, or another), an **SSH port** (empty: the Hardening page's port, then 22), a **Login user**
+     that accepts the UI's key and has passwordless sudo, **Extra firewall rules** for what it serves, and
+     whether to **Set its host name** (off by default). It gets none of the Vault's secrets: no admin
+     password (so sudo stays passwordless for that user), no relay password, no webhook URL.
+   - An untested Ubuntu release, or a VM outside the inventory whose guest didn't report its OS, needs
+     **It runs Ubuntu Server** ticked.
+   - **Host key**: **Scan the host key**, compare the fingerprints with the VM's console (`for f in
+     /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done`), tick the box and **Pin these keys**. The
+     keys are pinned to the cluster and VM ID, not the address, so a guest that reports another VM's
+     address only gets a refused connection. A server the project installed starts from the key recorded
+     when it was installed. **Test the login** tries the user and key.
+
+   **Review the plan** checks it all on the server and lists the hosts and what the run would change on a
+   server already in use (the firewall's default deny, SSH keys removed, every package upgraded, SSH
+   settings, renamed hosts). **Run the check** starts the baseline with `--check --diff`: nothing on the VMs
+   changes, and the run's page shows each host's result above the log. Real runs come in a later release.
 7. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
    only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers, nodes or groups,
    separated by commas). The page shows where `build-installer` puts the installer ISO: each node the
@@ -281,13 +303,13 @@ directories):
 | `inventory/group_vars/all/vault.yml` | The admin password and the API token (and the mail relay password, webhook URL and disk passphrase, if set), encrypted with Ansible Vault (AES-256). |
 | `.vault-pass` | The Vault password: 32 random bytes made on the first start (see below). |
 | `ssh/id_ed25519`, `ssh/id_ed25519.pub` | The UI's SSH key pair. |
-| `ssh/known_hosts` | The trusted host keys: each Proxmox node's, and each new VM's (added by provisioning). |
+| `ssh/known_hosts` | The trusted host keys: each Proxmox node's, each new VM's (added by provisioning), and the keys pinned on the VMs page, named `usas-<cluster>-<vmid>`. |
 | `pve-ca.pem`, `ca-bundle.pem` | The cluster CA you saved, and that CA together with the public ones. |
 | `auth.json` | The UI password's argon2id hash. |
 | `passkeys.json` | The passkeys' public keys, IDs, names and signature counters, and whether a passkey is required. |
 | `status-token.json` | The status token's HMAC (never the token), its first 4 characters, when it was made and last used, and from which address. There is none until you make a token. |
 | `webui.json` | The cluster's name, nodes and ISO storages from the last connection test, for the node dropdowns and the ISO plan. |
-| `runs/` | The run history: one `.json` and one `.log` per run. |
+| `runs/` | The run history: one `.json` and one `.log` per run; for a VMs page run also its inventory (`.inventory.yml`, no secrets) and each host's result (`.hosts.json`). `.lock` is held while a run goes. |
 
 **The Vault password is in the same volume by default**, so the encryption protects `vault.yml` when it is
 copied on its own (into a backup, a ticket or a repository), not against someone who has the whole volume.
@@ -386,6 +408,10 @@ What it does to protect them:
   `roles/*/vars/main.yml`), plus formats of its own for values the roles take as they are (the API host,
   the token name, firewall rules); the `--limit` must name hosts or groups in the inventory.
 - **No shell**: `ansible-playbook`, `ssh` and `ssh-keyscan` run with argument lists.
+- **VMs it didn't create**: a run from the VMs page reaches only VMs whose host keys were pinned after a
+  fingerprint comparison, by cluster and VM ID; credentials follow the Servers page's VM IDs, never a VM's
+  tags or description, so a VM outside it gets none of the Vault's secrets. Every value of the run's
+  inventory is checked against the roles' formats and written `!unsafe`.
 - **What guests report is untrusted.** The VMs page shows what each VM's guest agent says (its addresses,
   OS and host name), which whoever controls the VM can make up. The UI keeps IPv4 addresses that aren't
   special-use, at most 16 per VM, removes control and text-direction characters from the rest and shortens
@@ -452,7 +478,11 @@ For reference:
 | `/api/status` | GET | The summary for dashboards ([interfaces.md](interfaces.md#the-status-api)). No sign-in and no session: it needs the status token as `Authorization: Bearer`, and answers 404 until one exists. |
 | `/api/status-token/create`, `/api/status-token/revoke` | POST | Make (or replace) the status token, which needs the current password and is answered once with the token; revoke it. |
 | `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
-| `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, and whether the playbooks support them. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. Read-only. |
+| `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, whether the playbooks support them and whether they can be selected, and their pinned host keys. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. |
+| `/api/vms/hostkey` | POST | A VM's host keys: `scan` (address and port), `trust` (the scanned keys, with `confirm`), `forget`, or `test` the login. |
+| `/api/vms/plan` | POST | Check the selected VMs (`vmid`, up to 25) and their settings (`vm-<vmid>-address`, `-port`, `-user`, `-ufw`, `-hostname`, `-override`) with a `preset` (and `tags` for custom), and answer the plan to review with a plan ID that lasts 10 minutes, or the errors per field. |
+| `/api/vms/run` | POST | Run a reviewed plan (`plan_id`) in check mode (`mode=check`). |
+| `/api/runs/<id>/hosts` | GET | Each host's result so far (the summary callback's), for the run's page. |
 | `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
 | `/api/run` | POST | Start a run. |
 | `/api/runs/<id>/stop` | POST | Interrupt the run. |
@@ -473,7 +503,7 @@ answers 401 with `WWW-Authenticate: Bearer` instead).
 - One user, no accounts. Passkeys replace the password rather than adding a second step to it; they work
   on `http://localhost` or under the host name in `USAS_PUBLIC_URL`, not at an IP address.
 - One run at a time, and sessions don't survive a restart of the container.
-- The VMs page only lists the cluster's VMs; running playbooks against VMs picked there is planned.
+- The VMs page runs only the baseline, in check mode so far, on up to 25 VMs at a time.
 - It needs JavaScript (any current browser).
 - English only.
 
