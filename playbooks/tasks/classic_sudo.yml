@@ -3,6 +3,9 @@
 # so becoming root times out once passwordless sudo is gone (ansible-core 2.20 and 2.21 don't recognise it).
 # The classic sudo is installed next to it as sudo.ws and prints the prompt as given. Runs before anything
 # becomes root; an ansible_become_exe set in the inventory is left alone.
+# classic_sudo_needs_password says whether becoming root needs a password on this host. The baseline leaves it
+# unset, so it follows admin_sudo_nopasswd. A playbook for servers this project didn't install sets it from
+# ansible_become_password: such a server may have passwordless sudo-rs and no sudo.ws.
 - name: Look for the classic sudo
   ansible.builtin.stat:
     path: /usr/bin/sudo.ws
@@ -31,13 +34,14 @@
 - name: Fail if Ansible couldn't give sudo the admin password
   ansible.builtin.assert:
     that: >-
-      admin_sudo_nopasswd | default(false) | bool
+      not (classic_sudo_needs_password | default(not (admin_sudo_nopasswd | default(false) | bool)) | bool)
       or not (classic_sudo_version.stdout | default('')) is match('sudo-rs')
     fail_msg: >-
       sudo on {{ inventory_hostname }} is sudo-rs, whose password prompt Ansible doesn't recognise, and the
       classic sudo (/usr/bin/sudo.ws) isn't installed: once passwordless sudo is removed, becoming root would
       time out. Install the sudo package (it provides /usr/bin/sudo.ws), set ansible_become_exe to a sudo that
-      prints the prompt it is given, or keep passwordless sudo with admin_sudo_nopasswd: true.
+      prints the prompt it is given, or keep passwordless sudo (admin_sudo_nopasswd: true for the baseline; no
+      ansible_become_password for the updates playbook).
     quiet: true
   when: classic_sudo_version is not skipped
   tags: [always]

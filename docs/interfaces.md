@@ -124,6 +124,7 @@ example shows a typical value.
 | --- | --- | --- |
 | `admin_shell` | `/bin/bash` | The admin account's shell. |
 | `admin_sudo_nopasswd` | `false` | Passwordless sudo for the admin account. False removes the installer's passwordless sudo on the first baseline run; later runs need `ansible_become_password` (the example inventory and the web UI set it to the admin password). On Ubuntu 26.04 the playbooks become root with the classic sudo, `/usr/bin/sudo.ws`, since Ansible can't answer sudo-rs's password prompt; set `ansible_become_exe` to override. |
+| `classic_sudo_needs_password` | `not admin_sudo_nopasswd` | Whether becoming root needs a password on the host. If it does and the host has sudo-rs but not the classic sudo, the playbook stops before changing anything. The baseline leaves it unset. |
 | `ssh_keys_exclusive` | `true` | Remove authorized keys that aren't on GitHub or in `admin_extra_ssh_keys`. |
 | `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |

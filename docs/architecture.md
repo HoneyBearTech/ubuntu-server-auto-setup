@@ -41,7 +41,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on. | `roles/hardening/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
 | Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
-| Container image | ansible-core, the collections, the playbooks and roles, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
+| Container image | ansible-core, the collections, the playbooks, roles and shared plugin code, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
 
 ## How a server is built
 
@@ -162,6 +162,7 @@ baseline.
 | `auth.py` | The password (argon2id), the first-run setup code, in-memory sessions, CSRF tokens, throttling of failed sign-ins. | `webui/usas_web/auth.py` |
 | `passkeys.py` | Passkeys (WebAuthn, through py_webauthn): the options for the browser, single-use challenges tied to the session, checking registrations and sign-ins (origin, RP ID, user verification, signature counter), `passkeys.json` and "Require a passkey". | `webui/usas_web/passkeys.py` |
 | `runner.py` | Runs `ansible-playbook` with an argument list, one run at a time, writes the output (with the Vault's values masked) and the run's details to `runs/`. | `webui/usas_web/runner.py` |
+| `vms.py` | The VMs page's parsing of what Proxmox and the guest agents report. The code lives in `plugins/module_utils/usas_vms.py`, shared with the playbooks' own plugins so the page can't drift from them; `vms.py` loads it from the project. | `plugins/module_utils/usas_vms.py`, `webui/usas_web/vms.py` |
 | `sshkeys.py`, `remote.py` | The UI's key pair, scanning and trusting the node's host key, the cluster CA; the Proxmox connection test and the GitHub keys preview. | `webui/usas_web/` |
 | `main.py`, `templates/app.html` | The JSON API behind every page and form (the same field names and checks the forms always had), the HTML shell every page URL answers with, the guard middleware (allowed hosts, sessions, Origin checks, the CSRF header, security headers), the live log as server-sent events. | `webui/usas_web/` |
 | The app | The pages in the browser: React and TypeScript, built by Vite into `static/app` (one script, one stylesheet, the fonts; names carry a hash of their contents). Design tokens in `src/styles/tokens.css`; a small router over the History API; the log viewer reads the server-sent events. It only shows what the server answers: every check is the server's. | `webui/frontend/` |

@@ -17,25 +17,8 @@
         and provision_dhcp_address is not defined
       tags: [always]
 
-    # After ssh_hardening moves SSH off port 22, later runs connect on ssh_port; a fresh
-    # server still listens on 22. Probe so the same inventory works for both.
-    - name: Probe the configured SSH port
-      ansible.builtin.wait_for:
-        host: "{{ ansible_host | default(inventory_hostname) }}"
-        port: "{{ ssh_port | int }}"
-        timeout: 5
-      delegate_to: localhost
-      become: false
-      register: baseline_ssh_probe
-      ignore_errors: true
-      when: ssh_port is defined and ssh_port | int != 22 and ansible_port is not defined
-      tags: [always]
-
-    - name: Connect on whichever SSH port answers
-      ansible.builtin.set_fact:
-        ansible_port: "{{ (ssh_port | int) if baseline_ssh_probe is succeeded else 22 }}"
-      when: baseline_ssh_probe is not skipped
-      tags: [always]
+    - name: Connect on the SSH port that answers
+      ansible.builtin.import_tasks: tasks/ssh_port.yml
 
     - name: Use a sudo that Ansible can give the password to
       ansible.builtin.import_tasks: tasks/classic_sudo.yml

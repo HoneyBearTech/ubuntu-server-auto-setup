@@ -19,6 +19,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Vault's secrets (no admin, sudo or relay password, no webhook URL) and keeps passwordless sudo; credentials
   follow the inventory's `pve_vmid`, never a VM's tags or description. Real runs follow in a later release.
 
+### Changed
+
+- Groundwork for a playbook that keeps existing servers updated, with no change in behaviour: the SSH-port
+  probe the baseline runs first is now a shared task file (`playbooks/tasks/ssh_port.yml`); the classic-sudo
+  check reads a new variable, `classic_sudo_needs_password`, which follows `admin_sudo_nopasswd` unless set;
+  and the VMs page's parsing moved to `plugins/module_utils/usas_vms.py`, so the playbooks' own plugins can
+  share it (the container image now carries `plugins/`).
+
 ## [0.6.0] - 2026-10-25
 
 An opt-in, read-only status API lets a dashboard such as Heimdall show whether a run is going, how the last
