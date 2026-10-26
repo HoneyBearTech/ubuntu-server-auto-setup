@@ -77,8 +77,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 1. **`playbooks/build-installer.yml`** runs on the Proxmox nodes your servers use (inventory group
    `proxmox_nodes`) over SSH as root, or as a user of its own without root's privileges (optional, set up once
    by `playbooks/prepare-node.yml`): once for a storage the cluster shares, on each node for a node-local one.
-   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
-   Ubuntu's published `SHA256SUMS` after verifying Ubuntu's GPG signature on that file, and uses `xorriso` to build a copy whose GRUB menu adds the
+   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against the checksum the
+   project's OS catalog pins (taken from Ubuntu's `SHA256SUMS` after verifying Ubuntu's GPG signature on that
+   file, when the catalog was built), and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
    the playbook asks Proxmox for its folder, so shared storage such as NFS works too).
@@ -223,7 +224,7 @@ Everything is configured through the inventory (`inventory/hosts.yml`, copied fr
 (`inventory/group_vars/all/vault.yml`, copied from [`inventory/vault.example.yml`](inventory/vault.example.yml)).
 The variables you are most likely to set are below. [docs/interfaces.md](docs/interfaces.md) describes them
 in more detail, and every role lists all of its variables, with defaults and comments, in
-`roles/<role>/defaults/main.yml` (`installer_iso`, `ubuntu_release`, `proxmox_vm`, `common`, `firewall`,
+`roles/<role>/defaults/main.yml` (`installer_iso`, `os_catalog`, `proxmox_vm`, `common`, `firewall`,
 `ssh_hardening`, `fail2ban`, `hardening`).
 
 **Secrets (Vault)**
@@ -258,7 +259,8 @@ in more detail, and every role lists all of its variables, with defaults and com
 [docs/installing.md](docs/installing.md#6-optional-a-node-user-other-than-root) for a user without root's
 privileges). The ISO location is set by `pve_iso_storage` (default `local`); its
 folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The Ubuntu release is
-set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3
+set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (empty: the one the OS catalog pins, now
+`26.04.1`); `installer_grub_timeout` (3
 seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 
 **New VMs** (group `ubuntu_servers`, used by `provision-vms.yml`)

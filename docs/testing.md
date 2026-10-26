@@ -12,8 +12,10 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
-| Fuzzing | the code that turns inventory values into files and commands, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
-| Real installer ISO | Ubuntu's real signature on `SHA256SUMS`, checked with the shipped key, and the remastering of the real Ubuntu 26.04 live-server ISO; then an install from it in QEMU with Secure Boot and a TPM 2.0, with an encrypted disk, and boots of the result | `tests/real-iso.sh` (set `USAS_ISO_CACHE` to a folder holding the ISO to skip the download, and `USAS_LOG_DIR` to keep each play's log; a failed play shows its failed tasks), then `tests/secure-boot-install.sh` (Linux with KVM) | weekly, and on pull requests that change the installer roles or the installer's configuration; CI caches the ISO by its SHA-256 and keeps the logs of a failed run for 7 days |
+| Fuzzing | the code that turns inventory values into files and commands, and the OS catalog tool's parsers, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
+| OS catalog tool | `tools/update_os_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
+| OS catalog check | every image the catalog pins, against the real vendors: the signature on the checksum file (pinned keys), the checksum, and that the image can still be downloaded; newer builds are listed | `make catalog-check` | pull requests that change the catalog, the script or its keys; weekly, opening or updating an issue when a pin fails or a newer build is out (and closing it when the catalog checks out again) |
+| Real installer ISO | the real Ubuntu 26.04 live-server ISO the OS catalog pins, checked against the catalog's checksum and again against Ubuntu's real signature on `SHA256SUMS` with the shipped key (as for an unpinned point release), and its remastering; then an install from it in QEMU with Secure Boot and a TPM 2.0, with an encrypted disk, and boots of the result | `tests/real-iso.sh` (set `USAS_ISO_CACHE` to a folder holding the ISO to skip the download, and `USAS_LOG_DIR` to keep each play's log; a failed play shows its failed tasks), then `tests/secure-boot-install.sh` (Linux with KVM) | weekly, and on pull requests that change the installer roles, the OS catalog or the installer's configuration; CI caches the ISO by its SHA-256 and keeps the logs of a failed run for 7 days |
 | Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy), and before every release with the [pre-release checklist](release-checklist.md) |
 
 ## The integration tests
@@ -24,7 +26,7 @@ leaves the machine except the container image builds:
 | Real system | Stand-in |
 | --- | --- |
 | Two Proxmox VE nodes of one cluster (SSH as root and as the node user `prepare-node.yml` creates, ISO storage, a fake `pvesm` that runs for root only) | two Debian containers from `tests/images/pve-node`, `pve-test` with SSH on `127.0.0.1:2211` and `pve-test-2` on `2212`. Each has its own `local` storage folder; a Docker volume mounted at the same path in both stands in for the cluster's shared NFS storage (`synology-nfs`). Their `xorriso` keeps a copy of each seed's user-data for the network checks |
-| releases.ubuntu.com | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`) and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
+| releases.ubuntu.com and the OS catalog | a small ISO with Ubuntu's GRUB menu (`tests/fixtures/grub.cfg`), pinned as Ubuntu 26.04's installer in a copy of the real catalog that the tests pass as extra vars, and a `SHA256SUMS` in Ubuntu's format, signed (`SHA256SUMS.gpg`) with a test key made when the image is built, served inside that container. Only the test key's public half and fingerprint leave the build; `tests/run.sh` points `installer_signing_keyring` and `installer_signing_fingerprint` at them |
 | The Proxmox VE API | `tests/mock_pve.py`: the API calls the roles make, on `https://127.0.0.1:8006`, for a cluster of the two nodes with storages per node (`/nodes/<node>/storage`; `usb-iso` only on `pve-test`). A VM lives on the node it was created on, and calls for it must name that node. After a VM's first start it reports "running" for a few polls, then "stopped", as the installer does when it powers off. VM 4099 never stops. Once an installed VM runs, its guest agent lists one interface per network card with the card's MAC address; VM 4063's `net0` has a DHCP lease, the others only link-local addresses, and VM 4066's agent may not be asked. With `--fixture-vms` (the image smoke test and the browser tests) it also lists fixed VMs with guest agents for the web UI's VMs page: Ubuntu 26.04, 24.04 and 22.04, Debian, Windows, an agent that isn't running, a slow one, one the token may not ask, a stopped VM, a template, a container and hostile strings |
 | github.com/&lt;user&gt;.keys | a keys file the mock serves on `http://127.0.0.1:8081` |
 | A freshly installed VM | an Ubuntu 26.04 container with systemd, socket-activated SSH, sudo-rs and the admin user, as the autoinstall leaves it (`tests/images/ubuntu-target`), SSH on `127.0.0.1:2201` and `2222` |
@@ -38,9 +40,11 @@ run; your own `~/.ssh` is never touched. The steps:
    isn't trusted is named before any node builds; servers naming nodes the cluster doesn't have are refused
    in one error, by both playbooks, before anything is created. With the shared `synology-nfs` storage the
    ISO is built once, by `pve-test` only (only it has that run's work directory), and a storage a node
-   doesn't have is refused. Then it must refuse a `SHA256SUMS` whose checksum was
-   swapped (bad signature), one with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one,
-   and a malformed fingerprint.
+   doesn't have is refused. With the real catalog, whose checksum the stand-in ISO doesn't have, the
+   download is refused with what to do, and the copy in storage is kept. With an empty catalog and
+   `ubuntu_point_release` set, the ISO is checked against the signed `SHA256SUMS` instead (and a second
+   run changes nothing); then it must refuse a `SHA256SUMS` whose checksum was swapped (bad signature), one
+   with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one, and a malformed fingerprint.
 2. **provision-vms** for `srv-01`: the VM is created with the expected hardware (an EFI disk with Secure
    Boot keys pre-enrolled, no TPM), both ISOs attached, the install awaited, the ISOs detached, the boot
    order set to disk only, the seed deleted, the VM started and its host key trusted. A second run, with
@@ -138,11 +142,36 @@ template for an encrypted disk. It installs unattended, then:
 The VM's serial logs, screen dumps and the LUKS header dump are kept as a workflow artifact when it fails.
 It needs about 3 GB for the ISO and up to 8 GB for the VM's disk, and takes 20 to 30 minutes.
 
+## The OS catalog
+
+`roles/os_catalog/vars/catalog.yml` pins every image the project installs (see
+[interfaces.md](interfaces.md#the-os-catalog)). Refreshing it is a maintainer's job, done in a pull request:
+
+1. `make catalog` reads each vendor's index, checks the signature on every signed checksum file with `gpgv`
+   against the fingerprints pinned in `tools/update_os_catalog.py`, and writes the newest build of every
+   supported release. It needs `gpgv` and network access, and nothing else (standard-library Python).
+2. Review the diff: the URLs stay on the vendors' hosts, the builds move forward, and `signed` stays `true`
+   wherever it was.
+3. Open a pull request. The "OS catalog" workflow checks every pin against the vendors again, and the "Installer
+   ISO" workflow remasters and installs the newly pinned Ubuntu ISO.
+
+The weekly run of the "OS catalog" workflow opens an issue titled "OS catalog: refresh needed" (or updates
+the open one) when a pinned image is gone, no longer matches, or a newer build is out, and closes it once the
+catalog checks out again. A gone pin breaks runs that need that image, so it calls for a patch release.
+
+When a vendor replaces a signing key, the check fails with "isn't by <fingerprint>": confirm the new key on the
+vendor's own site (security.md lists where), replace the file in `tools/os-catalog-keys/` and the fingerprint
+in the script, and say so in the pull request. A new supported release is a new line in the script's
+`RELEASES` (with its end-of-life date) and, for a new vendor, a finder and a test.
+
+`make catalog-test` runs the script's unit tests offline: made-up indexes for every vendor, signed with a
+throwaway key made for the run.
+
 ## Fuzzing
 
 `tests/fuzz/` holds [Atheris](https://github.com/google/atheris) fuzz targets for the places where
-inventory values become configuration files or shell commands, and for the web UI's status API token
-header. Each target for the roles loads the real template, Jinja
+inventory values become configuration files or shell commands, for the web UI's status API token
+header, and for what the OS catalog tool reads from the vendors. Each target for the roles loads the real template, Jinja
 expression or allowlist pattern from the role (`tests/fuzz/roles.py`), renders it with Ansible's own
 filters and tests, and checks a property for every input the role would accept:
 
@@ -150,8 +179,9 @@ filters and tests, and checks a property for every input the role would accept:
 | --- | --- | --- |
 | `fuzz_user_data.py` | `roles/proxmox_vm/templates/user-data.j2` and `meta-data.j2` | the YAML parses and every field holds exactly the given value; the two root shell commands split into exactly the expected words; with disk encryption, the passphrase is exactly the layout's password and the key file's content and nowhere else, the enrollment script is the same for every input, and every passphrase the role accepts is 12 to 512 printable ASCII characters without braces |
 | `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm`, `common` and `proxmox_node_user` | all three roles agree; every entry is one trimmed line of the input that starts with a key type |
-| `fuzz_node_user.py` | `pve_ssh_user_pattern`, and the expression in `ubuntu_release` that reads the ISO folder from the file `prepare-node.yml` writes | the user pattern accepts exactly what `common_username_pattern` does; the folder taken is the storage's entry, an absolute path without control characters, or nothing |
+| `fuzz_node_user.py` | `pve_ssh_user_pattern`, and the expression in `os_catalog` that reads the ISO folder from the file `prepare-node.yml` writes | the user pattern accepts exactly what `common_username_pattern` does; the folder taken is the storage's entry, an absolute path without control characters, or nothing |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
+| `fuzz_os_catalog.py` | `tools/update_os_catalog.py`: the directory-listing and checksum-file parsers (vendor input), and the catalog file's reader and validation | only plain file names (not `.` or `..`, no path) and hex checksums of the right length come out of a listing or checksum file, exactly as they appear; any catalog text fails with the script's own error or reads as entries with only HTTPS URLs on the vendors' hosts, plain file names and sha256/sha512 checksums, which write back to the same text |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each node-local storage is built by its node when in the run, each shared storage exactly once by a node that uses it, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |

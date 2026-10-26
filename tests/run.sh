@@ -16,8 +16,11 @@ export ANSIBLE_CALLBACKS_ENABLED=task_coverage
 export TASK_COVERAGE_FILE="$TEST_TMP/coverage.txt"
 export ANSIBLE_FORCE_COLOR=0
 # The node's stand-in SHA256SUMS is signed with a test key made when its image is built; signing.yml (written
-# below) points the installer role at that key instead of Ubuntu's.
-INV=(-i tests/inventory/hosts.yml -e "@$TEST_TMP/signing.yml")
+# below) points the installer role at that key instead of Ubuntu's. catalog.yml (also written below) is the real
+# OS catalog with the stand-in ISO pinned as Ubuntu 26.04's installer.
+INV=(-i tests/inventory/hosts.yml -e "@$TEST_TMP/signing.yml" -e "@$TEST_TMP/catalog.yml")
+# For the steps that check an ISO the catalog doesn't pin against the signed SHA256SUMS: an empty catalog.
+UNPINNED=(-e '{"os_catalog": []}' -e ubuntu_point_release=26.04.1)
 PVE=usas-test-pve
 PVE2=usas-test-pve2
 SRV=usas-test-srv
@@ -184,6 +187,15 @@ printf '{"ansible_ssh_common_args": "-o UserKnownHostsFile=%s/known_hosts.one -o
 docker cp "$PVE":/srv/test-signing/keyring.gpg "$TEST_TMP/signing-keyring.gpg"
 printf 'installer_signing_keyring: %s\ninstaller_signing_fingerprint: %s\n' "$TEST_TMP/signing-keyring.gpg" \
   "$(docker exec "$PVE" cat /srv/test-signing/fingerprint)" >"$TEST_TMP/signing.yml"
+python3 - "$(docker exec "$PVE" sha256sum /srv/ubuntu/ubuntu-26.04.1-live-server-amd64.iso)" "$TEST_TMP/catalog.yml" <<'PY'
+import sys, yaml
+catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))
+iso = next(e for e in catalog["os_catalog"] if e["id"] == "ubuntu-26.04")["methods"]["autoinstall"]
+digest, path = sys.argv[1].split()
+name = path.rsplit("/", 1)[1]
+iso.update(url=f"https://releases.ubuntu.com/26.04/{name}", checksum=f"sha256:{digest}", file=name, build="26.04.1")
+yaml.safe_dump(catalog, open(sys.argv[2], "w"))
+PY
 
 step "build-installer: local ISO storage, so the ISO is remastered on each node its servers use"
 play_says 'local on pve-test-2: built by pve-test-2' playbooks/build-installer.yml
@@ -211,14 +223,25 @@ play_fails "$BAD_NODES" playbooks/provision-vms.yml -i tests/inventory/bad-nodes
 no_vms 4061 4062 4081 4083 4084 4099
 play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
 
+step "build-installer: an ISO that doesn't have the checksum the OS catalog pins is refused, the copy kept"
+# The real catalog pins the real ISO's checksum, which the stand-in doesn't have.
+play_fails "with the checksum the OS catalog pins" playbooks/build-installer.yml --limit pve-test \
+  -e @roles/os_catalog/vars/catalog.yml
+grep -q "update ubuntu-server-auto-setup, whose" "$last_log"
+docker exec "$PVE" cmp /srv/ubuntu/ubuntu-26.04.1-live-server-amd64.iso /var/lib/vz/template/iso/ubuntu-26.04.1-live-server-amd64.iso
+
+step "build-installer: a point release the catalog doesn't pin is checked against the signed SHA256SUMS"
+play_says 'Pick the checksum for ubuntu-26.04.1-live-server-amd64.iso' playbooks/build-installer.yml "${UNPINNED[@]}"
+play --idempotent playbooks/build-installer.yml "${UNPINNED[@]}"
+
 step "build-installer: a checksum file that isn't signed by the pinned key is refused"
 play_fails 'The signature on http://127.0.0.1:8080/tampered/SHA256SUMS is bad' playbooks/build-installer.yml \
-  -e ubuntu_iso_base_url=http://127.0.0.1:8080/tampered
+  "${UNPINNED[@]}" -e ubuntu_iso_base_url=http://127.0.0.1:8080/tampered
 play_fails "Couldn't fetch http://127.0.0.1:8080/unsigned/SHA256SUMS.gpg" playbooks/build-installer.yml \
-  -e ubuntu_iso_base_url=http://127.0.0.1:8080/unsigned
+  "${UNPINNED[@]}" -e ubuntu_iso_base_url=http://127.0.0.1:8080/unsigned
 # A good signature, but by a key other than the pinned one (the test key is in the keyring, Ubuntu's isn't).
 play_fails "isn't by the key 843938DF228D22F7B3742BC0D94AA3F0EFE21092" playbooks/build-installer.yml \
-  -e installer_signing_fingerprint=843938DF228D22F7B3742BC0D94AA3F0EFE21092
+  "${UNPINNED[@]}" -e installer_signing_fingerprint=843938DF228D22F7B3742BC0D94AA3F0EFE21092
 play_fails 'must be the signing key' playbooks/build-installer.yml -e installer_signing_fingerprint=EFE21092
 # What tests/real-iso.sh shows of a failed play: the failed task and its message, not the tasks that passed.
 failures="$(tests/show-failures.sh "$last_log")"

@@ -30,6 +30,13 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 **Provisioning**
 - Done: Ubuntu's GPG signature on `SHA256SUMS` is verified, with its CD image signing key pinned by
   fingerprint, before the ISO's checksum is trusted.
+- Done: an OS catalog that pins every supported image by URL and checksum, built from the vendors' indexes
+  with their signatures checked against pinned keys, and checked weekly
+  ([interfaces.md](interfaces.md#the-os-catalog)).
+- In progress (0.7.0): more operating systems, installed from the vendors' cloud images with the same
+  hardened baseline: Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and 10, Rocky Linux
+  9 and 10, and AlmaLinux 9 and 10 (UFW on Ubuntu and Debian, firewalld on the RHEL family). Ubuntu keeps its
+  installer ISO as a choice.
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
 - Done: Secure Boot by default for new VMs, and optional LUKS2 disk encryption unlocked by the VM's
@@ -79,7 +86,8 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - **Touch existing VMs' disks.** Provisioning creates VMs that don't exist; it will never reinstall,
   resize or rebuild an existing one. Rebuilding is a deliberate manual step (delete the VM, then run it).
 - **Support other hypervisors or clouds.** It is built for Proxmox VE. The baseline works on any Ubuntu
-  server, but installing elsewhere (VMware, Hyper-V, cloud images) is out of scope.
+  server, but installing elsewhere (VMware, Hyper-V, public clouds) is out of scope. (Cloud images are
+  used, as disk images on Proxmox VE.)
 - **Support non-LTS or end-of-life Ubuntu releases**, or other distributions.
 - **Manage applications.** It produces a hardened, up-to-date base server. Web servers, databases,
   containers and their configuration belong in your own playbooks on top.

@@ -11,18 +11,32 @@
 
 - name: Find the folder of ISO storage {{ installer_iso_storage }}
   ansible.builtin.include_role:
-    name: ubuntu_release
+    name: os_catalog
     tasks_from: iso_dir
   vars:
     pve_iso_storage: "{{ installer_iso_storage }}"
 
-- name: Download the Ubuntu Server ISO (checksum from the signed SHA256SUMS)
-  ansible.builtin.get_url:
-    url: "{{ ubuntu_iso_base_url }}/{{ ubuntu_iso_name }}"
-    dest: "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
-    checksum: "sha256:{{ installer_iso_sha256 }}"
-    mode: "0644"
-    timeout: 120
+# A copy that's already there is kept only if it has the checksum; a new download replaces it only if it has.
+- name: Download the Ubuntu Server ISO
+  block:
+    - name: Download the ISO, checked against the OS catalog's checksum or the signed SHA256SUMS
+      ansible.builtin.get_url:
+        url: "{{ ubuntu_iso_base_url }}/{{ ubuntu_iso_name }}"
+        dest: "{{ pve_iso_dir }}/{{ ubuntu_iso_name }}"
+        checksum: "{{ installer_iso_checksum }}"
+        mode: "0644"
+        timeout: 120
+  rescue:
+    - name: Fail with what went wrong and what to do
+      ansible.builtin.fail:
+        msg: >-
+          Couldn't download {{ ubuntu_iso_base_url }}/{{ ubuntu_iso_name }} with the checksum
+          {{ 'the OS catalog pins' if installer_iso_pinned else 'from the signed SHA256SUMS' }}
+          ({{ installer_iso_checksum }}): {{ ansible_failed_result.msg | default('') }}.
+          {{ 'If the file is gone, Ubuntu has moved it to old-releases.ubuntu.com: set ubuntu_iso_base_url to
+          https://old-releases.ubuntu.com/releases/' ~ ubuntu_release ~ ', or update ubuntu-server-auto-setup, whose
+          newer OS catalog pins a newer point release. A file with a different checksum is not the ISO that was
+          signed: use another mirror.' if installer_iso_pinned else '' }}
 
 - name: Check for an existing autoinstall ISO
   ansible.builtin.stat:

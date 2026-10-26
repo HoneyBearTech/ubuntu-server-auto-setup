@@ -33,7 +33,7 @@ KEY_COMMENT = "ubuntu-server-auto-setup-webui"
 SCAN_TYPES = "ed25519,ecdsa,rsa"
 TIMEOUT = 15
 PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
-# A Linux user name, as roles/ubuntu_release/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
+# A Linux user name, as roles/os_catalog/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
 NODE_USER = r"^[a-z_][a-z0-9_-]{0,31}\Z"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
 # The known_hosts name of a VM's pinned host keys: usas-<cluster>-<vmid> (plugins/module_utils/usas_vms.py).

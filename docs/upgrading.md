@@ -52,10 +52,14 @@ until you change them.
 
 ## A new Ubuntu point release
 
-When Ubuntu publishes a new point release (for example 26.04.2), the old ISO moves to
-`old-releases.ubuntu.com` and `make build-installer` stops with "not listed in SHA256SUMS". Set
-`ubuntu_point_release` to the new release (a project release will update the default too) and run
-`make build-installer` again; it downloads the new ISO and builds a new hands-off copy. Delete the old ISOs
+The OS catalog (`roles/os_catalog/vars/catalog.yml`) pins the point release each project release installs,
+by checksum. When Ubuntu publishes a new point release (for example 26.04.2), a weekly check opens an issue
+and a project release follows with the new pin. Until you update, the pinned ISO keeps working while Ubuntu
+keeps it on `releases.ubuntu.com`; once it moves to `old-releases.ubuntu.com`, `make build-installer` stops
+with "Couldn't download ... with the checksum the OS catalog pins". Update ubuntu-server-auto-setup, or set
+`ubuntu_iso_base_url` to `https://old-releases.ubuntu.com/releases/26.04`, or set `ubuntu_point_release` to the
+new release (checked against Ubuntu's signed `SHA256SUMS` instead, since the catalog doesn't pin it), and run
+`make build-installer` again; it downloads the ISO and builds a new hands-off copy. Delete the old ISOs
 from the node's ISO storage when no VM uses them. VMs installed from an older point release are brought
 up to date by the baseline's upgrade and by unattended upgrades.
 
