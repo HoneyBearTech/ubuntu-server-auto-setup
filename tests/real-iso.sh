@@ -68,13 +68,18 @@ if sed -n '/PLAY RECAP/,$p' "$LOGS/build-installer-second.log" | grep -Eq 'chang
   exit 1
 fi
 # The same ISO as a point release the catalog doesn't pin: checked against Ubuntu's signed SHA256SUMS with the
-# key that ships in the role. It is already there, so nothing changes.
+# key that ships in the role. The ISO is already there, so only the files the check needs are new in the work
+# folder (the runs above, checked against the catalog, never fetched them); nothing is downloaded or built again.
 echo "=== build-installer, checked against Ubuntu's signed SHA256SUMS instead of the catalog"
 play build-installer-signed playbooks/build-installer.yml -e ubuntu_iso_base_url=https://releases.ubuntu.com/26.04 \
   -e '{"os_catalog": []}' -e "ubuntu_point_release=$(sed -E 's/^ubuntu-(.*)-live-server-amd64\.iso$/\1/' <<<"$ISO")"
 grep -q 'Pick the checksum for' "$LOGS/build-installer-signed.log"
-if sed -n '/PLAY RECAP/,$p' "$LOGS/build-installer-signed.log" | grep -Eq 'changed=[1-9]'; then
-  echo "ERROR: checking against the signed SHA256SUMS changed something" >&2
+fetched="Copy the keyring with Ubuntu's CD image signing key|Fetch Ubuntu's SHA256SUMS|Fetch SHA256SUMS\.gpg"
+signed_changes="$(awk '/^TASK \[/ { task = $0 } /^changed:/ { print task }' "$LOGS/build-installer-signed.log" \
+  | grep -vE "^TASK \[installer_iso : ($fetched)\]" || true)"
+if [ -n "$signed_changes" ]; then
+  echo "$signed_changes"
+  echo "ERROR: checking against the signed SHA256SUMS changed more than the files it fetches" >&2
   exit 1
 fi
 play verify-installer tests/verify-installer.yml -e "verify_installer_iso=${ISO%.iso}-autoinstall.iso"
