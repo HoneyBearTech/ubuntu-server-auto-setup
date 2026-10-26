@@ -8,6 +8,27 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-25
+
+An opt-in, read-only status API lets a dashboard such as Heimdall show whether a run is going, how the last
+one ended and how many of the cluster's VMs run, with a token of its own and no names, addresses or secrets.
+Disk encryption for new VMs can now be set on the web UI's Defaults page. The rest are fixes for what the
+v0.5.0 checks on real Proxmox VE turned up: runs carry on when a connection to the Proxmox API drops, wait
+longer for SSH and sudo after a reboot, and an encrypted VM's console prompt takes three passphrases. An
+all-digit admin password set in the web UI no longer stops every run.
+
+### Upgrading
+
+- No step is needed. The status API stays off until a token is made on the Account page; it needs no new
+  Proxmox privilege, opens no port, and a dashboard reaches it only through the HTTPS name the UI already
+  serves ([docs/web-ui.md](docs/web-ui.md#dashboards-heimdall)).
+- If your admin password (or another Vault value) is all digits, nothing to do: the web UI writes its
+  Vault again when 0.6.0 starts, and logs "Rewrote the Vault". With your own Vault and the CLI, quote such a
+  value (`vault_admin_password: '123456'`).
+- Optional, for VMs installed with 0.5.0 and disk encryption: their crypttab line keeps the old default,
+  so one wrong passphrase at the console still leaves the boot waiting until a reset. The two commands in
+  [docs/security.md](docs/security.md#secure-boot-and-disk-encryption) ("Recovery") give them three tries.
+
 ### Added
 
 - **Disk encryption on the web UI's Defaults page** (`vm_disk_encryption`, off by default, which until now
@@ -583,7 +604,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0
 [0.5.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.5.0
 [0.4.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.4.0
 [0.3.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.3.0
