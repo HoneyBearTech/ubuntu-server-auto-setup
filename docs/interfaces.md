@@ -28,6 +28,7 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
 ### Inventory variables
 
@@ -270,8 +271,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 `linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
-- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (a read-only list of the
-  cluster's VMs), run, history, account. Each form
+- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (the cluster's VMs, and check
+  runs of the baseline against the ones selected), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
@@ -280,7 +281,11 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 - **Look**: a dark theme by default, light or the system's choice from the theme switch (kept in the
   `usas_theme` cookie).
 - **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
-  a limit, the same as the [commands](#commands). Exit status and logs are kept in the run history.
+  a limit, the same as the [commands](#commands). From the VMs page: `baseline` in check mode (`--check
+  --diff`) on up to 25 selected VMs, with `--tags` from a fixed list (`ssh_keys`, `common`, `firewall`,
+  `ssh`, `fail2ban`, `hardening`) and a second inventory the UI writes (`runs/<id>.inventory.yml`). Exit
+  status, logs and each host's result (`runs/<id>.hosts.json`, from `callback_plugins/usas_summary.py`) are
+  kept in the run history. One run at a time, also across processes (a lock on `runs/.lock`).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
@@ -342,6 +347,7 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature. `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails; any answer from the server, an error included, is final | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
+| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline in check mode: nothing changes. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
 | Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |

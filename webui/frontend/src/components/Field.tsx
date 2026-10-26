@@ -10,7 +10,7 @@ export function fieldId(name: string): string {
   return `f-${name}`;
 }
 
-function FieldError({ id, error }: { id: string; error?: string }) {
+export function FieldError({ id, error }: { id: string; error?: string }) {
   if (!error) return null;
   return (
     <p className="error" id={`${id}-error`}>
