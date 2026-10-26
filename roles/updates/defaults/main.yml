@@ -70,5 +70,18 @@ updates_allow_shared_become_password: false
 # Share of servers whose update may fail before no further server is started (0: stop at the first failure).
 updates_max_fail_percentage: 0
 
+# Notifications, sent once per run from the control node (set them for all servers, in group_vars/all):
+# on-change (an apply updated or rebooted a server, a check found updates waiting, or a server failed or
+# couldn't be reached), always, or only-on-error.
+updates_notify: on-change
+# Mail the summary here, through the same relay as the servers' mail (mail_relay_host, mail_relay_port,
+# mail_relay_tls, mail_relay_from, mail_relay_user, mail_relay_password); the relay's certificate is checked.
+updates_notify_mail: "{{ unattended_upgrades_mail | default('') }}"
+# POST the summary to this http(s) URL (it usually holds a token: keep it in the Vault; it can be the same as
+# fail2ban_webhook_url). text (for ntfy) or json (title, text, message and content, for Slack, Mattermost,
+# Gotify and Discord), as for Fail2Ban.
+updates_webhook_url: ""
+updates_webhook_format: text
+
 # Where the run's report goes on the control node: <run id>.json and <run id>.txt, readable by its owner only.
 updates_report_dir: "{{ playbook_dir | dirname }}/reports/updates"

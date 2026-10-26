@@ -2,10 +2,10 @@
 line-length = 120
 target-version = "py311"
 extend-exclude = [".venv", "collections", ".ansible"]
-# The web UI, its smoke test, the roles' filter plugins, the shared code in plugins/ and tools/; the older test
-# helpers follow their own style for now.
-include = ["webui/**/*.py", "tests/webui_smoke.py", "roles/*/filter_plugins/*.py", "plugins/**/*.py", "tools/*.py",
-           "tests/tools/*.py"]
+# The web UI, its smoke test, the roles' filter plugins and modules, the shared code in plugins/ and tools/; the
+# older test helpers follow their own style for now.
+include = ["webui/**/*.py", "tests/webui_smoke.py", "roles/*/filter_plugins/*.py", "roles/*/library/*.py",
+           "plugins/**/*.py", "tools/*.py", "tests/tools/*.py", "tests/notify_sink.py"]
 
 [lint]
 # pycodestyle, pyflakes, bugbear, bandit (security), pyupgrade, simplify, import order.

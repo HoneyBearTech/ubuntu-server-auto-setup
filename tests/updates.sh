@@ -260,6 +260,53 @@ play --limit upd-other -e updates_apt_upgrade=dist
 expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.1 usas-test-kernel=1.1 usas-test-pcr7=1.1 usas-test-held=1.0
 report "h['upd-other']['status'] == 'updated' and h['upd-other']['removals'] == []"
 
+step "Notifications: a summary by mail (STARTTLS, certificate checked) and to a webhook, when something changed"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 -addext "subjectAltName=IP:127.0.0.1" \
+  -keyout "$TEST_TMP/relay.key" -out "$TEST_TMP/relay.crt" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 -addext "subjectAltName=IP:127.0.0.1" \
+  -keyout "$TEST_TMP/other.key" -out "$TEST_TMP/other.crt" >/dev/null 2>&1
+python3 tests/notify_sink.py --cert "$TEST_TMP/relay.crt" --key "$TEST_TMP/relay.key" --smtp-port 2345 \
+  --cert2 "$TEST_TMP/other.crt" --key2 "$TEST_TMP/other.key" --smtp-port2 2346 --http-port 2347 \
+  --out "$TEST_TMP/notified.jsonl" >"$TEST_TMP/sink.log" 2>&1 &
+sink_pid=$!
+# The relay's certificate is trusted the way an operator's CA would be; the one on port 2346 isn't.
+export SSL_CERT_FILE="$TEST_TMP/relay.crt"
+NOTIFY=(-e updates_notify_mail=ops@example.com -e mail_relay_host=127.0.0.1 -e mail_relay_port=2345
+  -e mail_relay_from=usas@example.com -e mail_relay_user=usas -e mail_relay_password=relay-secret
+  -e updates_webhook_url=http://127.0.0.1:2347/hook/tok-secret -e updates_webhook_format=json)
+notified() {
+  python3 - "$TEST_TMP/notified.jsonl" "$@" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+n = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+mails, hooks = [m for m in n if m["kind"] == "mail"], [m for m in n if m["kind"] == "webhook"]
+for check in sys.argv[2:]:
+    if not eval(check, {"mails": mails, "hooks": hooks, "json": json}):  # noqa: S307 (the test's own expressions)
+        sys.exit(f"ERROR: not true: {check}\n{json.dumps(n, indent=1)}")
+print(f"notifications: {len(sys.argv) - 2} checks passed")
+PY
+}
+fresh "$UPD1" 2341 sysadmin
+play --limit upd-usas "${NOTIFY[@]}"
+notified "len(mails) == 1 and len(hooks) == 1" \
+  "mails[0]['tls'] and mails[0]['user'] == 'usas' and mails[0]['password_ok'] and mails[0]['to'] == ['ops@example.com']" \
+  "'Subject: USAS updates apply: 1 updated' in mails[0]['data'] and 'upd-usas: updated' in mails[0]['data']" \
+  "json.loads(hooks[0]['body'])['title'].startswith('USAS updates apply: 1 updated') and hooks[0]['path'] == '/hook/tok-secret'"
+play --idempotent --limit upd-usas "${NOTIFY[@]}"
+notified "len(mails) == 1 and len(hooks) == 1"
+play_fails "Couldn't send the mail: Couldn't send the mail through 127.0.0.1:2346" --limit upd-usas "${NOTIFY[@]}" \
+  -e mail_relay_port=2346 -e updates_notify=always
+notified "len(mails) == 1 and len(hooks) == 2"
+play_fails 'updates_webhook_url must be an http(s) URL' --limit upd-usas "${NOTIFY[@]}" \
+  -e '{"updates_webhook_url": "https://ntfy.example.com/x\nHost: evil"}'
+play_fails 'updates_notify must be always' --limit upd-usas "${NOTIFY[@]}" -e updates_notify=sometimes
+unset SSL_CERT_FILE
+kill "$sink_pid"
+if grep -lE 'relay-secret|tok-secret' "$TEST_TMP"/play.*; then
+  echo "ERROR: the relay password or the webhook's token is in the output above" >&2
+  exit 1
+fi
+
 step "Task coverage of the updates role"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles updates
 

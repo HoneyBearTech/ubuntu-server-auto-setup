@@ -1,8 +1,8 @@
 ---
 # On the control node (delegated, once), after every server: one result per server, written as JSON and as text to
 # updates_report_dir (only the control node's user can read them), and shown. The run fails if a server failed
-# or couldn't be reached; busy, skipped and unsupported servers don't count. The report is written in check runs
-# too: it is the control node's file, not a change to a server.
+# or couldn't be reached, or a notification couldn't be sent; busy, skipped and unsupported servers don't
+# count. The report is written in check runs too: it is the control node's file, not a change to a server.
 - name: Collect the results
   ansible.builtin.set_fact:
     usas_updates_results: "{{ results }}"
@@ -49,9 +49,17 @@
   ansible.builtin.debug:
     msg: "{{ usas_updates_summary.lines + ['Report: ' ~ updates_report_dir ~ '/' ~ usas_updates_run.id ~ '.json'] }}"
 
+- name: Send the notifications
+  ansible.builtin.include_tasks: notify.yml
+
 - name: Fail the run if a server failed
   ansible.builtin.fail:
     msg: >-
       {{ usas_updates_summary.failed }} of {{ usas_updates_summary.total }} servers failed or couldn't be reached;
       see the results above.
   when: usas_updates_summary.failed > 0
+
+- name: Fail the run if a notification couldn't be sent
+  ansible.builtin.fail:
+    msg: "Couldn't send {{ updates_notify_problems | join('; ') }}"
+  when: updates_notify_problems | length > 0
