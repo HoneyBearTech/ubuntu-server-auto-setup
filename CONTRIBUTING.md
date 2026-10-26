@@ -68,7 +68,8 @@ together is in [docs/architecture.md](docs/architecture.md).
 | Web UI tests | the server: sign-in, guards, the API behind every page and form and its validation against the roles' patterns, the inventory and Vault it writes, runs, the page shell; the app: every page against a stand-in API, axe-core and structural accessibility checks, the contrast of every colour pair; at least 80% statement coverage each; and the app in Chromium by keyboard only, with axe-core in every theme | `make webui-test`, `make webui-browser` | every pull request and push to `main` (required) |
 | Image smoke test | the container image, driven like a browser against the mock Proxmox API, with a real playbook run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and before a release image is pushed |
 | Fuzzing | the templates and expressions that turn inventory values into files and commands, with arbitrary inputs (Atheris) | `make fuzz` (Linux x86-64) | every pull request and push to `main`, longer weekly |
-| Real installer ISO | Ubuntu's real signature on `SHA256SUMS` with the shipped key, and the remastering against the real Ubuntu 26.04 ISO, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles |
+| Real installer ISO | The real Ubuntu 26.04 ISO the OS catalog pins, checked against the catalog's checksum and Ubuntu's real signature on `SHA256SUMS` with the shipped key, and the remastering, including identical BIOS and UEFI boot records | `tests/real-iso.sh` (downloads about 3 GB) | weekly, and on pull requests that change the installer roles or the OS catalog |
+| OS catalog | `tools/update_os_catalog.py` offline (unit tests), and every pinned image against the real vendors (signature, checksum, still downloadable) | `make catalog-test`, `make catalog-check` | unit tests on every pull request; the check on pull requests that change the catalog, and weekly (it opens an issue) |
 | Real run | the playbooks against a disposable VM on a real Proxmox node | `make provision` / `make baseline` with `LIMIT=` | no: by hand, see the test policy, and before every release ([checklist](docs/release-checklist.md)) |
 
 A pull request can only merge when the required checks pass. A failing check's log names the file, line and
@@ -86,8 +87,8 @@ can't be merged.
   and `no_log: true` on every task that handles a password, hash, token or key.
 - **YAML**: [yamllint](https://yamllint.readthedocs.io/) with the rules in `.yamllint` (lines up to 140
   characters, `true`/`false` only, quoted octal modes such as `"0644"`).
-- **Python** (the web UI and its smoke test): [ruff](https://docs.astral.sh/ruff/) with the rules in
-  `ruff.toml` (pycodestyle, pyflakes, bugbear, bandit's security rules, pyupgrade, import order; lines up to
+- **Python** (the web UI, its smoke test and `tools/`, which uses the standard library only):
+  [ruff](https://docs.astral.sh/ruff/) with the rules in `ruff.toml` (pycodestyle, pyflakes, bugbear, bandit's security rules, pyupgrade, import order; lines up to
   120 characters). Subprocesses take argument lists, never `shell=True`; secrets are never logged or sent
   back to the browser.
 - **Dockerfile**: [hadolint](https://github.com/hadolint/hadolint); base images pinned by digest, Python

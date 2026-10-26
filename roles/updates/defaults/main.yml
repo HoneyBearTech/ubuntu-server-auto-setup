@@ -1,0 +1,87 @@
+---
+# Settings of the updates playbook (playbooks/updates.yml), per host or group. It never configures a server: it
+# lists, installs and (when asked) reboots, then checks the server is healthy and reports. docs/updates.md
+# explains each choice; docs/interfaces.md lists them all.
+
+# false skips the host, whatever else is set (the owner of a server can opt out).
+updates_enabled: true
+# all: every update; security: only those from a security suite (Ubuntu's and Debian's -security pockets, ESM).
+updates_scope: all
+# safe: apt-get upgrade --with-new-pkgs (new kernels come in, nothing is removed). dist may remove packages,
+# so it needs updates_scope: all and no updates_exclude_packages.
+updates_apt_upgrade: safe
+# Shell globs of packages to leave alone in this run (never written to the server). An update that needs one of
+# them skips the server, with the reason in the report.
+updates_exclude_packages: []
+# false leaves kernels alone (adds updates_kernel_packages to the excludes).
+updates_kernel: true
+updates_kernel_packages: "{{ updates_os_kernel_packages }}"
+
+# never: report "reboot pending" only. if_required: reboot when the server asks for it, inside
+# updates_reboot_window, then check its health.
+updates_reboot: never
+# When a reboot may happen ({} is any time), the same form as updates_window.
+updates_reboot_window: {}
+# Seconds to wait for the server to come back, and to wait after it is back.
+updates_reboot_timeout: 900
+updates_post_reboot_delay: 0
+# The command whose output changes at every boot ("" is the reboot module's own, the kernel's boot_id).
+updates_boot_time_command: ""
+# Packages whose update changes PCR 7 (the Secure Boot state). On a server whose disk unlocks with the TPM (a VM
+# with vm_disk_encryption, or tpm2-device in /etc/crypttab) the reboot after one is held: the next boot would
+# wait for the passphrase at the console (docs/security.md, "Recovery").
+updates_pcr7_packages: "{{ updates_os_pcr7_packages }}"
+
+# When this server may be updated ({} is any time):
+#   {days: [sun], start: "02:00", duration: "3h", timezone: "Europe/Berlin"}
+# A server outside its window is skipped, and no server starts after its window has closed. Check runs
+# (--check) ignore the window and say whether an apply would run.
+updates_window: {}
+# true updates outside the window (a run by hand).
+updates_ignore_window: false
+
+# host: keep the server's own needrestart setting. list: only list the services to restart. auto: restart them.
+updates_restart_services: host
+
+# Seconds the package lists may be old before they are refreshed.
+updates_refresh_max_age: 3600
+# Seconds to wait for automatic updates or another package manager to finish; then the server is "busy" and
+# skipped (not failed).
+updates_lock_wait: 600
+# Seconds an upgrade may take. It runs in the background on the server, so a restarted sshd or a dropped
+# connection doesn't stop it.
+updates_task_timeout: 3600
+
+# Health checks after an update or a reboot: services that ran before must run after, and these too.
+updates_health_services: []
+# Globs of services whose stopping isn't a problem.
+updates_health_ignore_services: []
+# Called from the control node, with the certificate checked: [{url: https://..., status: 200}].
+updates_health_urls: []
+# Seconds to wait for the server to finish starting before the checks.
+updates_health_timeout: 300
+
+# Distributions and versions not in updates_supported_releases are skipped; true tries them anyway (only within
+# a family the role knows).
+updates_allow_unsupported: false
+# A server this project didn't install (in other_servers) that would get the Vault admin password as its sudo
+# password is refused, since root on it could read the password. true allows it for that host or group.
+updates_allow_shared_become_password: false
+# Share of servers whose update may fail before no further server is started (0: stop at the first failure).
+updates_max_fail_percentage: 0
+
+# Notifications, sent once per run from the control node (set them for all servers, in group_vars/all):
+# on-change (an apply updated or rebooted a server, a check found updates waiting, or a server failed or
+# couldn't be reached), always, or only-on-error.
+updates_notify: on-change
+# Mail the summary here, through the same relay as the servers' mail (mail_relay_host, mail_relay_port,
+# mail_relay_tls, mail_relay_from, mail_relay_user, mail_relay_password); the relay's certificate is checked.
+updates_notify_mail: "{{ unattended_upgrades_mail | default('') }}"
+# POST the summary to this http(s) URL (it usually holds a token: keep it in the Vault; it can be the same as
+# fail2ban_webhook_url). text (for ntfy) or json (title, text, message and content, for Slack, Mattermost,
+# Gotify and Discord), as for Fail2Ban.
+updates_webhook_url: ""
+updates_webhook_format: text
+
+# Where the run's report goes on the control node: <run id>.json and <run id>.txt, readable by its owner only.
+updates_report_dir: "{{ playbook_dir | dirname }}/reports/updates"

@@ -1,0 +1,14 @@
+# A new ID at every start of the container. A container shares the Docker host's kernel, whose boot_id doesn't
+# change when the container "reboots", so the updates tests tell ansible.builtin.reboot to compare this instead
+# (updates_boot_time_command: cat /run/usas-boot-id; /run is a tmpfs, emptied at every start).
+[Unit]
+Description=Write a boot ID for the updates tests
+DefaultDependencies=no
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'cat /proc/sys/kernel/random/uuid > /run/usas-boot-id'
+
+[Install]
+WantedBy=sysinit.target

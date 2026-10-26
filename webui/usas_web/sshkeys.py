@@ -4,6 +4,11 @@ One key pair reaches the Proxmox node (as pve_ssh_user, root unless prepare-node
 the ISO build and the seed files) and the servers (as the admin user; its public key is added to
 admin_extra_ssh_keys). The node's host key is trusted only after the
 user has compared its fingerprint with the one the node shows, and is then checked on every connection.
+
+VMs reached from the VMs page are pinned by cluster and VM ID rather than by address: their known_hosts entries
+are named usas-<cluster>-<vmid> (vm_alias), and every connection to them passes that name as HostKeyAlias. A
+guest that reports another VM's address then gets a host-key mismatch, and the port doesn't matter. The fleet
+updates use the same pins.
 """
 
 import base64
@@ -18,6 +23,7 @@ from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 
+from . import vms
 from .config import Settings
 from .problems import Problem
 from .schema import API_HOST
@@ -27,9 +33,11 @@ KEY_COMMENT = "ubuntu-server-auto-setup-webui"
 SCAN_TYPES = "ed25519,ecdsa,rsa"
 TIMEOUT = 15
 PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
-# A Linux user name, as roles/ubuntu_release/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
+# A Linux user name, as roles/os_catalog/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
 NODE_USER = r"^[a-z_][a-z0-9_-]{0,31}\Z"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
+# The known_hosts name of a VM's pinned host keys: usas-<cluster>-<vmid> (plugins/module_utils/usas_vms.py).
+ALIAS = vms.ALIAS_PATTERN
 
 
 def _why(exc: Exception) -> str:
@@ -89,6 +97,26 @@ def check_host(host: str) -> str:
     return host
 
 
+def check_port(port: int) -> int:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise KeyProblem("The SSH port must be a number from 1 to 65535.")
+    return port
+
+
+def vm_alias(cluster: str, vmid: int) -> str:
+    """The known_hosts name a VM's host keys are pinned under (usas_vms.vm_alias)."""
+    try:
+        return vms.vm_alias(cluster, vmid)
+    except ValueError:
+        raise KeyProblem("That isn't a VM ID.") from None
+
+
+def check_alias(alias: str) -> str:
+    if not ALIAS.match(alias):
+        raise KeyProblem("That isn't a VM's host-key name.")
+    return alias
+
+
 class Keys:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -142,23 +170,33 @@ class Keys:
 
     # --- Host keys -------------------------------------------------------------------------------------
 
-    def scan(self, host: str) -> list[HostKey]:
-        """The host keys the host offers now (not trusted yet)."""
-        host = check_host(host)
+    def scan(self, host: str, port: int = 22, name: str | None = None) -> list[HostKey]:
+        """The host keys the host offers now on port (not trusted yet), named name (a VM's alias) or else the
+        host as known_hosts names it."""
+        host, port = check_host(host), check_port(port)
+        if name is not None:
+            check_alias(name)
+        argv = ["ssh-keyscan", "-T", "5", "-t", SCAN_TYPES]
+        if port != 22:
+            argv += ["-p", str(port)]
         try:
             result = subprocess.run(  # noqa: S603 (an argument list, no shell)
-                ["ssh-keyscan", "-T", "5", "-t", SCAN_TYPES, "--", host],
-                capture_output=True, text=True, timeout=TIMEOUT, check=False,
+                [*argv, "--", host], capture_output=True, text=True, timeout=TIMEOUT, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise KeyProblem(f"Couldn't scan {host}: {_why(exc)}.") from None
+        label = name or (host if port == 22 else f"[{host}]:{port}")
         keys = []
         for line in result.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 3 and not line.startswith("#"):
-                keys.append(HostKey(host=host, keytype=parts[1], key=parts[2]))
+                try:
+                    fingerprint(parts[2])
+                except ValueError:
+                    continue
+                keys.append(HostKey(host=label, keytype=parts[1], key=parts[2]))
         if not keys:
-            raise KeyProblem(f"{host} offered no SSH host keys (is SSH running on port 22?).")
+            raise KeyProblem(f"{host} offered no SSH host keys (is SSH running on port {port}?).")
         return keys
 
     def trusted(self, host: str) -> list[HostKey]:
@@ -182,26 +220,62 @@ class Keys:
     def forget(self, host: str) -> None:
         self.trust(host, [])
 
+    def pins(self) -> dict[str, list[HostKey]]:
+        """Every VM's pinned host keys, by alias."""
+        path = self.settings.known_hosts
+        found: dict[str, list[HostKey]] = {}
+        for line in path.read_text().splitlines() if path.exists() else []:
+            parts = line.split()
+            if len(parts) >= 3 and ALIAS.match(parts[0]):
+                found.setdefault(parts[0], []).append(HostKey(host=parts[0], keytype=parts[1], key=parts[2]))
+        return found
+
+    def adopt(self, alias: str, host: str, port: int = 22) -> list[HostKey]:
+        """Pins a VM's alias to the keys known_hosts already trusts for its address (recorded when the project
+        installed it); [] if there are none, or the alias has pins already."""
+        check_alias(alias)
+        if self.trusted(alias):
+            return []
+        known = self.trusted(host if port == 22 else f"[{host}]:{port}")
+        keys = [HostKey(host=alias, keytype=k.keytype, key=k.key) for k in known]
+        if keys:
+            self.trust(alias, keys)
+        return keys
+
+    def ssh_options(self, alias: str) -> str:
+        """ansible_ssh_common_args for a pinned VM: its known_hosts entries by alias, checked strictly."""
+        check_alias(alias)
+        return (f"-o UserKnownHostsFile={self.settings.known_hosts} -o StrictHostKeyChecking=yes "
+                f"-o HostKeyAlias={alias}")
+
     # --- Using the key ---------------------------------------------------------------------------------
 
-    def _ssh(self, host: str, user: str, *command: str) -> subprocess.CompletedProcess:
-        host, user = check_host(host), check_user(user)
+    def _ssh(self, host: str, user: str, *command: str, port: int = 22,
+             alias: str | None = None) -> subprocess.CompletedProcess:
+        host, user, port = check_host(host), check_user(user), check_port(port)
         if not self.settings.ssh_key.exists():
             raise KeyProblem("Create or upload the SSH key first.")
-        if not self.trusted(host):
+        if alias is not None:
+            check_alias(alias)
+        if not self.trusted(alias or (host if port == 22 else f"[{host}]:{port}")):
             raise KeyProblem(f"Trust {host}'s host key first.")
         argv = [
             "ssh", "-i", str(self.settings.ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
             "-o", f"UserKnownHostsFile={self.settings.known_hosts}", "-o", "StrictHostKeyChecking=yes",
-            "-o", "ConnectTimeout=10", "-l", user, "--", host, *command,
+            "-o", "ConnectTimeout=10", "-o", "ControlPath=none",
         ]
+        if alias is not None:
+            argv += ["-o", f"HostKeyAlias={alias}"]
+        if port != 22:
+            argv += ["-p", str(port)]
+        argv += ["-l", user, "--", host, *command]
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, check=False)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise KeyProblem(f"SSH to {host} failed: {_why(exc)}.") from None
 
-    def test_login(self, host: str, user: str) -> str:
-        result = self._ssh(host, user, "true")
+    def test_login(self, host: str, user: str, port: int = 22, alias: str | None = None) -> str:
+        result = self._ssh(host, user, "true", port=port, alias=alias)
         if result.returncode != 0:
             raise KeyProblem(f"SSH to {user}@{host} failed: {result.stderr.strip()[-300:] or result.returncode}")
         return f"Logged in to {user}@{host} with the UI's key."

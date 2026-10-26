@@ -53,6 +53,8 @@ macOS.
   stores, and how it is secured; its [accessibility](docs/accessibility.md).
 - [Architecture](docs/architecture.md): the playbooks and roles, and how a VM goes from nothing to a
   hardened server.
+- [Keeping servers updated](docs/updates.md): report and install package updates on every server,
+  including ones this project didn't install, with opt-in reboots and health checks.
 - [Security requirements](docs/security.md): what this project does and doesn't protect against, and the
   [assurance case](docs/assurance-case.md) behind it.
 - [External interfaces](docs/interfaces.md): the inventory variables, the commands, and every system
@@ -77,8 +79,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 1. **`playbooks/build-installer.yml`** runs on the Proxmox nodes your servers use (inventory group
    `proxmox_nodes`) over SSH as root, or as a user of its own without root's privileges (optional, set up once
    by `playbooks/prepare-node.yml`): once for a storage the cluster shares, on each node for a node-local one.
-   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against
-   Ubuntu's published `SHA256SUMS` after verifying Ubuntu's GPG signature on that file, and uses `xorriso` to build a copy whose GRUB menu adds the
+   It downloads the official `ubuntu-26.04.1-live-server-amd64.iso`, checks it against the checksum the
+   project's OS catalog pins (taken from Ubuntu's `SHA256SUMS` after verifying Ubuntu's GPG signature on that
+   file, when the catalog was built), and uses `xorriso` to build a copy whose GRUB menu adds the
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
    the playbook asks Proxmox for its folder, so shared storage such as NFS works too).
@@ -104,6 +107,14 @@ Three playbooks, run from your own machine (the "control node") or from the cont
      an AppArmor check, and notifications (unattended-upgrades reports and Fail2Ban bans by mail through an
      msmtp relay, or bans to an ntfy, Gotify, Slack or Discord webhook). See
      [docs/security.md](docs/security.md#optional-hardening-and-notifications).
+
+Afterwards, **`playbooks/updates.yml`** keeps the servers updated, the ones this project installed and any
+others you add to the group `other_servers`. Ubuntu 22.04, 24.04 and 26.04 are supported. It never
+configures a server: `make updates-check` reports what each would install (security, held and phased
+packages included) and what its automatic updates already do. `make updates` installs the updates, a batch
+of servers at a time. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
+holds the reboot on an encrypted VM after a Secure Boot update. It then checks each server's health and
+starts no more servers after a failure. Every run writes a JSON report. See [docs/updates.md](docs/updates.md).
 
 ## Getting started
 
@@ -199,7 +210,7 @@ You need:
 | --- | --- |
 | `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`, `requirements-webui.in`) and the Ansible collections (`requirements.yml`). |
 | `make lint` | `yamllint .`, `ansible-lint` and `ruff check`. |
-| `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
+| `make syntax` | Syntax-check every playbook against the example inventory. |
 | `make test` | Run the integration tests against containers and a mock Proxmox API (needs Docker; see [docs/testing.md](docs/testing.md)). |
 | `make app` | Install the web UI app's npm packages and build it (needs Node 24). |
 | `make webui-test` | Run the web UI's unit tests with coverage: the server's (pytest) and the app's (TypeScript check, Vitest). |
@@ -210,6 +221,9 @@ You need:
 | `make provision` | Create and auto-install the VMs that don't exist yet. |
 | `make baseline` | Apply the baseline to the servers. |
 | `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
+| `make updates-check` | Report the package updates each server would get, changing nothing. |
+| `make updates` | Install the package updates, with health checks; reboots only with `updates_reboot: if_required` ([docs/updates.md](docs/updates.md)). |
+| `make test-updates` | Run the updates playbook's integration tests (needs Docker; `OS=ubuntu-24.04` picks the release). |
 
 Two variables apply to every target: `LIMIT=<host or group>` narrows the run (`--limit`), and
 `ARGS="..."` passes anything else to `ansible-playbook`, for example `ARGS="--ask-vault-pass"`,
@@ -223,7 +237,7 @@ Everything is configured through the inventory (`inventory/hosts.yml`, copied fr
 (`inventory/group_vars/all/vault.yml`, copied from [`inventory/vault.example.yml`](inventory/vault.example.yml)).
 The variables you are most likely to set are below. [docs/interfaces.md](docs/interfaces.md) describes them
 in more detail, and every role lists all of its variables, with defaults and comments, in
-`roles/<role>/defaults/main.yml` (`installer_iso`, `ubuntu_release`, `proxmox_vm`, `common`, `firewall`,
+`roles/<role>/defaults/main.yml` (`installer_iso`, `os_catalog`, `proxmox_vm`, `common`, `firewall`,
 `ssh_hardening`, `fail2ban`, `hardening`).
 
 **Secrets (Vault)**
@@ -258,7 +272,8 @@ in more detail, and every role lists all of its variables, with defaults and com
 [docs/installing.md](docs/installing.md#6-optional-a-node-user-other-than-root) for a user without root's
 privileges). The ISO location is set by `pve_iso_storage` (default `local`); its
 folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The Ubuntu release is
-set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (`26.04.1`); `installer_grub_timeout` (3
+set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (empty: the one the OS catalog pins, now
+`26.04.1`); `installer_grub_timeout` (3
 seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 
 **New VMs** (group `ubuntu_servers`, used by `provision-vms.yml`)

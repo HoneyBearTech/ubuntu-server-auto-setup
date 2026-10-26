@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Task coverage for the roles: the share of tasks and handlers that the integration tests ran.
 
-Ansible has no statement coverage tool, so this counts each task and handler in roles/*/tasks and
-roles/*/handlers (blocks are containers, not tasks; meta tasks are skipped) and checks it against the
-"path:line" records written by tests/callback_plugins/task_coverage.py.
+Ansible has no statement coverage tool, so this counts each task and handler in roles/*/tasks (and its
+subfolders, such as the per-family files) and roles/*/handlers (blocks are containers, not tasks; meta tasks are
+skipped) and checks it against the "path:line" records written by tests/callback_plugins/task_coverage.py.
+Each test suite measures the roles it exercises: tests/run.sh every role but updates, tests/updates.sh updates.
 
-Usage: coverage.py RECORDS_FILE [--min PERCENT]   (exits 1 below the minimum)
+Usage: coverage.py RECORDS_FILE [--min PERCENT] [--roles R,...] [--skip-roles R,...]   (exits 1 below the minimum)
 """
 
 import argparse
@@ -36,9 +37,12 @@ def tasks_in(node, path, out):
         out.append((path, item.start_mark.line + 1, name))
 
 
-def all_tasks():
+def all_tasks(roles=None, skip=()):
     out = []
-    for path in sorted(ROOT.glob("roles/*/tasks/*.yml")) + sorted(ROOT.glob("roles/*/handlers/*.yml")):
+    for path in sorted(ROOT.glob("roles/*/tasks/**/*.yml")) + sorted(ROOT.glob("roles/*/handlers/*.yml")):
+        role = path.relative_to(ROOT).parts[1]
+        if (roles and role not in roles) or role in skip:
+            continue
         tasks_in(yaml.compose(path.read_text()), path.relative_to(ROOT).as_posix(), out)
     return out
 
@@ -47,7 +51,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("records")
     parser.add_argument("--min", type=float, default=80.0)
+    parser.add_argument("--roles", default="", help="only these roles (comma-separated)")
+    parser.add_argument("--skip-roles", default="", help="every role but these (comma-separated)")
     args = parser.parse_args()
+    only = {r for r in args.roles.split(",") if r}
+    skip = {r for r in args.skip_roles.split(",") if r}
 
     ran = set()
     for line in pathlib.Path(args.records).read_text().splitlines():
@@ -55,7 +63,7 @@ def main():
         rel = path.split("/roles/", 1)[-1]
         ran.add((f"roles/{rel}", int(lineno)))
 
-    tasks = all_tasks()
+    tasks = all_tasks(only, skip)
     missed = [t for t in tasks if (t[0], t[1]) not in ran]
     covered = len(tasks) - len(missed)
     pct = 100.0 * covered / len(tasks)

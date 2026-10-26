@@ -313,6 +313,49 @@ Run the playbooks once through the web UI of the image under test, and the secon
 checkout of the same commit (`make build-installer`, `make provision LIMIT=test-01`,
 `make baseline LIMIT=test-01`), so both paths are covered. `make site LIMIT=test-01` runs all three.
 
+## updates
+
+If the release touches `playbooks/updates.yml` or `roles/updates`. Use the test VM from above
+(`test-01`, installed by this run, so it is in `ubuntu_servers`) and, for a server this project didn't
+install, a disposable Ubuntu 24.04 VM made by hand with an `ops` user that has passwordless sudo and your
+key, added to `other_servers` (`legacy-01` at `192.0.2.20` below). Compare `legacy-01`'s host key with its
+console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it to `known_hosts`.
+
+- [ ] **Check, changing nothing.** The run ends with `failed=0` and `changed=0`; each server shows
+  `pending` or `nothing`, with its automatic-update line, and the report is written:
+
+  ```bash
+  make updates-check LIMIT=test-01,legacy-01
+  ls -l reports/updates/
+  python3 -m json.tool "$(ls -t reports/updates/*.json | head -1)" | less
+  ```
+
+  Compare the pending list with the server's own view: `ssh sysadmin@192.0.2.10 apt list --upgradable`.
+- [ ] **Apply with reboots.** The servers that need a reboot restart and come back, the health check is
+  `ok`, and a second run reports `changed=0` and `nothing` for both:
+
+  ```bash
+  make updates LIMIT=test-01,legacy-01 ARGS="-e updates_reboot=if_required"
+  make updates LIMIT=test-01,legacy-01 ARGS="-e updates_reboot=if_required"
+  ```
+
+- [ ] **The admin password stays off servers this project didn't install.** This must stop before
+  connecting, naming `legacy-01`:
+
+  ```bash
+  make updates-check LIMIT=legacy-01 ARGS="-e ansible_become_password={{ vault_admin_password }}"
+  ```
+
+- [ ] **Busy servers wait.** On `test-01`, start the daily upgrade (`ssh -t sysadmin@192.0.2.10 sudo
+  systemctl start --no-block apt-daily-upgrade.service`) and at once run
+  `make updates-check LIMIT=test-01 ARGS="-e updates_lock_wait=5"`: if the upgrade is still running, the
+  server shows `busy` and the run doesn't fail. Run it again a few minutes later: `pending` or `nothing`.
+- [ ] **Encrypted VM**, if one from the Secure Boot section is still there and a `shim-signed`, `grub-efi-amd64-signed` or
+  `secureboot-db` update is pending on it (`apt list --upgradable`): `make updates LIMIT=<it>
+  ARGS="-e updates_reboot=if_required"` installs it and holds the reboot, naming the package and the
+  recovery steps; reboot from the console and follow "Recovery" in docs/security.md. If no such update is
+  pending, note "not available" in the record.
+
 ## Web UI
 
 - [ ] First run: the setup code from `docker logs usas-rc` sets the password; signing out and in again
@@ -425,7 +468,7 @@ Real Proxmox run (docs/release-checklist.md), <date>
 - Under test: commit <sha>, image built with USAS_VERSION=<version>
 - Proxmox VE <version>, <n>-node cluster, ISO storage: <type, e.g. NFS shared>
 - ansible-core <version>; collections: community.general <version>, ... (ansible-galaxy collection list)
-- Ubuntu <point release> live server ISO
+- Ubuntu <point release> live server ISO (the one roles/os_catalog/vars/catalog.yml pins)
 - build-installer, provision-vms, baseline: failed=0; second runs changed=0
 - Hand checks: key-only SSH, password and root refused, UFW, Fail2Ban, unattended-upgrades, hostname,
   sudo needs a password, SSH port change (or: not tested, why)

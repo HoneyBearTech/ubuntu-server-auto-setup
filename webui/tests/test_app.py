@@ -1217,3 +1217,153 @@ def test_vms_when_the_cluster_cant_be_listed(ui, monkeypatch):
     monkeypatch.setattr(remote.requests, "get", down)
     r = get(ui, "/api/vms")
     assert r.status_code == 502 and "Couldn't connect to pve.example.lan:8006" in r.json()["error"]
+
+
+# --- VMs: selecting VMs and running the baseline against them in check mode ------------------------------------
+
+ED = "AAAAC3NzaC1lZDI1NTE5AAAAIOMq"
+
+
+def finished(c, run_id):
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        run = c.app_state.runner.get(run_id)
+        if run.done:
+            return run
+        time.sleep(0.05)
+    raise AssertionError("the run didn't finish")
+
+
+def scan_answers(monkeypatch, calls=None):
+    from usas_web import sshkeys
+
+    def run(argv, **kw):
+        if calls is not None:
+            calls.append(argv)
+        if argv[0] == "ssh-keyscan":
+            return sshkeys.subprocess.CompletedProcess(argv, 0, f"{argv[-1]} ssh-ed25519 {ED}\n", "")
+        return sshkeys.subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(sshkeys.subprocess, "run", run)
+
+
+def test_vms_pin_plan_and_check(ui, monkeypatch):
+    configure(ui)
+    fake_pve(monkeypatch)
+    calls = []
+    scan_answers(monkeypatch, calls)
+    rows = {row["vmid"]: row for row in get(ui, "/api/vms").json()["vms"]}
+    assert rows[101]["selectable"] and rows[101]["alias"] == "usas-pve-101" and rows[101]["pinned"] == []
+    data = get(ui, "/api/vms").json()
+    assert data["run"]["default_preset"] == "full" and data["run"]["max_hosts"] == 25
+    assert data["run"]["user"] == "sysadmin"
+
+    # Pin VM 101's key: scan, then trust only with the box ticked.
+    r = post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "10.0.0.51", "port": "2222"})
+    assert r.status_code == 200 and r.json()["scanned"][0]["fingerprint"].startswith("SHA256:")
+    assert calls[-1][-4:] == ["-p", "2222", "--", "10.0.0.51"]
+    assert post(ui, "/vms/hostkey", {"action": "trust", "vmid": "101"}).status_code == 422
+    post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "10.0.0.51", "port": ""})
+    r = post(ui, "/vms/hostkey", {"action": "trust", "vmid": "101", "confirm": "on"})
+    assert r.status_code == 200 and r.json()["pinned"]
+    assert "usas-pve-101" in ui.app_state.keys.pins()
+    ui.app_state.keys.generate()
+    r = post(ui, "/vms/hostkey", {"action": "test", "vmid": "101", "address": "10.0.0.51", "port": "",
+                                  "user": "ubuntu"})
+    assert r.status_code == 200 and "ubuntu@10.0.0.51" in r.json()["message"]
+    r = post(ui, "/vms/hostkey", {"action": "test", "vmid": "101", "address": "10.0.0.51", "user": "Root"})
+    assert r.status_code == 422 and "Linux user name" in r.json()["error"]
+
+    # web-00 (VM 4000) has no pin yet, and no known key: the plan says so per VM.
+    plan = {"vmid": ["101", "4000"], "preset": "full", "vm-101-address": "10.0.0.51", "vm-101-user": "ubuntu"}
+    r = post(ui, "/vms/plan", plan)
+    assert r.status_code == 422 and "Trust VM 4000" in r.json()["errors"]["vm-4000-hostkey"]
+    # A server the project installed was trusted then: its pin starts from that entry.
+    known = ui.app_state.settings.known_hosts
+    known.write_text(known.read_text() + f"10.0.0.10 ssh-ed25519 {ED}\n")
+    r = post(ui, "/vms/plan", plan)
+    assert r.status_code == 200, r.text
+    reviewed = r.json()
+    assert [t["name"] for t in reviewed["plan"]["targets"]] == ["vm-101", "web-00"]
+    assert any("firewall" in w for w in reviewed["plan"]["warnings"])
+
+    r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "apply"})
+    assert r.status_code == 422 and "Only check runs" in r.json()["error"]
+    r = post(ui, "/vms/run", {"plan_id": "nope", "mode": "check"})
+    assert r.status_code == 422 and "expired" in r.json()["error"]
+    r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"})
+    assert r.status_code == 200, r.text
+    run = finished(ui, r.json()["run"]["id"])
+    assert (run.kind, run.check, run.diff, run.plan) == ("vms", True, True, reviewed["plan"]["digest"])
+    assert [t["vmid"] for t in run.targets] == [101, 4000]
+    log = ui.app_state.runner.log_path(run.id).read_text()
+    assert "--check --diff --limit=vm-101,web-00 playbooks/baseline.yml" in log
+    assert f"{run.id}.inventory.yml" in log and "--tags" not in log
+    inventory = ui.app_state.runner.path(run.id, ".inventory.yml").read_text()
+    assert TOKEN_SECRET not in inventory and "admin pass" not in inventory
+    detail = get(ui, f"/api/runs/{run.id}").json()
+    assert detail["hosts"] is None and detail["run"]["kind"] == "vms"
+    ui.app_state.runner.path(run.id, ".hosts.json").write_text(json.dumps(
+        {"finished": True, "hosts": {"vm-101": {"ok": 1, "failed_tasks": [{"task": "t", "message": TOKEN_SECRET}]}}}))
+    hosts = get(ui, f"/api/runs/{run.id}/hosts").json()
+    assert hosts["done"] and hosts["hosts"]["hosts"]["vm-101"]["failed_tasks"][0]["message"] == "********"
+    assert get(ui, "/api/runs/20250101-000000-abcdef/hosts").status_code == 404
+
+    assert post(ui, "/vms/hostkey", {"action": "forget", "vmid": "101"}).status_code == 200
+    assert "usas-pve-101" not in ui.app_state.keys.pins()
+
+
+def test_vms_plan_refuses(ui, monkeypatch):
+    configure(ui)
+    fake_pve(monkeypatch)
+    scan_answers(monkeypatch)
+    for data in ({"action": "scan", "vmid": "12"}, {"action": "rm", "vmid": "101"}):
+        assert post(ui, "/vms/hostkey", data).status_code == 403
+    r = post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "-oProxyCommand=id"})
+    assert r.status_code == 422
+    assert post(ui, "/vms/plan", {"vmid": ["101;id"], "preset": "full"}).status_code == 403
+    r = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "everything"})
+    assert r.status_code == 422 and "preset" in r.json()["errors"]
+    r = post(ui, "/vms/plan", {"vmid": [str(n) for n in range(100, 126)], "preset": "full"})
+    assert r.status_code == 422 and "at most 25" in r.json()["errors"]["selection"]
+    ui.app_state.keys.generate()
+    r = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "keys", "vm-101-address": "10.0.0.51",
+                               "vm-101-user": "ubuntu"})
+    assert r.status_code == 422 and "Trust VM 101" in r.json()["errors"]["vm-101-hostkey"]
+
+
+def test_vms_plan_needs_the_api_and_a_cluster(ui, monkeypatch):
+    r = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "full"})
+    assert r.status_code == 409
+    configure(ui)
+    ui.app_state.keys.generate()
+
+    def down(url, **kw):
+        raise requests.exceptions.ConnectionError()
+    monkeypatch.setattr(remote.requests, "get", down)
+    r = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "full"})
+    assert r.status_code == 502
+
+
+def test_vms_run_refused_while_another_runs(ui, monkeypatch):
+    configure(ui)
+    fake_pve(monkeypatch)
+    scan_answers(monkeypatch)
+    r = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "keys"})
+    assert r.status_code == 422 and "SSH key first" in r.json()["errors"]["selection"]
+    ui.app_state.keys.generate()
+    post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "10.0.0.51"})
+    post(ui, "/vms/hostkey", {"action": "trust", "vmid": "101", "confirm": "on"})
+    reviewed = post(ui, "/vms/plan", {"vmid": ["101"], "preset": "keys", "vm-101-address": "10.0.0.51",
+                                      "vm-101-user": "ubuntu"}).json()
+    ui.app_state.runner.settings.run_env["FAKE_DELAY"] = "5"
+    first = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"}).json()["run"]
+    r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"})
+    assert r.status_code == 422 and "Another run" in r.json()["error"]
+    ui.app_state.runner.stop(first["id"])
+    finished(ui, first["id"])
+    # Plans expire.
+    session_plans = next(iter(ui.app_state.auth._sessions.values())).vm_plans
+    for key, (_, plan) in list(session_plans.items()):
+        session_plans[key] = (0.0, plan)
+    r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"})
+    assert r.status_code == 422 and "expired" in r.json()["error"]

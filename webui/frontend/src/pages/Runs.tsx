@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { formData, post } from "../api";
+import { HostResults } from "../components/HostResults";
 import { Icon } from "../components/Icons";
 import { LogView } from "../components/LogView";
 import { ErrorMessage, Loading, Notice, PageHead, StatusBadge } from "../components/Parts";
@@ -239,7 +240,12 @@ export function RunDetail({ id }: { id: string }) {
         <div><dt>{running ? "Elapsed" : "Duration"}</dt><dd>{duration(run, now)}</dd></div>
         <div><dt>Options</dt><dd>{runOptions(run)}</dd></div>
         {run.playbook ? <div><dt>Playbook</dt><dd>{run.playbook}</dd></div> : null}
+        {run.kind === "vms" ? <div><dt>Started from</dt><dd>The VMs page</dd></div> : null}
       </dl>
+      {run.kind === "vms" || data.hosts ? (
+        <HostResults runId={run.id} initial={data.hosts ?? null} targets={run.targets ?? []} running={running}
+                     check={run.check} />
+      ) : null}
       <LogView key={run.id} initial={data.log}
                stream={!run.done ? `/runs/${encodeURIComponent(run.id)}/stream?offset=${data.offset}` : null}
                onEnd={onEnd} />

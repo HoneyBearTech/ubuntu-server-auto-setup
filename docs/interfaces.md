@@ -16,6 +16,7 @@ API for other programs. What should be reachable from where is described in the
 | Make targets | the operator | [below](#commands); `make help` |
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
+| The updates report (`<run id>.json` in `updates_report_dir`) | the operator, or other automation reading it | [below](#the-updates-report); [updates.md](updates.md#the-report) |
 | The web UI (the USAS app and its JSON API on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
 | The status API (`GET /api/status`, off by default) | dashboards such as Heimdall, with the status token | [below](#the-status-api); [web-ui.md](web-ui.md#dashboards-heimdall) |
 | The container image and its settings (environment variables, the `/data` volume) | the operator, with Docker | [below](#the-web-ui); [web-ui.md](web-ui.md#settings) |
@@ -28,14 +29,17 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
+| `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `ubuntu_servers` and `other_servers` |
+| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
 ### Inventory variables
 
 The variables below are the project's interface: names and meanings change only in a minor release before
 1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
 full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
-`roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
-`roles/ssh_hardening`, `roles/fail2ban` and `roles/hardening`. Where a role's default and the example inventory differ, the
+`roles/os_catalog`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
+`roles/ssh_hardening`, `roles/fail2ban`, `roles/hardening` and `roles/updates`. Where a role's default and the example inventory differ, the
 example shows a typical value.
 
 **Shared by provisioning and the baseline**
@@ -49,13 +53,13 @@ example shows a typical value.
 | `admin_extra_ssh_keys` | `[]` | More public keys, one per list item. |
 | `ssh_port` | `22` | The SSH port the baseline configures, opens in UFW and watches with Fail2Ban. |
 
-**Ubuntu release and ISOs** (`ubuntu_release`, `installer_iso`)
+**Ubuntu release and ISOs** (`os_catalog`, `installer_iso`)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ubuntu_release` | `"26.04"` | The release directory on the mirror. |
-| `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
-| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from. A mirror must publish all three. |
+| `ubuntu_release` | `"26.04"` | The Ubuntu release, and the release directory on the mirror. |
+| `ubuntu_point_release` | `""` | The point release whose ISO is downloaded. Empty means the one the OS catalog pins for `ubuntu_release` (26.04.1 today), checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed `SHA256SUMS` at run time. |
+| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO comes from; any mirror works for the point release the catalog pins, since the catalog's checksum decides. For another point release, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from here too, so the mirror must publish all three. |
 | `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image) on each node that uses it. The installer ISO is built once in a storage the cluster shares (such as NFS), and on every node that uses a node-local one. |
 | `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`, or for a user other than root the answer `prepare-node.yml` recorded), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
 | `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). It must be a folder of `pve_ssh_user`'s, mode `0700`. |
@@ -123,7 +127,7 @@ example shows a typical value.
 | --- | --- | --- |
 | `admin_shell` | `/bin/bash` | The admin account's shell. |
 | `admin_sudo_nopasswd` | `false` | Passwordless sudo for the admin account. False removes the installer's passwordless sudo on the first baseline run; later runs need `ansible_become_password` (the example inventory and the web UI set it to the admin password). On Ubuntu 26.04 the playbooks become root with the classic sudo, `/usr/bin/sudo.ws`, since Ansible can't answer sudo-rs's password prompt; set `ansible_become_exe` to override. |
-| `classic_sudo_needs_password` | `not admin_sudo_nopasswd` | Whether becoming root needs a password on the host. If it does and the host has sudo-rs but not the classic sudo, the playbook stops before changing anything. The baseline leaves it unset. |
+| `classic_sudo_needs_password` | `not admin_sudo_nopasswd` | Whether becoming root needs a password on the host. If it does and the host has sudo-rs but not the classic sudo, the playbook stops before changing anything. The baseline leaves it unset; the updates playbook sets it to whether `ansible_become_password` is set. |
 | `ssh_keys_exclusive` | `true` | Remove authorized keys that aren't on GitHub or in `admin_extra_ssh_keys`. |
 | `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
@@ -192,6 +196,37 @@ example shows a typical value.
 | `fail2ban_webhook_url` | `""` | POST a message for every ban to this http(s) URL, normally from the Vault (`"{{ vault_fail2ban_webhook_url }}"`). |
 | `fail2ban_webhook_format` | `text` | `text` (the message is the body, for ntfy) or `json` (`title`, `text`, `message` and `content`, for Slack, Mattermost, Gotify and Discord). |
 
+**Updates** (`updates`, used by `playbooks/updates.yml` only; [updates.md](updates.md))
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `updates_enabled` | `true` | `false` skips the server in every run. |
+| `updates_scope` | `all` | `all` or `security` (only updates from a `-security` suite or ESM). |
+| `updates_apt_upgrade` | `safe` | `safe` (upgrade and new dependencies, never removes) or `dist` (may remove; refused with `security`, excludes or `updates_kernel: false`). |
+| `updates_exclude_packages` | `[]` | Package-name globs left alone in this run; never written to the server. |
+| `updates_kernel`, `updates_kernel_packages` | `true`, the family's kernel globs | `false` adds the kernel packages to the excludes. |
+| `updates_reboot` | `never` | `never` (report "reboot pending") or `if_required`. |
+| `updates_reboot_window`, `updates_window` | `{}` (any time) | `{days: [sun], start: "02:00", duration: "3h", timezone: "Europe/Berlin"}`: when a reboot, or the update, may happen. |
+| `updates_ignore_window` | `false` | Update and reboot outside the windows. |
+| `updates_reboot_timeout`, `updates_post_reboot_delay` | `900`, `0` | Seconds to wait for a rebooted server, and after it answers. |
+| `updates_boot_time_command` | `""` | The command whose output changes at each boot (default: the kernel's boot ID). |
+| `updates_pcr7_packages` | `shim-signed`, the signed GRUB, `secureboot-db` | Updates that hold the reboot on a VM whose disk unlocks with the TPM. |
+| `updates_restart_services` | `host` | `host` (the server's own needrestart setting), `list` or `auto`. |
+| `updates_refresh_max_age` | `3600` | Seconds the package lists may be old before they are refreshed. |
+| `updates_lock_wait` | `600` | Seconds to wait for a busy package manager before the server is `busy`. |
+| `updates_task_timeout` | `3600` | Seconds an upgrade may take (it runs in the background on the server). |
+| `updates_health_services`, `updates_health_ignore_services` | `[]` | Services that must run after the update, and globs of services whose stopping isn't a problem. |
+| `updates_health_urls` | `[]` | `[{url, status}]`, called from the control node with the certificate checked. |
+| `updates_health_timeout` | `300` | Seconds to wait for the server to finish starting. |
+| `updates_allow_unsupported` | `false` | Try a release outside `updates_supported_releases`, within a known family. |
+| `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
+| `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
+| `updates_serial` | `25%` | The batch size (with `-e` only). |
+| `updates_notify` | `on-change` | When to notify: `on-change`, `always` or `only-on-error`. |
+| `updates_notify_mail` | `unattended_upgrades_mail` | Mail the run's summary here, through `mail_relay_host` (with `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`, `mail_relay_user`, `mail_relay_password`) from the control node, with the relay's certificate checked. |
+| `updates_webhook_url`, `updates_webhook_format` | `""`, `text` | POST the summary to this http(s) URL (normally from the Vault), as `text` or `json`, as for Fail2Ban. |
+| `updates_report_dir` | `reports/updates` in the checkout | Where `<run id>.json` and `<run id>.txt` are written on the control node (`0600`, in a `0700` folder). |
+
 ### Networks
 
 Every VM has a first network card, `net0`, and up to 31 more from `vm_extra_nics`. Each card gets a fixed
@@ -245,6 +280,7 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
 | `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
 | `vault_disk_passphrase` (optional) | `vm_disk_passphrase` | The disk encryption passphrase, also the recovery key at the console. |
+| `vault_become_password_<group>` (optional, any name you choose) | `ansible_become_password` of a group in `other_servers` | That group's own sudo password, for the updates playbook. |
 
 ### Commands
 
@@ -256,13 +292,54 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
 | `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `ubuntu_servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
-| `make deps`, `make lint`, `make syntax` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
+| `make updates-check` | `playbooks/updates.yml --check` | `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
+| `make updates` | `playbooks/updates.yml` | `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
+| `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
+| `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
+| `make deps`, `make lint`, `make syntax`, `make catalog-test` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
 
 `LIMIT=` becomes `--limit` (for `build-installer`, a node builds only if it is in the limit too), `ARGS=` is passed to `ansible-playbook` unchanged,
 and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh`,
 `fail2ban` and `hardening`, so `ARGS="--tags firewall"` runs one of them. Exit codes are `ansible-playbook`'s: 0 on success,
-non-zero on any failed or unreachable host. `--check --diff` is supported by the baseline (provisioning
+non-zero on any failed or unreachable host (for `updates`, busy, skipped and unsupported servers don't count). `--check --diff` is supported by the baseline and by `updates.yml` (where `--check` is the report-only mode) (provisioning
 needs to really create the VM, so it isn't meaningful there).
+
+### The updates report
+
+`updates.yml` writes `<run id>.json` (and a text summary, `<run id>.txt`) to `updates_report_dir` on the
+control node, mode `0600`. The run ID is the start time and four random hex digits (`20261026T020000Z-3fa9`).
+The JSON object has `run` (`id`, `mode`: `check` or `apply`, `started`, `finished`, in UTC), `summary` (a count
+per status) and `hosts`, one object per server with: `host`, `status` (`updated`, `nothing`, `pending`,
+`busy`, `skipped`, `unsupported`, `unreachable` or `failed`), `reason`, `os` (`facts`, `hint`, `warning`),
+`installed_by_usas`, `scope`, `apt_upgrade`, `window`, `pending` (each `name`, `current`, `candidate`,
+`suites`, `security`, `new`), `security_count`, `planned`, `upgraded` (each `name`, `from`, `to`), `held`,
+`excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
+`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `started` and `finished`.
+Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
+new keys may be added in a minor release, and existing ones keep their meaning.
+
+### The OS catalog
+
+`roles/os_catalog/vars/catalog.yml` lists every release the project supports, each image pinned like a lock
+file. `tools/update_os_catalog.py` writes it (don't edit it by hand) and reads it back; the roles load it as the
+variable `os_catalog`. Each entry has:
+
+| Field | Example | Meaning |
+| --- | --- | --- |
+| `id` | `ubuntu-26.04`, `debian-13`, `centos-stream-10`, `rocky-10`, `alma-10` | The release's name in the project. |
+| `family` | `ubuntu`, `debian`, `rhel` | Which baseline tasks apply. |
+| `name`, `version`, `codename` | `Debian`, `"13"`, `trixie` | For people (the codename is empty on the RHEL family). |
+| `eol` | `"2030-06-30"` | When the vendor's support ends: standard support for Ubuntu, LTS for Debian, the end of life for the RHEL family. |
+| `methods` | `autoinstall`, `cloud_image` | How it can be installed; `autoinstall` (the Ubuntu installer ISO) is Ubuntu only. |
+
+Each method has `url` (HTTPS, on the vendor's host), `checksum` (`sha256:<hex>`, or `sha512:<hex>` where the
+vendor publishes only SHA-512, as Debian does for cloud images), `file` (the name it is stored under on the
+Proxmox node; cloud images end in `.qcow2`, as Proxmox's Import content requires), `build` (the point release or
+the vendor's build serial) and `signed` (`true` when the vendor signs the checksum file the checksum came from and
+the script checked that signature; `false` for CentOS Stream and Debian's cloud images, which are HTTPS only).
+The catalog lists all eleven releases, but this release installs only the Ubuntu installer ISOs from it; the
+other images are used once cloud-image installs land (see the [roadmap](roadmap.md)).
 
 ### The web UI
 
@@ -270,8 +347,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 `linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
-- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (a read-only list of the
-  cluster's VMs), run, history, account. Each form
+- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (the cluster's VMs, and check
+  runs of the baseline against the ones selected), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
@@ -280,7 +357,11 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
 - **Look**: a dark theme by default, light or the system's choice from the theme switch (kept in the
   `usas_theme` cookie).
 - **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
-  a limit, the same as the [commands](#commands). Exit status and logs are kept in the run history.
+  a limit, the same as the [commands](#commands). From the VMs page: `baseline` in check mode (`--check
+  --diff`) on up to 25 selected VMs, with `--tags` from a fixed list (`ssh_keys`, `common`, `firewall`,
+  `ssh`, `fail2ban`, `hardening`) and a second inventory the UI writes (`runs/<id>.inventory.yml`). Exit
+  status, logs and each host's result (`runs/<id>.hosts.json`, from `callback_plugins/usas_summary.py`) are
+  kept in the run history. One run at a time, also across processes (a lock on `runs/.lock`).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
@@ -339,9 +420,11 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for a new server with `net_mode: dhcp`, check first that the token may ask its guest agent (`/access/permissions`); for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). A read whose connection drops (pveproxy restarting a worker) is retried up to 3 times, 5 seconds apart; any answer, an error included, is final. A VM creation whose connection drops is retried the same way, and the run carries on only with a VM of that ID that has the host's name and the description "Installed by ubuntu-server-auto-setup". |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
-| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature. `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails; any answer from the server, an error included, is final | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
+| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |
+| Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
+| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline in check mode: nothing changes. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
 | Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |

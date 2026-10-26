@@ -23,15 +23,16 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
    ├──────────────────────────────────────────────────────────────────────────────────┘
    │  HTTPS
    ├──▶ github.com/<github_user>.keys     (public SSH keys)
-   └──▶ releases.ubuntu.com (from the Proxmox node: ISO + SHA256SUMS + SHA256SUMS.gpg)
+   └──▶ releases.ubuntu.com (from the Proxmox node: the ISO, checked against the OS catalog's checksum)
 ```
 
 | Part | What it is | Where |
 | --- | --- | --- |
 | Inventory | Hosts, groups and variables: which Proxmox nodes, which servers, their IPs, VM IDs and sizes, and the baseline settings. | `inventory/hosts.yml` (gitignored; example in `inventory/hosts.example.yml`) |
 | Vault | The admin password and the Proxmox API token, encrypted with Ansible Vault. | `inventory/group_vars/all/vault.yml` (gitignored; example in `inventory/vault.example.yml`) |
-| Playbooks | `build-installer.yml`, `provision-vms.yml`, `baseline.yml`, and `site.yml` that imports all three. | `playbooks/` |
-| `ubuntu_release` | Shared defaults only: the Ubuntu release, ISO names and URLs, and the ISO storage location. | `roles/ubuntu_release/` |
+| Playbooks | `build-installer.yml`, `provision-vms.yml`, `baseline.yml`, and `site.yml` that imports all three; `updates.yml`, for servers that already run; `prepare-node.yml`, once. | `playbooks/` |
+| `os_catalog` | The OS catalog (`vars/catalog.yml`: every supported release's images, pinned by URL and checksum) and shared defaults: the Ubuntu release, ISO names and URLs, and the ISO storage location. | `roles/os_catalog/` |
+| `tools/update_os_catalog.py` | Builds and checks the OS catalog from the vendors' indexes, verifying their signatures with `gpgv` against pinned fingerprints. Run by the maintainer (`make catalog`) and weekly in CI; never during a playbook run. | `tools/` |
 | `installer_iso` | Downloads and verifies the Ubuntu ISO on a Proxmox node and remasters it for hands-off installs. | `roles/installer_iso/` |
 | `proxmox_vm` | Creates one VM per host through the Proxmox API, with a per-host seed ISO, and waits for the install. | `roles/proxmox_vm/` |
 | `common` | Packages and upgrades, hostname, timezone, the admin user, sudo, GitHub keys, unattended upgrades (and their optional mail report), an optional msmtp mail relay, the guest agent. | `roles/common/` |
@@ -39,6 +40,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | `ssh_hardening` | The sshd drop-in, the optional port change and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
 | `fail2ban` | The `sshd` jail, and optional ban notifications by mail or webhook. | `roles/fail2ban/` |
 | `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on. | `roles/hardening/` |
+| `updates` | For `playbooks/updates.yml` only: lists and installs package updates on existing servers, reboots them when asked, checks their health and writes the report; never configures a server. One task file per OS family and step (`tasks/pending/`, `apply/`, `reboot_required/`, `auto_updates/`), with the parsing in a filter plugin. | `roles/updates/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
 | Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
 | Container image | ansible-core, the collections, the playbooks, roles and shared plugin code, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
@@ -69,14 +71,17 @@ the ISO folders (through ACL entries), and read the ISO storage's folder from th
 recorded, because `pvesm` runs for root only.
 
 1. Install `xorriso` and `gpgv` on the node (as root), or check that they are installed (as the node user).
-2. Fetch `SHA256SUMS` and its signature `SHA256SUMS.gpg` from `releases.ubuntu.com` over HTTPS, and check
-   the signature with `gpgv` against the Ubuntu CD image signing key that ships with the role
-   (`files/ubuntu-cdimage-keyring.gpg`); stop unless it is a good signature by the key with the pinned
-   fingerprint (`installer_signing_fingerprint`).
-3. From that verified file, pick the line for `ubuntu-26.04.1-live-server-amd64.iso`; stop if it isn't
-   there (a newer point release has replaced it).
+2. Take the ISO's checksum from the OS catalog (`roles/os_catalog/vars/catalog.yml`), which pins the point
+   release it names, for example `ubuntu-26.04.1-live-server-amd64.iso`. `tools/update_os_catalog.py` took
+   that checksum from Ubuntu's `SHA256SUMS` after checking Ubuntu's signature on it, when the catalog was
+   built; the run doesn't fetch `SHA256SUMS`.
+3. Only for a point release the catalog doesn't pin (`ubuntu_point_release`): fetch `SHA256SUMS` and its
+   signature `SHA256SUMS.gpg` from `releases.ubuntu.com` over HTTPS, check the signature with `gpgv` against
+   the Ubuntu CD image signing key that ships with the role (`files/ubuntu-cdimage-keyring.gpg`), stop unless
+   it is a good signature by the key with the pinned fingerprint (`installer_signing_fingerprint`), and pick
+   the ISO's line from that verified file (stop if it isn't there).
 4. For each ISO storage the node builds for: download the ISO into it, verifying that checksum (`get_url`
-   with `checksum`), and then:
+   with `checksum`; a copy that's already there is kept only if it has it), and then:
 5. If the remastered ISO doesn't exist yet (or `installer_iso_rebuild` is set): extract `boot/grub/grub.cfg`,
    add the `autoinstall` kernel argument to the installer entries and shorten the GRUB timeout, check that
    the argument is really there, and write a new ISO with `xorriso`, replaying the original boot records

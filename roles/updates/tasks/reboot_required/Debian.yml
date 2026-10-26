@@ -1,0 +1,34 @@
+---
+# Ubuntu: update-notifier's /var/run/reboot-required, with the packages that asked in reboot-required.pkgs.
+# needrestart (when installed) adds the services still running old code.
+- name: Check for /var/run/reboot-required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: updates_reboot_file
+
+- name: Read which packages want the reboot
+  ansible.builtin.slurp:
+    src: /var/run/reboot-required.pkgs
+  register: updates_reboot_pkgs
+  failed_when: false
+  when: updates_reboot_file.stat.exists
+
+- name: Ask needrestart which services run old code
+  ansible.builtin.command:
+    argv: [needrestart, -b]
+  register: updates_needrestart
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: updates_needrestart_bin.stat.exists | default(false)
+
+- name: Note whether a reboot is needed
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot | combine(reboot),
+      'restart_services': needrestart.services}) }}
+  vars:
+    needrestart: "{{ updates_needrestart.stdout | default('') | usas_needrestart }}"
+    reboot:
+      required: "{{ updates_reboot_file.stat.exists or needrestart.kernel_status in [2, 3] }}"
+      packages: "{{ updates_reboot_pkgs.content | default('') | b64decode | usas_package_names(100) }}"

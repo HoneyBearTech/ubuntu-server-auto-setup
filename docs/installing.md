@@ -214,7 +214,7 @@ and can write to the ISO storage's folder and its own work directory only:
 
 | Step on the node | What the user needs | How it gets it |
 | --- | --- | --- |
-| Download `SHA256SUMS` and the ISO, check the signature (`gpgv`) | a work directory | `/var/tmp/ubuntu-server-auto-setup`, its own, mode `0700` |
+| Download the ISO (and, for a point release the OS catalog doesn't pin, `SHA256SUMS`, whose signature `gpgv` checks) | a work directory | `/var/tmp/ubuntu-server-auto-setup`, its own, mode `0700` |
 | Remaster the ISO (`xorriso`), build the seed ISOs | the same work directory | as above |
 | Put the ISOs in the ISO storage, delete the seed afterwards | write access to that folder only | an ACL entry (`user:usas-build:rwx`) on `<storage>/template/iso`; Proxmox keeps owning the folder |
 | Find the ISO storage's folder | `pvesm` runs for root only (it reads `/etc/pve`) | `prepare-node.yml` asks it once, as root, and writes the answer to `/etc/ubuntu-server-auto-setup/iso-dirs.json` (root's, readable by all) |
@@ -295,12 +295,19 @@ To go back to root, set `pve_ssh_user: root` again. To remove the user: `userdel
 
 ## Troubleshooting
 
-- **"... is not listed in SHA256SUMS"**: Ubuntu has published a newer point release and moved the old one.
-  Set `ubuntu_point_release` to the new one (and rerun `make build-installer`), or point
-  `ubuntu_iso_base_url` at `https://old-releases.ubuntu.com/releases/26.04`.
+- **"Couldn't download .../ubuntu-26.04.1-live-server-amd64.iso with the checksum the OS catalog pins"**:
+  either the file is gone (HTTP 404: Ubuntu has published a newer point release and moved the old one to
+  `old-releases.ubuntu.com`), or what was downloaded isn't the ISO Ubuntu signed. For a missing file, update
+  ubuntu-server-auto-setup (a newer release's catalog pins the newer point release), or point
+  `ubuntu_iso_base_url` at `https://old-releases.ubuntu.com/releases/26.04`. For a different checksum, use
+  another mirror; don't work around the check. A copy already in the ISO storage is kept only if it has the
+  pinned checksum.
+- **"... is not listed in SHA256SUMS"** (with `ubuntu_point_release` set to a point release the catalog doesn't
+  pin): Ubuntu has moved that point release. Set `ubuntu_point_release` to the current one, or clear it to use
+  the catalog's, and rerun `make build-installer`.
 - **"The signature on .../SHA256SUMS is bad or isn't by the key ..."** or **"Couldn't fetch
-  .../SHA256SUMS.gpg"**: the checksum file couldn't be authenticated, so nothing was downloaded. Check
-  `ubuntu_iso_base_url`: a mirror must publish `SHA256SUMS.gpg` next to `SHA256SUMS`. If it's
+  .../SHA256SUMS.gpg"** (same case): the checksum file couldn't be authenticated, so nothing was downloaded.
+  Check `ubuntu_iso_base_url`: a mirror must publish `SHA256SUMS.gpg` next to `SHA256SUMS`. If it's
   `releases.ubuntu.com` itself, a tampered file or a proxy rewriting it is possible; don't work around the
   check. If Ubuntu has moved to a new signing key, update to a release that ships it.
 - **The installer waits for input or never powers off**: the remastered ISO didn't get the `autoinstall`

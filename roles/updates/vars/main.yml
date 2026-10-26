@@ -1,0 +1,28 @@
+---
+# Values the updates playbook accepts, and limits on what servers report. tests/fuzz/ reads them from here, and
+# roles/updates/filter_plugins/usas_updates.py uses the same patterns.
+updates_scope_values: [all, security]
+updates_apt_upgrade_values: [safe, dist]
+updates_reboot_values: [never, if_required]
+updates_restart_values: [host, list, auto]
+# Debian package names (and :arch), as servers report them.
+updates_package_pattern: '^[a-z0-9][a-z0-9+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z'
+# Shell globs of package names: letters, digits, + . - and the wildcards * and ?.
+updates_package_glob_pattern: '^[a-z0-9*?][a-z0-9+.*?-]{0,127}\Z'
+# systemd unit names, as in updates_health_services.
+updates_service_pattern: '^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,254}\Z'
+# Health URLs: the same form as the notification webhook (fail2ban_webhook_url_pattern).
+updates_url_pattern: '^https?://[A-Za-z0-9][A-Za-z0-9.-]{0,252}(:[0-9]{1,5})?(/[A-Za-z0-9._~/+=-]*)?(\?[A-Za-z0-9._~/+=&-]*)?\Z'
+# Seconds, for the waits and timeouts.
+updates_seconds_pattern: '^[0-9]{1,6}\Z'
+# At most this many packages are kept per host in a report.
+updates_max_entries: 5000
+
+# Releases the playbook updates, with the end of their standard support (later: the OS catalog). A release past
+# its end still gets updates, with a warning in the report.
+updates_supported_releases:
+  - {distribution: Ubuntu, version: "22.04", eol: "2027-04-30"}
+  - {distribution: Ubuntu, version: "24.04", eol: "2029-04-30"}
+  - {distribution: Ubuntu, version: "26.04", eol: "2031-04-30"}
+# The families the role has task files for (tasks/*/<os_family>.yml).
+updates_families: [Debian]

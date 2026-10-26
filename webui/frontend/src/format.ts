@@ -33,7 +33,8 @@ export function duration(run: Run, now: number = Date.now() / 1000): string {
 }
 
 export function runOptions(run: Run): string {
-  const parts = [run.check && "check", run.diff && "diff", run.limit && `limit ${run.limit}`].filter(Boolean);
+  const parts = [run.check && "check", run.diff && "diff", run.tags?.length && `tags ${run.tags.join(",")}`,
+    run.limit && `limit ${run.limit}`].filter(Boolean);
   return parts.length ? parts.join(" ") : "none";
 }
 

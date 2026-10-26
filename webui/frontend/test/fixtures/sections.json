@@ -164,11 +164,11 @@
     "name": "ubuntu_point_release",
     "label": "Ubuntu point release",
     "kind": "text",
-    "help": "The installer ISO's version, such as 26.04.1. Change it when Ubuntu replaces the point release.",
+    "help": "The installer ISO's version, such as 26.04.1. Empty means the point release the OS catalog pins, checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed SHA256SUMS when it's downloaded.",
     "required": false,
     "advanced": true,
     "variable": "ubuntu_point_release",
-    "default": "26.04.1",
+    "default": null,
     "choices": null
    }
   ],
@@ -187,7 +187,7 @@
    "pve_iso_storage": "local",
    "pve_api_timeout": "60",
    "pve_ssh_user": "root",
-   "ubuntu_point_release": "26.04.1"
+   "ubuntu_point_release": ""
   },
   "cluster": {
    "name": "olympus",

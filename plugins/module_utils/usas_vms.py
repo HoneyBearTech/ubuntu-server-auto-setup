@@ -242,3 +242,44 @@ def classify(vm: Vm, config: VmConfig | None, os: OsInfo | None) -> tuple[str, s
     if os.version_id in SUPPORTED_UBUNTU:
         return SUPPORTED, f"{name} (reported by the guest)."
     return NEEDS_OVERRIDE, f"{name} (reported by the guest): only {' and '.join(SUPPORTED_UBUNTU)} are tested."
+
+
+# --- What a run calls a VM, and the name its host keys are pinned under -----------------------------------------
+# A run reaches a VM either as the static inventory's host with the same pve_vmid (its own name, address and
+# credentials) or as vm-<vmid>: never by its Proxmox name, which whoever may edit the VM chooses and which could
+# match a host_vars file. Its SSH host keys are pinned in known_hosts as usas-<cluster>-<vmid>, passed to ssh as
+# HostKeyAlias, so a guest that reports another VM's address gets a host-key mismatch. The web UI's VMs page and
+# the fleet updates' inventory plugin use these, so both name and pin a VM the same way.
+
+FOREIGN_NAME = "vm-{vmid}"
+CLUSTER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
+ALIAS_PATTERN = re.compile(r"^usas-[a-z0-9][a-z0-9-]{0,31}-[0-9]{3,9}\Z")
+DEFAULT_CLUSTER = "pve"  # when the cluster's name isn't known (a single node, or a token without Sys.Audit)
+
+
+def vm_alias(cluster: str, vmid: int) -> str:
+    """The known_hosts name of a VM's pinned host keys: usas-<cluster>-<vmid>. cluster is the cluster's name
+    (lowercased; "pve" when it is empty or not a plain name). Raises ValueError for a VM ID Proxmox wouldn't
+    give."""
+    name = str(cluster).strip().lower()
+    if not CLUSTER_PATTERN.match(name):
+        name = DEFAULT_CLUSTER
+    alias = f"usas-{name}-{int(vmid)}"
+    if not ALIAS_PATTERN.match(alias):
+        raise ValueError(f"{vmid} isn't a VM ID")
+    return alias
+
+
+def host_name(vmid: int, servers: list[dict[str, Any]]) -> tuple[str, dict[str, Any] | None]:
+    """The inventory name a run reaches a VM as, and the static host it is (by pve_vmid), if any."""
+    for server in servers:
+        if str(server.get("pve_vmid") or "") == str(int(vmid)):
+            return str(server["name"]), server
+    return FOREIGN_NAME.format(vmid=int(vmid)), None
+
+
+def control_path(vmid: int) -> str:
+    """ansible_control_path for a VM: its own SSH master connection. Without it, a master opened for another VM at
+    the same address, port and user would be reused, and this VM's host key never checked. %C already hashes the
+    address, port and user; the VM ID keeps the socket path short."""
+    return f"%(directory)s/v{int(vmid)}-%%C"

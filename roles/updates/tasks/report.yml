@@ -1,0 +1,65 @@
+---
+# On the control node (delegated, once), after every server: one result per server, written as JSON and as text to
+# updates_report_dir (only the control node's user can read them), and shown. The run fails if a server failed
+# or couldn't be reached, or a notification couldn't be sent; busy, skipped and unsupported servers don't
+# count. The report is written in check runs too: it is the control node's file, not a change to a server.
+- name: Collect the results
+  ansible.builtin.set_fact:
+    usas_updates_results: "{{ results }}"
+    usas_updates_summary: "{{ results | usas_updates_summary }}"
+  vars:
+    # A server left in "pending" or "applying" stopped with an error the play reported above.
+    results: >-
+      {{ groups['usas_updates_targets'] | default([]) | map('extract', hostvars, 'usas_updates_result') | list
+      | usas_finish_results(usas_updates_run.mode) }}
+
+- name: Make the report folder
+  ansible.builtin.file:
+    path: "{{ updates_report_dir }}"
+    state: directory
+    mode: "0700"
+  changed_when: false
+  check_mode: false
+
+- name: Write the report as JSON
+  ansible.builtin.copy:
+    content: >-
+      {{ {'run': run | combine({'finished': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}), 'summary': usas_updates_summary.counts,
+      'hosts': usas_updates_results} | to_nice_json }}
+    dest: "{{ updates_report_dir }}/{{ run.id }}.json"
+    mode: "0600"
+  changed_when: false
+  check_mode: false
+  vars:
+    run: "{{ usas_updates_run }}"
+
+- name: Write the report as text
+  ansible.builtin.copy:
+    content: |
+      Updates run {{ usas_updates_run.id }} ({{ usas_updates_run.mode }}), started {{ usas_updates_run.started }}
+      {% for line in usas_updates_summary.lines %}
+      {{ line }}
+      {% endfor %}
+    dest: "{{ updates_report_dir }}/{{ usas_updates_run.id }}.txt"
+    mode: "0600"
+  changed_when: false
+  check_mode: false
+
+- name: Show the results
+  ansible.builtin.debug:
+    msg: "{{ usas_updates_summary.lines + ['Report: ' ~ updates_report_dir ~ '/' ~ usas_updates_run.id ~ '.json'] }}"
+
+- name: Send the notifications
+  ansible.builtin.include_tasks: notify.yml
+
+- name: Fail the run if a server failed
+  ansible.builtin.fail:
+    msg: >-
+      {{ usas_updates_summary.failed }} of {{ usas_updates_summary.total }} servers failed or couldn't be reached;
+      see the results above.
+  when: usas_updates_summary.failed > 0
+
+- name: Fail the run if a notification couldn't be sent
+  ansible.builtin.fail:
+    msg: "Couldn't send {{ updates_notify_problems | join('; ') }}"
+  when: updates_notify_problems | length > 0

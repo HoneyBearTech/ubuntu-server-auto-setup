@@ -1,0 +1,90 @@
+---
+# After the connection, sudo and facts: is the OS one this role updates, is the package manager free, what would
+# be installed, and what does the server already do on its own. Read-only, so check runs (--check) do all of it.
+- name: Find the server's release in the supported list
+  ansible.builtin.set_fact:
+    updates_release: >-
+      {{ updates_supported_releases | selectattr('distribution', 'equalto', ansible_facts.distribution)
+      | selectattr('version', 'equalto', ansible_facts.distribution_version) | first | default({}) }}
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'os': usas_updates_result.os | combine({'facts': os_text,
+      'warning': hint_warning})}) }}
+  vars:
+    os_text: "{{ (ansible_facts.distribution ~ ' ' ~ ansible_facts.distribution_version) | usas_clean_text(80) }}"
+    hint_warning: "{{ usas_updates_result.os.hint | usas_hint_warning(ansible_facts.distribution, os_text) }}"
+
+- name: Skip a release this role doesn't update
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'unsupported', 'reason': usas_updates_result.os.facts
+      ~ ' (' ~ ansible_facts.os_family ~ ' family) is not a release this playbook updates'}) }}
+  when: >-
+    not updates_release and not (updates_allow_unsupported | bool and ansible_facts.os_family in updates_families)
+
+- name: End here for a release this role doesn't update
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'
+
+- name: Warn about a release past its standard support
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'os': usas_updates_result.os | combine({'warning':
+      ([usas_updates_result.os.warning, eol_text] | select | join('; '))})}) }}
+  vars:
+    eol_text: >-
+      {{ (usas_updates_result.os.facts ~ ' is past the end of its standard support (' ~ updates_release.eol ~ ')')
+      if updates_release.eol | default('9999-12-31') < now(utc=true).strftime('%Y-%m-%d') else
+      ('not a supported release; updated because updates_allow_unsupported is true' if not updates_release else '') }}
+  when: eol_text | length > 0
+
+# The family's settings, then the distribution's and the release's, each overriding the one before.
+- name: Load the settings for the server's OS
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/{{ item }}.yml"
+  loop:
+    - "{{ ansible_facts.os_family }}"
+    - "{{ ansible_facts.distribution }}"
+    - "{{ ansible_facts.distribution }}-{{ ansible_facts.distribution_major_version }}"
+  when: (role_path ~ '/vars/' ~ item ~ '.yml') is file
+
+- name: List the pending updates
+  ansible.builtin.include_tasks: pending/{{ ansible_facts.os_family }}.yml
+
+- name: Report what the server's automatic updates do
+  ansible.builtin.include_tasks: auto_updates/{{ ansible_facts.os_family }}.yml
+  when: usas_updates_result.status == 'pending'
+
+- name: Check whether the server is waiting for a reboot
+  ansible.builtin.include_tasks: reboot_required/{{ ansible_facts.os_family }}.yml
+  when: usas_updates_result.status == 'pending'
+
+# A disk that unlocks with the TPM (provisioned with vm_disk_encryption, or set up by hand) needs the Secure Boot
+# state (PCR 7) unchanged at the next boot.
+- name: Look for a disk that unlocks with the TPM
+  ansible.builtin.slurp:
+    src: /etc/crypttab
+  register: updates_crypttab
+  failed_when: false
+  when: usas_updates_result.status == 'pending'
+
+- name: Note what an apply would do
+  ansible.builtin.set_fact:
+    updates_tpm_unlock: >-
+      {{ vm_disk_encryption | default(false) | bool
+      or (updates_crypttab.content | default('') | b64decode | regex_search('(?m)^[^#]*tpm2-device') is not none) }}
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'nothing' if nothing else 'pending', 'checked': true,
+      'reason': window_note if ansible_check_mode and not in_window else ''}) }}
+  vars:
+    nothing: >-
+      {{ usas_updates_result.planned | length == 0
+      and not (usas_updates_result.reboot.required and updates_reboot == 'if_required') }}
+    in_window: "{{ updates_ignore_window | bool or updates_window | usas_in_window }}"
+    window_note: "outside its update window ({{ updates_window | usas_window_text }}): an apply would skip it"
+  when: usas_updates_result.status == 'pending'
+
+- name: Line the server up for the apply
+  ansible.builtin.group_by:
+    key: usas_updates_ready
+  changed_when: false
+  when: usas_updates_result.status == 'pending' and not ansible_check_mode

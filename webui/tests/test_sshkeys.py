@@ -95,7 +95,8 @@ def test_scan_trust_forget(keys, settings, monkeypatch):
 
     def run(argv, **kw):
         calls.append(argv)
-        return completed("# pve:22 SSH-2.0\npve ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMq\npve ssh-rsa AAAAB3Nza\n")
+        return completed("# pve:22 SSH-2.0\npve ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMq\n"
+                         "pve ssh-rsa AAAAB3NzaC1yc2E=\npve ssh-rsa not*base64\n")
 
     monkeypatch.setattr(k.subprocess, "run", run)
     found = keys.scan("pve")
@@ -104,7 +105,7 @@ def test_scan_trust_forget(keys, settings, monkeypatch):
     settings.ssh_dir.mkdir(exist_ok=True)
     settings.known_hosts.write_text("other ssh-ed25519 AAAAOTHER\npve ssh-ed25519 AAAAOLD\n")
     keys.trust("pve", found)
-    assert [h.key for h in keys.trusted("pve")] == ["AAAAC3NzaC1lZDI1NTE5AAAAIOMq", "AAAAB3Nza"]
+    assert [h.key for h in keys.trusted("pve")] == ["AAAAC3NzaC1lZDI1NTE5AAAAIOMq", "AAAAB3NzaC1yc2E="]
     assert keys.trusted("other")[0].key == "AAAAOTHER"
     keys.forget("pve")
     assert keys.trusted("pve") == [] and keys.trusted("other")
@@ -175,7 +176,7 @@ def test_the_node_user_pattern_is_the_roles():
 
     from .conftest import REPO
 
-    release = yaml.safe_load((REPO / "roles/ubuntu_release/vars/main.yml").read_text())
+    release = yaml.safe_load((REPO / "roles/os_catalog/vars/main.yml").read_text())
     common = yaml.safe_load((REPO / "roles/common/vars/main.yml").read_text())
     assert k.NODE_USER == release["pve_ssh_user_pattern"] == common["common_username_pattern"]
 
@@ -207,3 +208,63 @@ def test_ca(settings, monkeypatch, tmp_path):
         k.save_ca(settings, "x" * 300_000)
     monkeypatch.setattr(k, "SYSTEM_CAS", ())
     assert "BEGIN CERTIFICATE" in k.system_cas()  # certifi's bundle
+
+
+ED = "AAAAC3NzaC1lZDI1NTE5AAAAIOMq"
+
+
+def test_vm_aliases():
+    assert k.vm_alias("Home-Lab", 101) == "usas-home-lab-101"
+    for odd in ("", "a b", "x" * 40, "-lab", "lab\tx", "läb"):
+        assert k.vm_alias(odd, 4061) == "usas-pve-4061"
+    with pytest.raises(KeyProblem):
+        k.vm_alias("lab", 12)
+    for bad in ("usas-pve-1", "pve", "usas-pve-101 x", "usas--101", "usas-pve-101\n"):
+        with pytest.raises(KeyProblem):
+            k.check_alias(bad)
+
+
+def test_scan_a_vm_on_another_port(keys, monkeypatch):
+    calls = []
+    monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: calls.append(argv) or completed(
+        f"[10.0.1.5]:2222 ssh-ed25519 {ED}\n"))
+    found = keys.scan("10.0.1.5", 2222, "usas-pve-101")
+    assert calls[0][-4:] == ["-p", "2222", "--", "10.0.1.5"]
+    assert [(h.host, h.key) for h in found] == [("usas-pve-101", ED)]
+    assert keys.scan("10.0.1.5", 2222)[0].host == "[10.0.1.5]:2222"
+    assert keys.scan("10.0.1.5")[0].host == "10.0.1.5" and "-p" not in calls[-1]
+    for port in (0, 65536, True, "22"):
+        with pytest.raises(KeyProblem, match="port"):
+            keys.scan("10.0.1.5", port)
+    with pytest.raises(KeyProblem, match="host-key name"):
+        keys.scan("10.0.1.5", 22, "10.0.1.6")
+
+
+def test_pins_adopt_and_options(keys, settings):
+    settings.ssh_dir.mkdir(exist_ok=True)
+    settings.known_hosts.write_text(f"10.0.0.10 ssh-ed25519 {ED}\nusas-pve-102 ssh-rsa AAAA\nusas-pve-102 x y\n")
+    assert sorted(keys.pins()) == ["usas-pve-102"] and len(keys.pins()["usas-pve-102"]) == 2
+    adopted = keys.adopt("usas-pve-4000", "10.0.0.10")
+    assert [(h.host, h.key) for h in adopted] == [("usas-pve-4000", ED)]
+    assert keys.adopt("usas-pve-4000", "10.0.0.10") == []  # pinned already
+    assert keys.adopt("usas-pve-4001", "10.0.0.11") == [] and "usas-pve-4001" not in keys.pins()
+    assert keys.trusted("10.0.0.10")  # the address entry stays
+    options = keys.ssh_options("usas-pve-4000")
+    assert options.endswith("-o StrictHostKeyChecking=yes -o HostKeyAlias=usas-pve-4000")
+    with pytest.raises(KeyProblem):
+        keys.ssh_options("10.0.0.10")
+
+
+def test_login_to_a_pinned_vm(keys, settings, monkeypatch):
+    keys.generate()
+    with pytest.raises(KeyProblem, match="Trust"):
+        keys.test_login("10.0.1.5", "ubuntu", 2222, "usas-pve-101")
+    keys.trust("usas-pve-101", [HostKey("usas-pve-101", "ssh-ed25519", ED)])
+    seen = []
+    monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: seen.append(argv) or completed(""))
+    assert keys.test_login("10.0.1.5", "ubuntu", 2222, "usas-pve-101").startswith("Logged in to ubuntu@10.0.1.5")
+    argv = seen[0]
+    assert "HostKeyAlias=usas-pve-101" in argv and "ControlPath=none" in argv
+    assert argv[argv.index("-p") + 1] == "2222"
+    with pytest.raises(KeyProblem, match="Trust"):
+        keys.test_login("10.0.1.5", "ubuntu", 2222)  # the address itself isn't trusted

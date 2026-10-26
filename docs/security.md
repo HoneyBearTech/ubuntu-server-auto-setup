@@ -37,14 +37,34 @@ defaults and the advice in the README's "Running it securely" section and in [we
 
 **Downloads**
 
-- The Ubuntu ISO is downloaded over HTTPS and checked against the SHA-256 checksum Ubuntu publishes for it
-  in `SHA256SUMS`. Before that checksum is used, `gpgv` checks Ubuntu's signature on `SHA256SUMS`
-  (`SHA256SUMS.gpg`) against the Ubuntu CD image signing key that ships with the role
+- **The OS catalog** (`roles/os_catalog/vars/catalog.yml`) pins every image the project installs by URL and
+  checksum, like a lock file, and is reviewed like code: it changes only through a pull request. The
+  maintainer builds it with `tools/update_os_catalog.py`, which reads the vendors' indexes over HTTPS from
+  their own hosts only and, where a vendor signs its checksum file, checks that signature with `gpgv` against
+  a key whose full fingerprint is pinned in the script (the keys are in `tools/os-catalog-keys/`, never fetched
+  at run time):
+
+  | Images | Signed checksum file | Key (fingerprint) |
+  | --- | --- | --- |
+  | Ubuntu installer ISOs | `SHA256SUMS` + `SHA256SUMS.gpg` | Ubuntu CD Image Automatic Signing Key (2012), `8439 38DF 228D 22F7 B374 2BC0 D94A A3F0 EFE2 1092` |
+  | Ubuntu cloud images | `SHA256SUMS` + `SHA256SUMS.gpg` | UEC Image Automatic Signing Key, `D2EB 4462 6FDD C30B 513D 5BB7 1A5D 6C4C 7DB8 7C81` |
+  | Rocky Linux 9 / 10 | per image `.CHECKSUM` + `.CHECKSUM.asc` | `21CB 256A E16F C54C 6E65 2949 702D 426D 350D 275D` / `FC22 6859 C086 0BF0 DDB9 5B08 5B10 6C73 6FED FC85` |
+  | AlmaLinux 9 / 10 | `CHECKSUM` + `CHECKSUM.asc` | `BF18 AC28 7617 8908 D6E7 1267 D36C B86C B86B 3716` / `EE6D B7B9 8F5B F5ED D9DA 0DE5 DEE5 C11C C2A1 E572` |
+  | CentOS Stream 9 / 10, Debian 12 / 13 cloud images | none published: the checksum is taken over HTTPS only, and the entry says `signed: false` | none |
+
+  The Rocky and Alma fingerprints are the ones the vendors list at rockylinux.org/keys and
+  almalinux.org/security; the Ubuntu ones are Ubuntu's published CD image and cloud image signing keys. CI
+  runs the same check on every pull request that changes the catalog, and weekly, when it also opens an issue
+  if a pinned image is gone or a newer build is out. A run on your nodes checks only the pinned checksum, so a
+  mirror can't swap the image, and nothing in a run depends on a key or an index fetched that day.
+- The Ubuntu ISO is downloaded over HTTPS and must have the checksum the catalog pins; a copy already in the
+  ISO storage is kept only if it has it. A mismatch stops the run before the ISO is used. For a point release
+  the catalog doesn't pin (`ubuntu_point_release`), the run checks instead: `gpgv` verifies Ubuntu's signature
+  on `SHA256SUMS` (`SHA256SUMS.gpg`) against the Ubuntu CD image signing key that ships with the role
   (`roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`), pinned by its full fingerprint
-  `8439 38DF 228D 22F7 B374 2BC0 D94A A3F0 EFE2 1092` (`installer_signing_fingerprint`). The key is never
-  fetched from a keyserver at run time. A missing or bad signature, a signature by any other key, or a
-  checksum mismatch stops the run before the ISO is used. To inspect the shipped key:
-  `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`.
+  (`installer_signing_fingerprint`), before the ISO's checksum is taken from it. A missing or bad signature,
+  a signature by any other key, or a checksum mismatch stops the run. To inspect the shipped keys:
+  `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg tools/os-catalog-keys/*.asc`.
 - SSH public keys come from `https://github.com/<github_user>.keys` over HTTPS. Only lines that look like
   public keys are used, and they reach the installer configuration as data written with `to_nice_yaml`, so they can't add other
   configuration or commands.
@@ -180,6 +200,27 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   secrets (gitleaks over the full history) before it can merge; workflows run with read-only tokens and
   pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
   release runs for a `v*` tag (the `release` environment).
+
+**Updates** (`playbooks/updates.yml`, [updates.md](updates.md))
+
+- The updates playbook never configures a server: it reads, installs the updates you chose, reboots only
+  with `updates_reboot: if_required`, and checks health. It doesn't stop, mask or change automatic updates,
+  write holds, or install anything that isn't an update of an installed package or its new dependency.
+- It never turns off package signature checks: apt checks every package against the server's own keyrings
+  (`tests/updates.sh` fails if the role names an option that would turn that off).
+- A server outside `ubuntu_servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
+  password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
+  there could read it. Host keys are checked strictly on every connection, as for every playbook.
+- What servers report (package names, versions, services) is checked against the role's patterns, stripped
+  of control characters and capped at 5,000 entries per list before it reaches the report, which is
+  readable only by the control node's user.
+- Its notifications go from the control node to the mail relay with STARTTLS or TLS and the relay's
+  certificate checked (not with Ansible's mail module, which doesn't check it), and to the webhook with
+  its certificate checked; they carry a summary only, and the webhook's URL and the relay password stay out
+  of the output.
+- With `safe` (the default) apt never removes a package; an update that would need a package you excluded
+  skips the server instead of upgrading that package. One failed server, or a failed health check, stops
+  the servers not yet started.
 
 ## Optional hardening and notifications
 
@@ -359,6 +400,14 @@ in the trust store, and how to do the same in the web UI's data volume.
 - **What a guest says about itself.** A VM's guest agent reports whatever the VM's owner wants: another
   VM's address, Ubuntu when it isn't. The VMs page labels this data as reported by the guest and shows
   where each address came from; check them before you act on them.
+- **What a server says about its packages.** The updates report shows what each server claims: a server
+  whose root is hostile can report anything, or report nothing. Updating a server also means trusting its
+  package sources (its mirrors and keys), which the playbook doesn't change.
+- **Reboots and updates that go wrong.** An update can break an application in ways the health checks
+  don't see, and a server may not come back from a reboot. Snapshots (a later release) aren't backups,
+  and rolling back to one also undoes the security updates. On a VM whose disk unlocks with the TPM, a
+  Secure Boot update means typing the passphrase at the console at the next boot; the playbook holds that
+  reboot and says so.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
   installed (with the disk passphrase, if the VM is encrypted), read and change VM disks, read a VM's vTPM
   state and memory (so disk encryption doesn't keep them out), and run commands inside the VMs through
@@ -397,6 +446,9 @@ in the trust store, and how to do the same in the web UI's data volume.
   Fail2Ban until the baseline has run; `make site` runs it straight away.
 - **Upstream components.** Vulnerabilities in Ubuntu, Proxmox VE, OpenSSH, Ansible or its collections
   are fixed upstream; how the project tracks them is in [dependencies.md](dependencies.md).
-- **Ubuntu's signing key itself.** The ISO is trusted because Ubuntu's CD image signing key signed its
-  checksum. If Ubuntu replaces that key, the role stops until a release ships the new key; if the key were
-  compromised, the check would not catch it.
+- **The vendors' signing keys and mirrors themselves.** An image is trusted because its vendor's key signed
+  its checksum (Ubuntu, Rocky Linux, AlmaLinux), or, for CentOS Stream and Debian's cloud images, which
+  publish no signature, because the vendor's HTTPS site served that checksum when the catalog was built. If a
+  vendor replaces its key, `make catalog` and the weekly check stop until a release ships the new key; if a
+  key or a vendor's site were compromised when the catalog was built, the check would not catch it. The
+  reviewed, pinned checksum means a compromise after that can't reach a run.

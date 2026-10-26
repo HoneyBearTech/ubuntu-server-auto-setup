@@ -1,5 +1,5 @@
 ---
-# Sets up pve_ssh_user (ubuntu_release's variable; it must not be root here) on a Proxmox node so that the ISO
+# Sets up pve_ssh_user (os_catalog's variable; it must not be root here) on a Proxmox node so that the ISO
 # builds and the seed files need no root: run by playbooks/prepare-node.yml, which logs in as root.
 
 # Public keys that may log in as pve_ssh_user, one authorized_keys line each. They replace whatever its

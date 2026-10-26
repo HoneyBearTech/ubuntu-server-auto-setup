@@ -1,0 +1,120 @@
+---
+# One server, in its batch (the play's serial). A failure is caught and recorded here instead of failing the
+# host, so the report is always written; updates_max_fail_percentage then keeps later batches from starting.
+- name: Decide whether this server may still start
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'skipped', 'reason': reason}) if reason else usas_updates_result }}
+  vars:
+    started: >-
+      {{ groups['usas_updates_ready'] | map('extract', hostvars, 'usas_updates_result')
+      | selectattr('apply_started', 'defined') | list }}
+    failed: "{{ started | selectattr('status', 'in', ['failed', 'unreachable']) | list | length }}"
+    too_many: "{{ (failed | int) > 0 and (failed | int) * 100 > (updates_max_fail_percentage | int) * (started | length) }}"
+    window_closed: "{{ not updates_ignore_window | bool and not updates_window | usas_in_window }}"
+    reason: >-
+      {{ ('not started: ' ~ failed ~ ' of ' ~ started | length ~ ' servers failed before it') if too_many
+      else ('not started: its update window (' ~ (updates_window | usas_window_text) ~ ') had closed') if window_closed
+      else '' }}
+
+- name: End here for a server that may not start
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'
+
+- name: Update the server
+  block:
+    - name: Mark the server as started
+      ansible.builtin.set_fact:
+        usas_updates_result: "{{ usas_updates_result | combine({'status': 'applying', 'apply_started': true}) }}"
+
+    - name: Note which services run before the update
+      ansible.builtin.service_facts:
+      register: updates_services_before
+
+    - name: Note the system state before the update
+      ansible.builtin.command:
+        argv: [systemctl, is-system-running]
+      register: updates_state_before
+      changed_when: false
+      failed_when: updates_state_before is unreachable
+
+    - name: Note the installed packages before the update
+      ansible.builtin.package_facts:
+      register: updates_packages_before
+
+    - name: Install the updates
+      ansible.builtin.include_tasks: apply/{{ ansible_facts.os_family }}.yml
+      when: usas_updates_result.planned | length > 0
+
+    - name: Note the installed packages after the update
+      ansible.builtin.package_facts:
+      register: updates_packages_after
+
+    - name: Note what was upgraded
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'upgraded': updates_packages_before.ansible_facts.packages
+          | usas_package_changes(updates_packages_after.ansible_facts.packages)}) }}
+
+    - name: Check whether the server needs a reboot now
+      ansible.builtin.include_tasks: reboot_required/{{ ansible_facts.os_family }}.yml
+
+    - name: Decide about the reboot
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot | combine({'held': why | length > 0,
+          'why': why})}) }}
+      vars:
+        boot_chain: "{{ usas_updates_result.upgraded | map(attribute='name') | usas_matching(updates_pcr7_packages) }}"
+        why: >-
+          {{ '' if not usas_updates_result.reboot.required or updates_reboot != 'if_required'
+          else (boot_chain | join(', ') ~ ' changed the Secure Boot state (PCR 7): the disk would wait for its passphrase'
+          ~ ' at the console. Reboot from the console and re-enroll the TPM (docs/security.md, "Recovery")')
+          if boot_chain and updates_tpm_unlock | bool
+          else ('outside the reboot window (' ~ (updates_reboot_window | usas_window_text) ~ ')')
+          if not updates_ignore_window | bool and not updates_reboot_window | usas_in_window
+          else '' }}
+
+    - name: Reboot to finish the updates
+      ansible.builtin.reboot:
+        msg: Rebooting to finish package updates (ubuntu-server-auto-setup)
+        reboot_timeout: "{{ updates_reboot_timeout | int }}"
+        post_reboot_delay: "{{ updates_post_reboot_delay | int }}"
+        boot_time_command: "{{ updates_boot_time_command if updates_boot_time_command | length > 0 else omit }}"
+      register: updates_reboot_run
+      when:
+        - usas_updates_result.reboot.required
+        - updates_reboot == 'if_required'
+        - not usas_updates_result.reboot.held
+
+    - name: Note the reboot
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot | combine({'done': true,
+          'required': false})}) }}
+      when: updates_reboot_run.rebooted | default(false)
+
+    - name: Check the server's health
+      ansible.builtin.include_tasks: health.yml
+      when: usas_updates_result.upgraded | length > 0 or usas_updates_result.reboot.done
+
+    - name: Note the result
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'status': 'updated' if usas_updates_result.upgraded
+          or usas_updates_result.reboot.done else 'nothing', 'finished': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}) }}
+
+  rescue:
+    - name: Note the failure
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'status': status, 'reason': message | usas_clean_text(300),
+          'finished': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}) }}
+      vars:
+        message: >-
+          {{ ansible_failed_task.name | default('') ~ ': ' ~ (ansible_failed_result.msg | default('failed')) }}
+        status: >-
+          {{ 'unreachable' if ansible_failed_result.unreachable | default(false)
+          else 'busy' if ansible_failed_task.name | default('') == 'Install the updates with apt'
+          and ansible_failed_result.msg | default('') is search('lock')
+          else 'failed' }}

@@ -8,13 +8,88 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Upgrading
+
+- The role `ubuntu_release` is now `os_catalog`. Only playbooks of your own that list `ubuntu_release` as a
+  role or include it (`include_role: name: ubuntu_release`) need the new name; the inventory variables keep
+  theirs.
+- `ubuntu_point_release` now defaults to empty, meaning the point release the OS catalog pins (26.04.1 in
+  this release). An inventory that sets it explicitly keeps working: the catalog's point release is checked
+  against the catalog's checksum, any other against Ubuntu's signed `SHA256SUMS`, as before. Clear it (or
+  leave the web UI's field empty) to follow the catalog from release to release.
+- A mirror in `ubuntu_iso_base_url` no longer needs to publish `SHA256SUMS.gpg` for the point release the
+  catalog pins: the pinned checksum decides.
+
+### Added
+
+- **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
+  and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
+  10, Rocky Linux 9 and 10, and AlmaLinux 9 and 10. This release installs only the Ubuntu installer ISOs from
+  it; the cloud images are for the coming releases' other operating systems. `tools/update_os_catalog.py`
+  (`make catalog`) builds it from the vendors' indexes and checks their signatures with `gpgv` against pinned
+  fingerprints; CentOS Stream and Debian's cloud images, which aren't signed, are marked `signed: false`.
+  `make catalog-check` checks every pin again. ([interfaces.md](docs/interfaces.md#the-os-catalog),
+  [testing.md](docs/testing.md#the-os-catalog))
+- A weekly "OS catalog" workflow checks every pinned image against the vendors (signature, checksum, still
+  downloadable), and opens an issue when one fails or a newer build is out. It also runs on pull requests
+  that change the catalog.
+- **A playbook that keeps servers updated** (`playbooks/updates.yml`, `make updates-check`, `make updates`;
+  [docs/updates.md](docs/updates.md)), for Ubuntu 22.04, 24.04 and 26.04: the servers this project
+  installed and others you add to the new group `other_servers`. It never configures a server. A check run
+  reports, for each server, the pending updates (security ones marked), held, phased and excluded packages,
+  what its automatic updates already do, and whether it waits for a reboot. An apply installs `all` or
+  `security` updates (`safe` by default, which never removes a package; `dist` opt-in), a batch at a time.
+  It waits for a busy package manager and then skips the server as `busy`. It reboots only with
+  `updates_reboot: if_required`, inside `updates_reboot_window`, and holds the reboot on an encrypted VM
+  after a Secure Boot update. It then checks the server's health (services, system state, optional URLs)
+  and stops starting servers after a failure. Maintenance windows (`updates_window`) and an opt-out
+  (`updates_enabled: false`) are per server or group, and every run writes a JSON and a text report on
+  the control node.
+  **New attack surface:** the control node now connects with sudo to servers this project didn't install,
+  and reads what they report about their packages. Such a server is never sent the Vault admin password
+  as its sudo password (unless `updates_allow_shared_become_password`), host keys are checked strictly,
+  and reported data is checked, stripped and capped before it reaches the report
+  ([docs/security.md](docs/security.md), assurance case boundaries B18 and B19).
+- **Notifications from the updates playbook** ([docs/updates.md](docs/updates.md#notifications)): once per
+  run, the control node mails the summary through the servers' relay settings (`mail_relay_*`) to
+  `updates_notify_mail` (default `unattended_upgrades_mail`) and/or posts it to `updates_webhook_url`
+  (`text` or `json`, as for Fail2Ban), `on-change` by default, or `always` or `only-on-error`. The relay's
+  certificate is checked (a small module of the role, since Ansible's mail module doesn't check it).
+  A notification that can't be sent fails the run after the report is written.
+- VMs page: select running Ubuntu VMs (up to 25) and run the baseline against them in check mode, with a
+  preset (SSH keys only, SSH hardening and Fail2Ban, the full baseline, or chosen parts) and each VM's
+  address, SSH port, login user and extra firewall rules. Each VM's host key is pinned by cluster and VM ID
+  after you compare the fingerprints, the plan is reviewed with what it would change on a server already in
+  use, and the run's page shows each host's result. **New attack surface:** the web UI now connects over SSH
+  to VMs it didn't create. A VM that isn't a server in the inventory is named `vm-<vmid>`, gets none of the
+  Vault's secrets (no admin, sudo or relay password, no webhook URL) and keeps passwordless sudo; credentials
+  follow the inventory's `pve_vmid`, never a VM's tags or description. Real runs follow in a later release.
+
 ### Changed
 
+- **The Ubuntu ISO is checked against the checksum the OS catalog pins**, which was taken from Ubuntu's
+  signed `SHA256SUMS` when the catalog was built, instead of fetching and verifying `SHA256SUMS` on every
+  run. A point release the catalog doesn't pin is still checked against the signed `SHA256SUMS` at run time.
+  A failed download now says whether the file is gone or isn't the signed ISO, and what to do.
+- The weekly real-ISO job remasters the ISO the catalog pins (it used to take the newest from
+  `SHA256SUMS`), and checks Ubuntu's real signature as for an unpinned point release.
 - Groundwork for a playbook that keeps existing servers updated, with no change in behaviour: the SSH-port
   probe the baseline runs first is now a shared task file (`playbooks/tasks/ssh_port.yml`); the classic-sudo
   check reads a new variable, `classic_sudo_needs_password`, which follows `admin_sudo_nopasswd` unless set;
   and the VMs page's parsing moved to `plugins/module_utils/usas_vms.py`, so the playbooks' own plugins can
   share it (the container image now carries `plugins/`).
+- The assurance case's trust boundaries are numbered once each again: the mail relay and webhook boundary,
+  which shared B12 with the guest agents, is now B17.
+- The integration tests' required check, "Integration tests", now passes when both suites pass: the
+  playbooks' (`tests/run.sh`) and the updates playbook's on each Ubuntu release (`tests/updates.sh`).
+  `tests/coverage.py` counts the per-family task files too, and each suite measures its own roles.
+
+### Security
+
+- The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
+  reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
+  catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
+  [assurance case](docs/assurance-case.md).
 
 ### Fixed
 
