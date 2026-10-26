@@ -9,6 +9,7 @@
 !scripts/retry.sh
 !playbooks/
 !roles/
+!callback_plugins/
 !inventory/hosts.example.yml
 !inventory/vault.example.yml
 !webui/usas_web/
