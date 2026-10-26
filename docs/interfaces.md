@@ -16,6 +16,7 @@ API for other programs. What should be reachable from where is described in the
 | Make targets | the operator | [below](#commands); `make help` |
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
+| The updates report (`<run id>.json` in `updates_report_dir`) | the operator, or other automation reading it | [below](#the-updates-report); [updates.md](updates.md#the-report) |
 | The web UI (the USAS app and its JSON API on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
 | The status API (`GET /api/status`, off by default) | dashboards such as Heimdall, with the status token | [below](#the-status-api); [web-ui.md](web-ui.md#dashboards-heimdall) |
 | The container image and its settings (environment variables, the `/data` volume) | the operator, with Docker | [below](#the-web-ui); [web-ui.md](web-ui.md#settings) |
@@ -28,6 +29,8 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
+| `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `ubuntu_servers` and `other_servers` |
 | `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
 ### Inventory variables
@@ -36,7 +39,7 @@ The variables below are the project's interface: names and meanings change only 
 1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
 full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
 `roles/os_catalog`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
-`roles/ssh_hardening`, `roles/fail2ban` and `roles/hardening`. Where a role's default and the example inventory differ, the
+`roles/ssh_hardening`, `roles/fail2ban`, `roles/hardening` and `roles/updates`. Where a role's default and the example inventory differ, the
 example shows a typical value.
 
 **Shared by provisioning and the baseline**
@@ -124,7 +127,7 @@ example shows a typical value.
 | --- | --- | --- |
 | `admin_shell` | `/bin/bash` | The admin account's shell. |
 | `admin_sudo_nopasswd` | `false` | Passwordless sudo for the admin account. False removes the installer's passwordless sudo on the first baseline run; later runs need `ansible_become_password` (the example inventory and the web UI set it to the admin password). On Ubuntu 26.04 the playbooks become root with the classic sudo, `/usr/bin/sudo.ws`, since Ansible can't answer sudo-rs's password prompt; set `ansible_become_exe` to override. |
-| `classic_sudo_needs_password` | `not admin_sudo_nopasswd` | Whether becoming root needs a password on the host. If it does and the host has sudo-rs but not the classic sudo, the playbook stops before changing anything. The baseline leaves it unset. |
+| `classic_sudo_needs_password` | `not admin_sudo_nopasswd` | Whether becoming root needs a password on the host. If it does and the host has sudo-rs but not the classic sudo, the playbook stops before changing anything. The baseline leaves it unset; the updates playbook sets it to whether `ansible_become_password` is set. |
 | `ssh_keys_exclusive` | `true` | Remove authorized keys that aren't on GitHub or in `admin_extra_ssh_keys`. |
 | `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
@@ -193,6 +196,34 @@ example shows a typical value.
 | `fail2ban_webhook_url` | `""` | POST a message for every ban to this http(s) URL, normally from the Vault (`"{{ vault_fail2ban_webhook_url }}"`). |
 | `fail2ban_webhook_format` | `text` | `text` (the message is the body, for ntfy) or `json` (`title`, `text`, `message` and `content`, for Slack, Mattermost, Gotify and Discord). |
 
+**Updates** (`updates`, used by `playbooks/updates.yml` only; [updates.md](updates.md))
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `updates_enabled` | `true` | `false` skips the server in every run. |
+| `updates_scope` | `all` | `all` or `security` (only updates from a `-security` suite or ESM). |
+| `updates_apt_upgrade` | `safe` | `safe` (upgrade and new dependencies, never removes) or `dist` (may remove; refused with `security`, excludes or `updates_kernel: false`). |
+| `updates_exclude_packages` | `[]` | Package-name globs left alone in this run; never written to the server. |
+| `updates_kernel`, `updates_kernel_packages` | `true`, the family's kernel globs | `false` adds the kernel packages to the excludes. |
+| `updates_reboot` | `never` | `never` (report "reboot pending") or `if_required`. |
+| `updates_reboot_window`, `updates_window` | `{}` (any time) | `{days: [sun], start: "02:00", duration: "3h", timezone: "Europe/Berlin"}`: when a reboot, or the update, may happen. |
+| `updates_ignore_window` | `false` | Update and reboot outside the windows. |
+| `updates_reboot_timeout`, `updates_post_reboot_delay` | `900`, `0` | Seconds to wait for a rebooted server, and after it answers. |
+| `updates_boot_time_command` | `""` | The command whose output changes at each boot (default: the kernel's boot ID). |
+| `updates_pcr7_packages` | `shim-signed`, the signed GRUB, `secureboot-db` | Updates that hold the reboot on a VM whose disk unlocks with the TPM. |
+| `updates_restart_services` | `host` | `host` (the server's own needrestart setting), `list` or `auto`. |
+| `updates_refresh_max_age` | `3600` | Seconds the package lists may be old before they are refreshed. |
+| `updates_lock_wait` | `600` | Seconds to wait for a busy package manager before the server is `busy`. |
+| `updates_task_timeout` | `3600` | Seconds an upgrade may take (it runs in the background on the server). |
+| `updates_health_services`, `updates_health_ignore_services` | `[]` | Services that must run after the update, and globs of services whose stopping isn't a problem. |
+| `updates_health_urls` | `[]` | `[{url, status}]`, called from the control node with the certificate checked. |
+| `updates_health_timeout` | `300` | Seconds to wait for the server to finish starting. |
+| `updates_allow_unsupported` | `false` | Try a release outside `updates_supported_releases`, within a known family. |
+| `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
+| `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
+| `updates_serial` | `25%` | The batch size (with `-e` only). |
+| `updates_report_dir` | `reports/updates` in the checkout | Where `<run id>.json` and `<run id>.txt` are written on the control node (`0600`, in a `0700` folder). |
+
 ### Networks
 
 Every VM has a first network card, `net0`, and up to 31 more from `vm_extra_nics`. Each card gets a fixed
@@ -246,6 +277,7 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
 | `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
 | `vault_disk_passphrase` (optional) | `vm_disk_passphrase` | The disk encryption passphrase, also the recovery key at the console. |
+| `vault_become_password_<group>` (optional, any name you choose) | `ansible_become_password` of a group in `other_servers` | That group's own sudo password, for the updates playbook. |
 
 ### Commands
 
@@ -257,6 +289,9 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
 | `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `ubuntu_servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
+| `make updates-check` | `playbooks/updates.yml --check` | `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
+| `make updates` | `playbooks/updates.yml` | `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
 | `make deps`, `make lint`, `make syntax`, `make catalog-test` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
@@ -264,8 +299,22 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 `LIMIT=` becomes `--limit` (for `build-installer`, a node builds only if it is in the limit too), `ARGS=` is passed to `ansible-playbook` unchanged,
 and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh`,
 `fail2ban` and `hardening`, so `ARGS="--tags firewall"` runs one of them. Exit codes are `ansible-playbook`'s: 0 on success,
-non-zero on any failed or unreachable host. `--check --diff` is supported by the baseline (provisioning
+non-zero on any failed or unreachable host (for `updates`, busy, skipped and unsupported servers don't count). `--check --diff` is supported by the baseline and by `updates.yml` (where `--check` is the report-only mode) (provisioning
 needs to really create the VM, so it isn't meaningful there).
+
+### The updates report
+
+`updates.yml` writes `<run id>.json` (and a text summary, `<run id>.txt`) to `updates_report_dir` on the
+control node, mode `0600`. The run ID is the start time and four random hex digits (`20261026T020000Z-3fa9`).
+The JSON object has `run` (`id`, `mode`: `check` or `apply`, `started`, `finished`, in UTC), `summary` (a count
+per status) and `hosts`, one object per server with: `host`, `status` (`updated`, `nothing`, `pending`,
+`busy`, `skipped`, `unsupported`, `unreachable` or `failed`), `reason`, `os` (`facts`, `hint`, `warning`),
+`installed_by_usas`, `scope`, `apt_upgrade`, `window`, `pending` (each `name`, `current`, `candidate`,
+`suites`, `security`, `new`), `security_count`, `planned`, `upgraded` (each `name`, `from`, `to`), `held`,
+`excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
+`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `started` and `finished`.
+Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
+new keys may be added in a minor release, and existing ones keep their meaning.
 
 ### The OS catalog
 

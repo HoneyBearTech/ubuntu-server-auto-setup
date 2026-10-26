@@ -1,0 +1,37 @@
+---
+# Inventory for tests/updates.sh: two containers built from tests/images/ubuntu-target (stage "updates"), with
+# SSH on local ports. upd-usas stands in for a server this project installed, upd-other for one it didn't (its
+# own user, passwordless sudo). TEST_TMP is set by updates.sh.
+all:
+  vars:
+    test_tmp: "{{ lookup('ansible.builtin.env', 'TEST_TMP') }}"
+    ansible_ssh_private_key_file: "{{ test_tmp }}/id_ed25519"
+    ansible_ssh_common_args: "-o UserKnownHostsFile={{ test_tmp }}/known_hosts -o StrictHostKeyChecking=yes"
+    vault_admin_password: test-password
+    updates_report_dir: "{{ test_tmp }}/reports"
+    # A container shares the Docker host's kernel, whose boot_id doesn't change when the container restarts.
+    updates_boot_time_command: cat /run/usas-boot-id
+    updates_reboot_timeout: 120
+    # The test packages stand in for the kernel and the Secure Boot chain.
+    updates_kernel_packages: [usas-test-kernel]
+    updates_pcr7_packages: [usas-test-pcr7]
+    updates_lock_wait: 10
+    updates_health_timeout: 60
+
+  children:
+    ubuntu_servers:
+      vars:
+        ansible_user: sysadmin
+        ansible_become_password: test-password
+      hosts:
+        upd-usas:
+          ansible_host: 127.0.0.1
+          ansible_port: 2341
+          pve_vmid: 4091
+    other_servers:
+      vars:
+        ansible_user: ops
+      hosts:
+        upd-other:
+          ansible_host: 127.0.0.1
+          ansible_port: 2342

@@ -4,7 +4,7 @@ LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 
-.PHONY: help deps app lint syntax test catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys
+.PHONY: help deps app lint syntax test test-updates catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys updates updates-check
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -22,10 +22,14 @@ lint: ## Run yamllint, ansible-lint and ruff
 	ruff check
 
 syntax: ## Syntax-check every playbook against the example inventory
-	ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml
+	ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml \
+	  playbooks/updates.yml
 
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
+
+test-updates: ## Integration tests of the updates playbook (needs Docker; OS=ubuntu-24.04 picks the release)
+	tests/updates.sh
 
 catalog: ## Pin the newest image of every supported release in the OS catalog (vendor signatures checked; needs gpgv)
 	python3 tools/update_os_catalog.py
@@ -72,3 +76,9 @@ baseline: ## Apply the server baseline (users, SSH, UFW, Fail2Ban, updates)
 
 keys: ## Re-sync GitHub SSH keys only
 	$(PLAYBOOK) playbooks/baseline.yml --tags ssh_keys $(LIMIT_ARG) $(ARGS)
+
+updates-check: ## Report the package updates each server would get, changing nothing
+	$(PLAYBOOK) playbooks/updates.yml --check $(LIMIT_ARG) $(ARGS)
+
+updates: ## Install package updates on the servers (reboots only with updates_reboot: if_required)
+	$(PLAYBOOK) playbooks/updates.yml $(LIMIT_ARG) $(ARGS)

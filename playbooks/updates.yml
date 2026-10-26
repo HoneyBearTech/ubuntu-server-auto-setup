@@ -1,0 +1,87 @@
+---
+# Lists and installs package updates on servers that already run: the ones this project installed
+# (ubuntu_servers) and others added to the inventory (other_servers). It never configures a server: it reads,
+# installs, reboots only when updates_reboot asks for it, checks the server's health and writes a report.
+# With --check it only reports what it would do. docs/updates.md describes it; make updates-check / make updates.
+
+# Every server at once (forks), changing nothing: settings, reachability, sudo, the OS, a busy package manager,
+# what would be installed and whether a reboot is waiting. In check mode this is the whole run. Unreachable
+# servers stay in the play so that their results reach the report.
+- name: Check what each server would update
+  hosts: ubuntu_servers:other_servers
+  gather_facts: false
+  become: true
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Check the settings and the window
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: start
+        apply:
+          tags: [always]
+      tags: [always]
+
+    - name: Connect on the SSH port that answers
+      ansible.builtin.import_tasks: tasks/ssh_port.yml
+
+    - name: Check that the server answers and has Python
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: connect
+        apply:
+          tags: [always]
+      tags: [always]
+
+    # A server this project didn't install may have passwordless sudo-rs and no classic sudo; only a sudo that
+    # needs a password has to be the classic one.
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: tasks/classic_sudo.yml
+      vars:
+        classic_sudo_needs_password: "{{ ansible_become_password | default('') | string | length > 0 }}"
+
+    - name: Gather facts
+      ansible.builtin.setup:
+        gather_subset: [min, virtual]
+      tags: [always]
+
+  tasks:
+    - name: List the pending updates
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: preflight
+        apply:
+          tags: [always]
+      tags: [always]
+
+# The servers with something to do, a batch at a time (updates_serial, 25 % by default).
+- name: Update the servers
+  hosts: usas_updates_ready
+  serial: "{{ updates_serial | default('25%') }}"
+  gather_facts: false
+  become: true
+  ignore_unreachable: true
+  tasks:
+    - name: Update the server
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: apply
+        apply:
+          tags: [always]
+      tags: [always]
+
+# On the control node (delegated, once), so that --limit doesn't leave the report out.
+- name: Report the updates run
+  hosts: usas_updates_targets
+  gather_facts: false
+  tasks:
+    - name: Write and show the report
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: report
+        apply:
+          delegate_to: localhost
+          run_once: true
+          become: false
+          tags: [always]
+      run_once: true
+      tags: [always]

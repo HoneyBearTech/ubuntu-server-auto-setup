@@ -153,7 +153,7 @@ python3 tests/mock_pve.py --cert "$TEST_TMP/api.crt" --key "$TEST_TMP/api.key" \
 mock_pid=$!
 
 docker build -q -t usas-test-pve:latest -f tests/images/pve-node/Dockerfile tests/fixtures >/dev/null
-docker build -q -t usas-test-srv:latest tests/images/ubuntu-target >/dev/null
+docker build -q --target target -t usas-test-srv:latest tests/images/ubuntu-target >/dev/null
 docker rm -f "$PVE" "$PVE2" "$SRV" >/dev/null 2>&1 || true
 docker volume rm "$NFS" >/dev/null 2>&1 || true
 docker volume create "$NFS" >/dev/null
@@ -577,6 +577,7 @@ play_fails "whose password prompt Ansible doesn't recognise" playbooks/baseline.
 docker exec "$SRV" mv /usr/bin/sudo.ws.hidden /usr/bin/sudo.ws
 
 step "Task coverage"
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE"
+# The updates role has its own suite and figure (tests/updates.sh).
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates
 
 step "All integration tests passed"

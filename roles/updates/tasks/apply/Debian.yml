@@ -1,0 +1,25 @@
+---
+# Ubuntu and Debian: install what the check chose. safe names the chosen packages (only those already installed
+# are upgraded, apt adds the new dependencies, and --no-remove makes apt stop rather than remove anything); dist
+# upgrades everything and may remove packages. The upgrade runs in the background on the server, so a restarted
+# sshd or a dropped connection doesn't stop it. Signatures are checked as apt always does: this role never
+# turns that off (tests/updates.sh checks the role for such options).
+- name: Install the updates with apt
+  ansible.builtin.apt:
+    name: "{{ updates_selection.install if updates_apt_upgrade == 'safe' else omit }}"
+    state: "{{ 'latest' if updates_apt_upgrade == 'safe' else omit }}"
+    only_upgrade: "{{ updates_apt_upgrade == 'safe' }}"
+    fail_on_autoremove: "{{ updates_apt_upgrade == 'safe' }}"
+    upgrade: "{{ 'dist' if updates_apt_upgrade == 'dist' else omit }}"
+    lock_timeout: "{{ updates_lock_wait | int }}"
+  environment: "{{ {'NEEDRESTART_MODE': restart_mode[updates_restart_services]} if updates_restart_services != 'host' else {} }}"
+  async: "{{ updates_task_timeout | int }}"
+  poll: 10
+  register: updates_upgrade
+  vars:
+    restart_mode: {list: l, auto: a}
+
+- name: Stop if the server stopped answering during the upgrade
+  ansible.builtin.fail:
+    msg: The server stopped answering while it installed updates; check it before running again.
+  when: updates_upgrade is unreachable

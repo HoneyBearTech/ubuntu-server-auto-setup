@@ -1,0 +1,33 @@
+---
+# What the server does on its own (unattended-upgrades and its timer), as one line for the report. Read only:
+# this playbook never changes it; the baseline sets it up on the servers this project installed.
+- name: Read apt's configuration
+  ansible.builtin.command:
+    argv: [apt-config, dump]
+  register: updates_apt_config
+  changed_when: false
+  check_mode: false
+
+- name: Check the automatic-upgrade timer
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, apt-daily-upgrade.timer]
+  register: updates_upgrade_timer
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Check that unattended-upgrades is installed
+  ansible.builtin.stat:
+    path: /usr/bin/unattended-upgrade
+  register: updates_unattended
+
+- name: Look for needrestart
+  ansible.builtin.stat:
+    path: /usr/sbin/needrestart
+  register: updates_needrestart_bin
+
+- name: Note the automatic updates
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'auto_updates': (updates_apt_config.stdout
+      | usas_apt_auto_updates(updates_upgrade_timer.stdout, updates_unattended.stat.exists)).line}) }}

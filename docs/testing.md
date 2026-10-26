@@ -9,6 +9,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | --- | --- | --- | --- |
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
+| Updates tests | the updates playbook against two servers with updates waiting in a signed test repository, on Ubuntu 22.04, 24.04 and 26.04: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=ubuntu-24.04` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
@@ -107,7 +108,8 @@ run; your own `~/.ssh` is never touched. The steps:
    leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
    (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
 10. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
-   (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did. Ansible has no
+   (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did (every role but
+   `updates`, which `tests/updates.sh` measures the same way). Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
    the containers can't reach (waiting for `cloud-init`, the QEMU guest agent, reboots) are listed in the
    report and covered by the real-run part of the test policy and the
@@ -115,6 +117,31 @@ run; your own `~/.ssh` is never touched. The steps:
 
 UFW rate-limits new SSH connections (6 in 30 seconds per address), and in the tests every connection comes
 from Docker's one address, so the script pauses between some steps.
+
+## The updates tests
+
+`tests/updates.sh` runs `playbooks/updates.yml` against two containers built from
+`tests/images/ubuntu-target` (stage `updates`, for the release in `OS`): `upd-usas` stands in for a server
+this project installed (`ubuntu_servers`, sudo with a password), `upd-other` for one it didn't
+(`other_servers`, its own user, passwordless sudo), on `127.0.0.1:2341` and `2342`. The image replaces
+Ubuntu's archive with a repository built at image build time (`test-repo.sh`): small packages with newer
+versions in a `test-updates` and a `test-security` suite, a held one, one phased at 0 %, one whose update
+asks for a reboot (standing in for the kernel) and one standing in for the Secure Boot chain. Its
+`Release` files are signed with a key made in the build stage; only the public key is in the image, and
+apt checks it as it would Ubuntu's. A container shares the Docker host's kernel, whose boot ID doesn't
+change, so the image writes a new ID to `/run/usas-boot-id` at each start and the tests point
+`updates_boot_time_command` at it; the containers restart on reboot (`--restart=always`).
+
+The steps: a check run reports the pending, security, held and phased packages and the automatic-update
+line, and changes nothing; security updates only; everything but an excluded package, whose reboot waits
+(`updates_reboot: never`); a second run changes nothing; a reboot held outside its window; everything with
+`if_required`, where the container must restart and pass its health check, then a second run changes
+nothing; on an encrypted VM, the Secure Boot stand-in holds the reboot; windows, opt-outs and unsupported
+releases skip servers; settings that can't be honoured are refused; a busy dpkg lock makes the server
+`busy`, then it is updated; a server without Python is skipped and one that doesn't answer fails the run;
+a service the update breaks fails its server's health check and keeps the other server from starting
+(`updates_serial=1`); and a `dist` upgrade installs all but the held package. Each checks the run's JSON
+report. Last, at least 80% of the updates role's tasks must have run. It takes about 6 minutes per release.
 
 ## Secure Boot and disk encryption in a VM
 
@@ -171,7 +198,8 @@ throwaway key made for the run.
 
 `tests/fuzz/` holds [Atheris](https://github.com/google/atheris) fuzz targets for the places where
 inventory values become configuration files or shell commands, for the web UI's status API token
-header, and for what the OS catalog tool reads from the vendors. Each target for the roles loads the real template, Jinja
+header, for what servers report to the updates playbook, and for what the OS catalog tool reads from the vendors.
+Each target for the roles loads the real template, Jinja
 expression or allowlist pattern from the role (`tests/fuzz/roles.py`), renders it with Ansible's own
 filters and tests, and checks a property for every input the role would accept:
 
@@ -185,6 +213,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each node-local storage is built by its node when in the run, each shared storage exactly once by a node that uses it, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
+| `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 | `fuzz_vm_inventory.py` | `webui/usas_web/vmplan.py` (the VMs page's run plans and their inventory), `inventory_names`, `parse_limit` and `parse_tags` in `webui/usas_web/runner.py`, and `vm_alias`, `ALIAS` and `Keys.pins` in `webui/usas_web/sshkeys.py` | any listing and settings give a plan or a refusal, nothing else; a plan's inventory loads back to exactly the hosts planned (servers by name, other VMs as `vm-<vmid>` in `usas_vms`), with every typed or reported value `!unsafe` and no line break; a VM outside the inventory gets none of the Vault's secrets, passwordless sudo, a usable IPv4 address and its pinned alias; the plan's limit and tags pass the runner's own checks unchanged; aliases always match `ALIAS`, and any `known_hosts` text yields only aliases |
 
@@ -292,7 +321,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free. The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342 and 2349 for `make test-updates`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install

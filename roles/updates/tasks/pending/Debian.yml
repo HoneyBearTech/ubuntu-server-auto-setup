@@ -1,0 +1,118 @@
+---
+# Ubuntu and Debian: what apt would install. Nothing here changes a package; the package lists are refreshed,
+# also in check mode, as the baseline does.
+
+# Automatic updates (apt-daily, apt-daily-upgrade) and anything else holding apt's or dpkg's locks: wait, then
+# leave the server alone. The probe takes each lock the way apt does (fcntl) and lets go at once.
+- name: Wait for automatic updates and other package managers to finish
+  ansible.builtin.command:
+    argv: [python3, -c, "{{ probe }}", "{{ {'units': updates_os_busy_units, 'locks': updates_os_locks} | to_json }}"]
+  register: updates_busy
+  changed_when: false
+  check_mode: false
+  until: updates_busy.stdout | default('x') | length == 0
+  retries: "{{ [(updates_lock_wait | int) // 10, 1] | max }}"
+  delay: "{{ [updates_lock_wait | int, 10] | min }}"
+  ignore_errors: true
+  vars:
+    probe: |
+      import fcntl, json, subprocess, sys
+      todo = json.loads(sys.argv[1])
+      busy = [u for u in todo["units"] if subprocess.run(["systemctl", "is-active", "--quiet", u]).returncode == 0]
+      for path in todo["locks"]:
+          try:
+              f = open(path, "r+")
+          except OSError:
+              continue
+          with f:
+              try:
+                  fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+              except OSError:
+                  busy.append(path)
+      print("\n".join(busy))
+
+- name: Skip a server whose package manager stays busy
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'busy', 'reason': 'still busy after ' ~ updates_lock_wait
+      ~ ' seconds: ' ~ (updates_busy.stdout_lines | default([]) | map('usas_clean_text', 80) | join(', '))}) }}
+  when: updates_busy is failed
+
+- name: End here for a busy server
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'
+
+- name: Refresh the package lists
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ updates_refresh_max_age | int }}"
+    lock_timeout: "{{ updates_lock_wait | int }}"
+  changed_when: false
+  check_mode: false
+
+- name: List the held packages
+  ansible.builtin.command:
+    argv: [apt-mark, showhold]
+  register: updates_holds
+  changed_when: false
+  check_mode: false
+
+# The C locale, so that the section headings ("kept back", "deferred due to phasing") are the ones the parser
+# knows; no locking, since it only reads.
+- name: Ask apt what it would upgrade
+  ansible.builtin.command:
+    argv: "{{ ['apt-get', '-s', '-o', 'Debug::NoLocking=1'] + (safe if updates_apt_upgrade == 'safe' else ['dist-upgrade']) }}"
+  environment:
+    LC_ALL: C
+  register: updates_simulation
+  changed_when: false
+  check_mode: false
+  vars:
+    safe: [upgrade, --with-new-pkgs]
+
+- name: Choose the updates to install
+  ansible.builtin.set_fact:
+    updates_pending: "{{ pending }}"
+    updates_selection: "{{ pending.upgrades | usas_select_updates(updates_scope, excludes, held) }}"
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'held': held, 'deferred': (pending.kept_back + pending.phased) | difference(held) | unique,
+      'pending': pending.upgrades, 'security_count': pending.upgrades | rejectattr('new') | selectattr('security') | list | length,
+      'truncated': pending.truncated}) }}
+  vars:
+    pending: "{{ updates_simulation.stdout | usas_apt_simulation(updates_max_entries) }}"
+    held: "{{ updates_holds.stdout | usas_package_names }}"
+    excludes: "{{ updates_exclude_packages + ([] if updates_kernel | bool else updates_kernel_packages) }}"
+
+# What installing exactly those would do (dependencies included): an update that needs a package left out would
+# upgrade it anyway, so such a server is skipped instead.
+- name: Ask apt what installing the chosen updates would do
+  ansible.builtin.command:
+    argv: "{{ ['apt-get', '-s', '-o', 'Debug::NoLocking=1', 'install', '--only-upgrade', '--no-remove'] + updates_selection.install }}"
+  environment:
+    LC_ALL: C
+  register: updates_plan_simulation
+  changed_when: false
+  check_mode: false
+  when: updates_apt_upgrade == 'safe' and updates_selection.install | length > 0
+
+- name: Note the plan
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'planned': planned_names, 'excluded': updates_selection.excluded,
+      'reboot': usas_updates_result.reboot | combine({'expected': planned_names | usas_matching(
+      updates_os_reboot_packages + updates_kernel_packages) | length > 0}), 'removals': plan.removals,
+      'status': 'skipped' if dragged else 'pending',
+      'reason': ('the updates would also upgrade packages left out: ' ~ dragged | join(', ')) if dragged else ''}) }}
+  vars:
+    plan: >-
+      {{ (updates_plan_simulation.stdout | usas_apt_simulation(updates_max_entries))
+      if updates_plan_simulation is not skipped else updates_pending }}
+    planned_names: >-
+      {{ (plan.upgrades | map(attribute='name') | list) if updates_selection.install | length > 0
+      or updates_apt_upgrade == 'dist' else [] }}
+    dragged: >-
+      {{ planned_names | usas_matching(updates_selection.excluded + usas_updates_result.held) }}
+
+- name: Leave a server alone whose updates need a package left out
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'

@@ -33,6 +33,23 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - A weekly "OS catalog" workflow checks every pinned image against the vendors (signature, checksum, still
   downloadable), and opens an issue when one fails or a newer build is out. It also runs on pull requests
   that change the catalog.
+- **A playbook that keeps servers updated** (`playbooks/updates.yml`, `make updates-check`, `make updates`;
+  [docs/updates.md](docs/updates.md)), for Ubuntu 22.04, 24.04 and 26.04: the servers this project
+  installed and others you add to the new group `other_servers`. It never configures a server. A check run
+  reports, for each server, the pending updates (security ones marked), held, phased and excluded packages,
+  what its automatic updates already do, and whether it waits for a reboot. An apply installs `all` or
+  `security` updates (`safe` by default, which never removes a package; `dist` opt-in), a batch at a time.
+  It waits for a busy package manager and then skips the server as `busy`. It reboots only with
+  `updates_reboot: if_required`, inside `updates_reboot_window`, and holds the reboot on an encrypted VM
+  after a Secure Boot update. It then checks the server's health (services, system state, optional URLs)
+  and stops starting servers after a failure. Maintenance windows (`updates_window`) and an opt-out
+  (`updates_enabled: false`) are per server or group, and every run writes a JSON and a text report on
+  the control node.
+  **New attack surface:** the control node now connects with sudo to servers this project didn't install,
+  and reads what they report about their packages. Such a server is never sent the Vault admin password
+  as its sudo password (unless `updates_allow_shared_become_password`), host keys are checked strictly,
+  and reported data is checked, stripped and capped before it reaches the report
+  ([docs/security.md](docs/security.md), assurance case boundaries B18 and B19).
 - VMs page: select running Ubuntu VMs (up to 25) and run the baseline against them in check mode, with a
   preset (SSH keys only, SSH hardening and Fail2Ban, the full baseline, or chosen parts) and each VM's
   address, SSH port, login user and extra firewall rules. Each VM's host key is pinned by cluster and VM ID
@@ -55,6 +72,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   check reads a new variable, `classic_sudo_needs_password`, which follows `admin_sudo_nopasswd` unless set;
   and the VMs page's parsing moved to `plugins/module_utils/usas_vms.py`, so the playbooks' own plugins can
   share it (the container image now carries `plugins/`).
+- The assurance case's trust boundaries are numbered once each again: the mail relay and webhook boundary,
+  which shared B12 with the guest agents, is now B17.
+- The integration tests' required check, "Integration tests", now passes when both suites pass: the
+  playbooks' (`tests/run.sh`) and the updates playbook's on each Ubuntu release (`tests/updates.sh`).
+  `tests/coverage.py` counts the per-family task files too, and each suite measures its own roles.
 
 ### Security
 

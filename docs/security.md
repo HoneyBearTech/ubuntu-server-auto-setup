@@ -201,6 +201,23 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
   release runs for a `v*` tag (the `release` environment).
 
+**Updates** (`playbooks/updates.yml`, [updates.md](updates.md))
+
+- The updates playbook never configures a server: it reads, installs the updates you chose, reboots only
+  with `updates_reboot: if_required`, and checks health. It doesn't stop, mask or change automatic updates,
+  write holds, or install anything that isn't an update of an installed package or its new dependency.
+- It never turns off package signature checks: apt checks every package against the server's own keyrings
+  (`tests/updates.sh` fails if the role names an option that would turn that off).
+- A server outside `ubuntu_servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
+  password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
+  there could read it. Host keys are checked strictly on every connection, as for every playbook.
+- What servers report (package names, versions, services) is checked against the role's patterns, stripped
+  of control characters and capped at 5,000 entries per list before it reaches the report, which is
+  readable only by the control node's user.
+- With `safe` (the default) apt never removes a package; an update that would need a package you excluded
+  skips the server instead of upgrading that package. One failed server, or a failed health check, stops
+  the servers not yet started.
+
 ## Optional hardening and notifications
 
 These are off by default and each has its own switch, because each can get in the way of something a
@@ -379,6 +396,14 @@ in the trust store, and how to do the same in the web UI's data volume.
 - **What a guest says about itself.** A VM's guest agent reports whatever the VM's owner wants: another
   VM's address, Ubuntu when it isn't. The VMs page labels this data as reported by the guest and shows
   where each address came from; check them before you act on them.
+- **What a server says about its packages.** The updates report shows what each server claims: a server
+  whose root is hostile can report anything, or report nothing. Updating a server also means trusting its
+  package sources (its mirrors and keys), which the playbook doesn't change.
+- **Reboots and updates that go wrong.** An update can break an application in ways the health checks
+  don't see, and a server may not come back from a reboot. Snapshots (a later release) aren't backups,
+  and rolling back to one also undoes the security updates. On a VM whose disk unlocks with the TPM, a
+  Secure Boot update means typing the passphrase at the console at the next boot; the playbook holds that
+  reboot and says so.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
   installed (with the disk passphrase, if the VM is encrypted), read and change VM disks, read a VM's vTPM
   state and memory (so disk encryption doesn't keep them out), and run commands inside the VMs through

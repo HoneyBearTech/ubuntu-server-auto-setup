@@ -1,0 +1,10 @@
+# For the updates tests' health check: runs until usas-test-kernel has been updated and the server restarted,
+# then fails, as a service broken by an update would. Enabled only by the test that needs it.
+[Unit]
+Description=A service an update breaks (updates tests)
+
+[Service]
+ExecStart=/bin/sh -c 'dpkg -s usas-test-kernel | grep -qx "Version: 1.0" && exec sleep infinity'
+
+[Install]
+WantedBy=multi-user.target
