@@ -175,7 +175,7 @@ def test_the_node_user_pattern_is_the_roles():
 
     from .conftest import REPO
 
-    release = yaml.safe_load((REPO / "roles/ubuntu_release/vars/main.yml").read_text())
+    release = yaml.safe_load((REPO / "roles/os_catalog/vars/main.yml").read_text())
     common = yaml.safe_load((REPO / "roles/common/vars/main.yml").read_text())
     assert k.NODE_USER == release["pve_ssh_user_pattern"] == common["common_username_pattern"]
 

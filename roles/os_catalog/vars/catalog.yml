@@ -1,0 +1,167 @@
+---
+# The OS catalog: every release the playbooks install, each image pinned by URL and checksum, like a lock file.
+# Written by tools/update_os_catalog.py (make catalog), which checks the vendors' signatures where they sign their
+# checksums (signed: true); don't edit it by hand. See docs/interfaces.md.
+# yamllint disable rule:line-length
+os_catalog:
+  - id: "ubuntu-22.04"
+    family: "ubuntu"
+    name: "Ubuntu"
+    version: "22.04"
+    codename: "jammy"
+    eol: "2027-06-01"
+    methods:
+      autoinstall:
+        url: "https://releases.ubuntu.com/22.04/ubuntu-22.04.5-live-server-amd64.iso"
+        checksum: "sha256:9bc6028870aef3f74f4e16b900008179e78b130e6b0b9a140635434a46aa98b0"
+        file: "ubuntu-22.04.5-live-server-amd64.iso"
+        build: "22.04.5"
+        signed: true
+      cloud_image:
+        url: "https://cloud-images.ubuntu.com/releases/jammy/release-20261020/ubuntu-22.04-server-cloudimg-amd64.img"
+        checksum: "sha256:2099e63da0b822ef8e05e3d596c1b402eaaae658fc08ab919cb8495bfcdc488b"
+        file: "ubuntu-22.04-server-cloudimg-amd64-20261020.qcow2"
+        build: "20261020"
+        signed: true
+  - id: "ubuntu-24.04"
+    family: "ubuntu"
+    name: "Ubuntu"
+    version: "24.04"
+    codename: "noble"
+    eol: "2029-05-31"
+    methods:
+      autoinstall:
+        url: "https://releases.ubuntu.com/24.04/ubuntu-24.04.5-live-server-amd64.iso"
+        checksum: "sha256:97f3d7ffb032c3eb3b23d2c8be9cc76e60c2c1f2c0146ba5ba9fe01cafae0fd8"
+        file: "ubuntu-24.04.5-live-server-amd64.iso"
+        build: "24.04.5"
+        signed: true
+      cloud_image:
+        url: "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img"
+        checksum: "sha256:04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94"
+        file: "ubuntu-24.04-server-cloudimg-amd64-20261017.qcow2"
+        build: "20261017"
+        signed: true
+  - id: "ubuntu-26.04"
+    family: "ubuntu"
+    name: "Ubuntu"
+    version: "26.04"
+    codename: "resolute"
+    eol: "2031-05-29"
+    methods:
+      autoinstall:
+        url: "https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso"
+        checksum: "sha256:cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927"
+        file: "ubuntu-26.04.1-live-server-amd64.iso"
+        build: "26.04.1"
+        signed: true
+      cloud_image:
+        url: "https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img"
+        checksum: "sha256:5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
+        file: "ubuntu-26.04-server-cloudimg-amd64-20261016.qcow2"
+        build: "20261016"
+        signed: true
+  - id: "debian-12"
+    family: "debian"
+    name: "Debian"
+    version: "12"
+    codename: "bookworm"
+    eol: "2028-06-30"
+    methods:
+      cloud_image:
+        url: "https://cloud.debian.org/images/cloud/bookworm/20261021-2638/debian-12-genericcloud-amd64-20261021-2638.qcow2"
+        checksum: "sha512:9f181877006e8d9ca4f4554eba8729a829936f0f7d1db5e77f69b1ef0f6bc372b4d46f3dae39b10d84f9131496c2cc1d449264f26577fe934a79de5a5512a3dd"
+        file: "debian-12-genericcloud-amd64-20261021-2638.qcow2"
+        build: "20261021-2638"
+        signed: false
+  - id: "debian-13"
+    family: "debian"
+    name: "Debian"
+    version: "13"
+    codename: "trixie"
+    eol: "2030-06-30"
+    methods:
+      cloud_image:
+        url: "https://cloud.debian.org/images/cloud/trixie/20261021-2638/debian-13-genericcloud-amd64-20261021-2638.qcow2"
+        checksum: "sha512:16e0965312c56feb331049d45d2b1b5778f3f942a33d4300eedbb97527707f2bea87c0006f3e4cc7a25fadbff739c4e235a51fb9bcd1b66fd554f7f8e80ba45c"
+        file: "debian-13-genericcloud-amd64-20261021-2638.qcow2"
+        build: "20261021-2638"
+        signed: false
+  - id: "centos-stream-9"
+    family: "rhel"
+    name: "CentOS Stream"
+    version: "9"
+    codename: ""
+    eol: "2027-05-31"
+    methods:
+      cloud_image:
+        url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-20261023.1.x86_64.qcow2"
+        checksum: "sha256:c705412b3b80cace91f1a205c685fc1da168637fed4f3fce022c2147d5276d18"
+        file: "CentOS-Stream-GenericCloud-9-20261023.1.x86_64.qcow2"
+        build: "20261023.1"
+        signed: false
+  - id: "centos-stream-10"
+    family: "rhel"
+    name: "CentOS Stream"
+    version: "10"
+    codename: ""
+    eol: "2030-05-31"
+    methods:
+      cloud_image:
+        url: "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-20261021.0.x86_64.qcow2"
+        checksum: "sha256:f79f96b884b94e89b97386173fc1ebf8d20842a65f55da0f365a5dddf5c72e6e"
+        file: "CentOS-Stream-GenericCloud-10-20261021.0.x86_64.qcow2"
+        build: "20261021.0"
+        signed: false
+  - id: "rocky-9"
+    family: "rhel"
+    name: "Rocky Linux"
+    version: "9"
+    codename: ""
+    eol: "2032-05-31"
+    methods:
+      cloud_image:
+        url: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2"
+        checksum: "sha256:92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8"
+        file: "Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2"
+        build: "9.8-20260525.0"
+        signed: true
+  - id: "rocky-10"
+    family: "rhel"
+    name: "Rocky Linux"
+    version: "10"
+    codename: ""
+    eol: "2035-05-31"
+    methods:
+      cloud_image:
+        url: "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
+        checksum: "sha256:9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48"
+        file: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
+        build: "10.2-20260525.0"
+        signed: true
+  - id: "alma-9"
+    family: "rhel"
+    name: "AlmaLinux"
+    version: "9"
+    codename: ""
+    eol: "2032-05-31"
+    methods:
+      cloud_image:
+        url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-9.8-20261005.x86_64.qcow2"
+        checksum: "sha256:25942b554efaac077e2f60d6bb27bd3332c171454cc21bbd33e5f79244d7570f"
+        file: "AlmaLinux-9-GenericCloud-9.8-20261005.x86_64.qcow2"
+        build: "9.8-20261005"
+        signed: true
+  - id: "alma-10"
+    family: "rhel"
+    name: "AlmaLinux"
+    version: "10"
+    codename: ""
+    eol: "2035-05-31"
+    methods:
+      cloud_image:
+        url: "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64.qcow2"
+        checksum: "sha256:cbee4726fc0f5a60694bb4f289003cc221e715dfbacebcce76b54daf386d8eca"
+        file: "AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64.qcow2"
+        build: "10.2-20261012.0"
+        signed: true

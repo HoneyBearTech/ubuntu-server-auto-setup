@@ -41,12 +41,17 @@ copied into the repository ("vendored").
 | Fuzzing engine (atheris) | `requirements-fuzz.in`, pinned in `requirements-fuzz.txt` | exact version with SHA-256 hashes | the fuzzing workflow and `make fuzz` |
 | Chromium for the browser tests (Playwright's headless build) | the version of `@playwright/test` in `package-lock.json` | that Playwright release's browser build, downloaded over HTTPS from Playwright's servers (not hash-pinned by this repository); CI caches it by Playwright version | `npx playwright install --with-deps --only-shell chromium` (CI); `npx playwright install chromium` locally |
 | Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test` |
+| Operating system images (Ubuntu installer ISOs and cloud images, Debian, CentOS Stream, Rocky Linux and AlmaLinux cloud images) | `roles/os_catalog/vars/catalog.yml` (the OS catalog), built by `tools/update_os_catalog.py` | exact URL and checksum per image; the vendors' signatures checked against pinned fingerprints when the catalog is built (`tools/os-catalog-keys/`) | downloaded by the Proxmox node during a run; the weekly OS catalog workflow reports new builds and gone pins |
+| Vendor signing keys (Ubuntu CD image and cloud image keys, Rocky Linux 9 and 10, AlmaLinux 9 and 10) | `roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`, `tools/os-catalog-keys/*.asc` | full fingerprints in `tools/update_os_catalog.py` and `installer_signing_fingerprint` | `gpgv`, when the catalog is built (and at run time for an unpinned Ubuntu point release) |
 
 On the systems they manage, the playbooks install packages only from Ubuntu's and Debian's own archives
 (`apt`): `xorriso` and `gpgv` on the Proxmox nodes; UFW, Fail2Ban, unattended-upgrades, qemu-guest-agent and a few
-tools on the servers. The Ubuntu ISO is verified against Ubuntu's published SHA-256 checksum, after `gpgv`
-has checked Ubuntu's signature on the checksum file with the CD image signing key that ships in
-`roles/installer_iso/files/` (pinned by fingerprint; it is never fetched at run time).
+tools on the servers. The Ubuntu ISO is verified against the checksum the OS catalog pins, which was taken
+from Ubuntu's checksum file after `gpgv` checked Ubuntu's signature on it with the CD image signing key (pinned
+by fingerprint; never fetched at run time). A point release the catalog doesn't pin is checked the same way at
+run time, with the key that ships in `roles/installer_iso/files/`. These are runtime inputs on your own
+infrastructure rather than dependencies of the project's code: the vendors' mirrors and signing keys are
+trusted as [security.md](security.md) describes.
 
 Version ranges, not exact pins, are used for a control node you set up yourself on purpose: there the
 project is a set of playbooks you run, and you should get Ansible's and the collections' bug and security

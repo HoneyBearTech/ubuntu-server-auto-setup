@@ -4,7 +4,7 @@ LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 
-.PHONY: help deps app lint syntax test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys
+.PHONY: help deps app lint syntax test catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -26,6 +26,15 @@ syntax: ## Syntax-check every playbook against the example inventory
 
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
+
+catalog: ## Pin the newest image of every supported release in the OS catalog (vendor signatures checked; needs gpgv)
+	python3 tools/update_os_catalog.py
+
+catalog-check: ## Check every image the OS catalog pins against the vendors again, and list newer builds
+	python3 tools/update_os_catalog.py --check
+
+catalog-test: ## Unit tests for tools/update_os_catalog.py, offline (needs gpg; pytest from requirements-dev.txt)
+	python3 -m pytest tests/tools -p no:cacheprovider --cov=tools --cov-report=term-missing --cov-fail-under=80
 
 fuzz: ## Atheris fuzz targets, FUZZ_SECONDS each (Linux x86-64; needs requirements-fuzz.txt)
 	tests/fuzz/run.sh

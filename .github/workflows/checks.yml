@@ -54,9 +54,13 @@ jobs:
           docker run --rm -v "$PWD:/repo:ro" -w /repo
           rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
-      # The web UI's Python, with the rules in ruff.toml (including bandit's security checks).
+      # The web UI's Python and tools/, with the rules in ruff.toml (including bandit's security checks).
       - name: Lint Python (ruff)
         run: ruff check --output-format github
+
+      # tools/update_os_catalog.py, offline: made-up vendor indexes signed with a throwaway key (make catalog-test).
+      - name: Unit-test the OS catalog tool
+        run: make catalog-test
 
       # The Docker Hub overview the release publishes: within Docker Hub's size limit, Markdown it renders,
       # absolute URLs only.

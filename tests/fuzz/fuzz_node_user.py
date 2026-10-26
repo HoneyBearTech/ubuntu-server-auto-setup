@@ -18,9 +18,9 @@ import atheris
 with atheris.instrument_imports():
     import roles
 
-RELEASE = roles.role_vars("ubuntu_release")
+RELEASE = roles.role_vars("os_catalog")
 COMMON = roles.role_vars("common")
-ISO_DIR = "roles/ubuntu_release/tasks/iso_dir.yml"
+ISO_DIR = "roles/os_catalog/tasks/iso_dir.yml"
 # The last of the two set_fact tasks for pve_iso_dir: "Use the folder recorded for the ISO storage".
 PICK = roles.set_fact_expression(ISO_DIR, "pve_iso_dir", last=True)
 PICK_VARS = roles.set_fact_vars(ISO_DIR, "pve_iso_dir", last=True)
@@ -60,9 +60,9 @@ def iso_dir(fdp):
         slurp = {"content": base64.b64encode(json.dumps([recorded]).encode()).decode()}  # not an object
     else:
         slurp = {"content": base64.b64encode(json.dumps(recorded).encode()).decode()}
-    dirs = PICK_VARS["ubuntu_release_dirs"].render(ubuntu_release_iso_dirs=slurp)
-    chosen = PICK_VARS["ubuntu_release_recorded"].render(ubuntu_release_dirs=dirs, pve_iso_storage=storage)
-    picked = PICK.render(ubuntu_release_recorded=chosen, pve_iso_dir_pattern=RELEASE["pve_iso_dir_pattern"])
+    dirs = PICK_VARS["os_catalog_dirs"].render(os_catalog_iso_dirs=slurp)
+    chosen = PICK_VARS["os_catalog_recorded"].render(os_catalog_dirs=dirs, pve_iso_storage=storage)
+    picked = PICK.render(os_catalog_recorded=chosen, pve_iso_dir_pattern=RELEASE["pve_iso_dir_pattern"])
     assert isinstance(picked, str), repr(picked)
     if picked:
         assert shape >= 2 and picked == recorded.get(storage), (picked, recorded, storage)

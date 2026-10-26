@@ -8,4 +8,4 @@ galaxy_info:
     - name: Debian
       versions: [bookworm, trixie]
 dependencies:
-  - role: ubuntu_release
+  - role: os_catalog

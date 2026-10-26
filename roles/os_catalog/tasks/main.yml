@@ -1,0 +1,6 @@
+---
+# Runs first in every role that depends on this one. The catalog is a file of its own, which
+# tools/update_os_catalog.py writes; only extra vars (-e) take precedence over it, as in the integration tests.
+- name: Load the OS catalog
+  ansible.builtin.include_vars:
+    file: catalog.yml

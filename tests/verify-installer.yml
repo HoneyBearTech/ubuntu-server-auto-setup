@@ -2,10 +2,13 @@
 - name: Verify the remastered installer ISO
   hosts: proxmox_nodes
   gather_facts: false
+  vars:
+    # tests/real-iso.sh passes the real catalog's ISO; tests/run.sh's stand-in is 26.04.1.
+    verify_installer_iso: ubuntu-26.04.1-live-server-amd64-autoinstall.iso
   tasks:
     - name: Extract grub.cfg from the autoinstall ISO
       ansible.builtin.command:
-        argv: [xorriso, -osirrox, "on", -indev, /var/lib/vz/template/iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso,
+        argv: [xorriso, -osirrox, "on", -indev, "/var/lib/vz/template/iso/{{ verify_installer_iso }}",
                -extract, /boot/grub/grub.cfg, /tmp/verify-grub.cfg]
       changed_when: false
 
