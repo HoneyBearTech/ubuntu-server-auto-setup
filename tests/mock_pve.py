@@ -25,7 +25,7 @@ without answering, "after" carries the call out (a VM is created) and then close
 dropped calls are listed in the state's "dropped".
 
 Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
-                   [--fixture-vms]
+                   [--fixture-vms] [--vm-target VMID=IPV4 ...]
 The state (VMs, config changes, requests) is at GET /mock/state, for the tests' assertions.
 """
 
@@ -459,8 +459,21 @@ def main():
     # The web UI smoke test runs the mock in its own container, reached by name (tests/webui-smoke.sh).
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--fixture-vms", action="store_true", help="also list the fixed VMs of FIXTURE_VMS")
+    # The VMs page's integration test (tests/webui-vms.sh): running Ubuntu VMs whose guest agent reports the
+    # given address, such as a test container's. Two VM IDs with one address make a guest that lies about it.
+    parser.add_argument("--vm-target", action="append", default=[], metavar="VMID=IPV4",
+                        help="also list a running Ubuntu 26.04 VM whose agent reports this address")
     args = parser.parse_args()
-    FIXTURES["enabled"] = args.fixture_vms
+    FIXTURES["enabled"] = args.fixture_vms or bool(args.vm_target)
+    if not args.fixture_vms:
+        FIXTURE_VMS.clear()
+    for target in args.vm_target:
+        vmid, _, address = target.partition("=")
+        FIXTURE_VMS[int(vmid)] = {
+            "name": f"app-{vmid}", "maxcpu": 2, "mem": 536_870_912, "maxmem": 2_147_483_648, "uptime": 300,
+            "config": {"agent": "1", "ostype": "l26"},
+            "agent": ("ok", [_iface("lo", "127.0.0.1"), _iface("eth0", address)], _ubuntu("26.04", "Resolute Raccoon"),
+                      f"app-{vmid}")}
 
     with open(args.keys_file, "rb") as fh:
         KeysHandler.keys = fh.read()
