@@ -266,6 +266,9 @@ that UID. DSM picks its users' UIDs, so match the node user to it:
    `getent passwd <uid>` that it is free) and hand it its work directory again:
    `chown -R usas-build: /var/tmp/ubuntu-server-auto-setup`.
 3. Run `prepare-node.yml` again: its write test now passes.
+4. Hand the user the ISOs that earlier root builds left in that folder (`chown usas-build <folder>/ubuntu-*.iso`
+   on one node): the build sets their mode, which only their owner may do there, and stops with "Operation not
+   permitted" otherwise.
 
 **By hand.** The same, as root on the node, for the `local` storage:
 
