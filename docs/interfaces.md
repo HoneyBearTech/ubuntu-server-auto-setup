@@ -38,7 +38,7 @@ API for other programs. What should be reachable from where is described in the
 The variables below are the project's interface: names and meanings change only in a minor release before
 1.0 (with an "Upgrading" note in the [changelog](../CHANGELOG.md)) and in a major release after it. The
 full list, with every default and a comment for each, lives in each role's `defaults/main.yml`:
-`roles/ubuntu_release`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
+`roles/os_catalog`, `roles/installer_iso`, `roles/proxmox_vm`, `roles/proxmox_node_user`, `roles/common`, `roles/firewall`,
 `roles/ssh_hardening`, `roles/fail2ban`, `roles/hardening` and `roles/updates`. Where a role's default and the example inventory differ, the
 example shows a typical value.
 
@@ -53,13 +53,13 @@ example shows a typical value.
 | `admin_extra_ssh_keys` | `[]` | More public keys, one per list item. |
 | `ssh_port` | `22` | The SSH port the baseline configures, opens in UFW and watches with Fail2Ban. |
 
-**Ubuntu release and ISOs** (`ubuntu_release`, `installer_iso`)
+**Ubuntu release and ISOs** (`os_catalog`, `installer_iso`)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ubuntu_release` | `"26.04"` | The release directory on the mirror. |
-| `ubuntu_point_release` | `"26.04.1"` | The point release whose ISO is downloaded. |
-| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from. A mirror must publish all three. |
+| `ubuntu_release` | `"26.04"` | The Ubuntu release, and the release directory on the mirror. |
+| `ubuntu_point_release` | `""` | The point release whose ISO is downloaded. Empty means the one the OS catalog pins for `ubuntu_release` (26.04.1 today), checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed `SHA256SUMS` at run time. |
+| `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO comes from; any mirror works for the point release the catalog pins, since the catalog's checksum decides. For another point release, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from here too, so the mirror must publish all three. |
 | `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image) on each node that uses it. The installer ISO is built once in a storage the cluster shares (such as NFS), and on every node that uses a node-local one. |
 | `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`, or for a user other than root the answer `prepare-node.yml` recorded), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
 | `installer_work_dir` | `/var/tmp/ubuntu-server-auto-setup` | Scratch space on the node (ISO build, seed files). It must be a folder of `pve_ssh_user`'s, mode `0700`. |
@@ -292,7 +292,9 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | `make updates-check` | `playbooks/updates.yml --check` | `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
 | `make updates` | `playbooks/updates.yml` | `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
-| `make deps`, `make lint`, `make syntax` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
+| `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
+| `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
+| `make deps`, `make lint`, `make syntax`, `make catalog-test` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
 
 `LIMIT=` becomes `--limit` (for `build-installer`, a node builds only if it is in the limit too), `ARGS=` is passed to `ansible-playbook` unchanged,
 and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `common`, `firewall`, `ssh`,
@@ -313,6 +315,28 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
+
+### The OS catalog
+
+`roles/os_catalog/vars/catalog.yml` lists every release the project supports, each image pinned like a lock
+file. `tools/update_os_catalog.py` writes it (don't edit it by hand) and reads it back; the roles load it as the
+variable `os_catalog`. Each entry has:
+
+| Field | Example | Meaning |
+| --- | --- | --- |
+| `id` | `ubuntu-26.04`, `debian-13`, `centos-stream-10`, `rocky-10`, `alma-10` | The release's name in the project. |
+| `family` | `ubuntu`, `debian`, `rhel` | Which baseline tasks apply. |
+| `name`, `version`, `codename` | `Debian`, `"13"`, `trixie` | For people (the codename is empty on the RHEL family). |
+| `eol` | `"2030-06-30"` | When the vendor's support ends: standard support for Ubuntu, LTS for Debian, the end of life for the RHEL family. |
+| `methods` | `autoinstall`, `cloud_image` | How it can be installed; `autoinstall` (the Ubuntu installer ISO) is Ubuntu only. |
+
+Each method has `url` (HTTPS, on the vendor's host), `checksum` (`sha256:<hex>`, or `sha512:<hex>` where the
+vendor publishes only SHA-512, as Debian does for cloud images), `file` (the name it is stored under on the
+Proxmox node; cloud images end in `.qcow2`, as Proxmox's Import content requires), `build` (the point release or
+the vendor's build serial) and `signed` (`true` when the vendor signs the checksum file the checksum came from and
+the script checked that signature; `false` for CentOS Stream and Debian's cloud images, which are HTTPS only).
+The catalog lists all eleven releases, but this release installs only the Ubuntu installer ISOs from it; the
+other images are used once cloud-image installs land (see the [roadmap](roadmap.md)).
 
 ### The web UI
 
@@ -393,7 +417,8 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for a new server with `net_mode: dhcp`, check first that the token may ask its guest agent (`/access/permissions`); for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). A read whose connection drops (pveproxy restarting a worker) is retried up to 3 times, 5 seconds apart; any answer, an error included, is final. A VM creation whose connection drops is retried the same way, and the run carries on only with a VM of that ID that has the host's name and the description "Installed by ubuntu-server-auto-setup". |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
-| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; `SHA256SUMS` is checked against Ubuntu's signature. `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails; any answer from the server, an error included, is final | The Ubuntu ISO, `SHA256SUMS` and `SHA256SUMS.gpg`. |
+| `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |
+| Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline in check mode: nothing changes. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |

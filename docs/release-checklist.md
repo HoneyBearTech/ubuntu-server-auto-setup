@@ -468,7 +468,7 @@ Real Proxmox run (docs/release-checklist.md), <date>
 - Under test: commit <sha>, image built with USAS_VERSION=<version>
 - Proxmox VE <version>, <n>-node cluster, ISO storage: <type, e.g. NFS shared>
 - ansible-core <version>; collections: community.general <version>, ... (ansible-galaxy collection list)
-- Ubuntu <point release> live server ISO
+- Ubuntu <point release> live server ISO (the one roles/os_catalog/vars/catalog.yml pins)
 - build-installer, provision-vms, baseline: failed=0; second runs changed=0
 - Hand checks: key-only SSH, password and root refused, UFW, Fail2Ban, unattended-upgrades, hostname,
   sudo needs a password, SSH port change (or: not tested, why)

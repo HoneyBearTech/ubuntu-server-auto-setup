@@ -1,0 +1,31 @@
+---
+# Shared by installer_iso, proxmox_vm and proxmox_node_user (they depend on this role). vars/catalog.yml is the
+# OS catalog: the images the playbooks install, each pinned by URL and checksum. tools/update_os_catalog.py
+# writes it after checking the vendors' signatures (make catalog); a run checks only the pinned checksum.
+# The Ubuntu release the installer ISO is for.
+ubuntu_release: "26.04"
+# Empty means the point release the OS catalog pins, checked against the catalog's checksum. Any other point
+# release is checked against Ubuntu's signed SHA256SUMS when it's downloaded.
+ubuntu_point_release: ""
+ubuntu_iso_base_url: "https://releases.ubuntu.com/{{ ubuntu_release }}"
+ubuntu_iso_name: "ubuntu-{{ os_catalog_point_release }}-live-server-amd64.iso"
+installer_iso_name: "{{ ubuntu_iso_name | regex_replace('\\.iso$', '-autoinstall.iso') }}"
+
+# The installer ISO the catalog pins for ubuntu_release ({url, checksum, file, build, signed}; {} if none), and
+# the point release in use. Worked out from the settings above; not settings themselves.
+os_catalog_ubuntu_iso: >-
+  {{ os_catalog | selectattr('id', 'equalto', 'ubuntu-' ~ ubuntu_release) | map(attribute='methods')
+     | selectattr('autoinstall', 'defined') | map(attribute='autoinstall') | first | default({}, true) }}
+os_catalog_point_release: "{{ ubuntu_point_release or os_catalog_ubuntu_iso.build | default(ubuntu_release) }}"
+
+# The Proxmox storage for the ISOs (it must allow ISO images; a storage shared by the cluster, such as NFS,
+# works for every node). Its folder on the node is asked from Proxmox (`pvesm path`); set pve_iso_dir only
+# to override that, for an unusual setup.
+pve_iso_storage: local
+pve_iso_dir: ""
+installer_work_dir: /var/tmp/ubuntu-server-auto-setup
+
+# The user Ansible logs in to the Proxmox nodes as over SSH; the proxmox_nodes' ansible_user must match (the roles
+# check). root needs nothing else. Any other user needs playbooks/prepare-node.yml run once (it logs in as root)
+# first: it creates the user, with write access to the ISO storages' folders only (docs/installing.md).
+pve_ssh_user: root

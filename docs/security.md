@@ -37,14 +37,34 @@ defaults and the advice in the README's "Running it securely" section and in [we
 
 **Downloads**
 
-- The Ubuntu ISO is downloaded over HTTPS and checked against the SHA-256 checksum Ubuntu publishes for it
-  in `SHA256SUMS`. Before that checksum is used, `gpgv` checks Ubuntu's signature on `SHA256SUMS`
-  (`SHA256SUMS.gpg`) against the Ubuntu CD image signing key that ships with the role
+- **The OS catalog** (`roles/os_catalog/vars/catalog.yml`) pins every image the project installs by URL and
+  checksum, like a lock file, and is reviewed like code: it changes only through a pull request. The
+  maintainer builds it with `tools/update_os_catalog.py`, which reads the vendors' indexes over HTTPS from
+  their own hosts only and, where a vendor signs its checksum file, checks that signature with `gpgv` against
+  a key whose full fingerprint is pinned in the script (the keys are in `tools/os-catalog-keys/`, never fetched
+  at run time):
+
+  | Images | Signed checksum file | Key (fingerprint) |
+  | --- | --- | --- |
+  | Ubuntu installer ISOs | `SHA256SUMS` + `SHA256SUMS.gpg` | Ubuntu CD Image Automatic Signing Key (2012), `8439 38DF 228D 22F7 B374 2BC0 D94A A3F0 EFE2 1092` |
+  | Ubuntu cloud images | `SHA256SUMS` + `SHA256SUMS.gpg` | UEC Image Automatic Signing Key, `D2EB 4462 6FDD C30B 513D 5BB7 1A5D 6C4C 7DB8 7C81` |
+  | Rocky Linux 9 / 10 | per image `.CHECKSUM` + `.CHECKSUM.asc` | `21CB 256A E16F C54C 6E65 2949 702D 426D 350D 275D` / `FC22 6859 C086 0BF0 DDB9 5B08 5B10 6C73 6FED FC85` |
+  | AlmaLinux 9 / 10 | `CHECKSUM` + `CHECKSUM.asc` | `BF18 AC28 7617 8908 D6E7 1267 D36C B86C B86B 3716` / `EE6D B7B9 8F5B F5ED D9DA 0DE5 DEE5 C11C C2A1 E572` |
+  | CentOS Stream 9 / 10, Debian 12 / 13 cloud images | none published: the checksum is taken over HTTPS only, and the entry says `signed: false` | none |
+
+  The Rocky and Alma fingerprints are the ones the vendors list at rockylinux.org/keys and
+  almalinux.org/security; the Ubuntu ones are Ubuntu's published CD image and cloud image signing keys. CI
+  runs the same check on every pull request that changes the catalog, and weekly, when it also opens an issue
+  if a pinned image is gone or a newer build is out. A run on your nodes checks only the pinned checksum, so a
+  mirror can't swap the image, and nothing in a run depends on a key or an index fetched that day.
+- The Ubuntu ISO is downloaded over HTTPS and must have the checksum the catalog pins; a copy already in the
+  ISO storage is kept only if it has it. A mismatch stops the run before the ISO is used. For a point release
+  the catalog doesn't pin (`ubuntu_point_release`), the run checks instead: `gpgv` verifies Ubuntu's signature
+  on `SHA256SUMS` (`SHA256SUMS.gpg`) against the Ubuntu CD image signing key that ships with the role
   (`roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`), pinned by its full fingerprint
-  `8439 38DF 228D 22F7 B374 2BC0 D94A A3F0 EFE2 1092` (`installer_signing_fingerprint`). The key is never
-  fetched from a keyserver at run time. A missing or bad signature, a signature by any other key, or a
-  checksum mismatch stops the run before the ISO is used. To inspect the shipped key:
-  `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`.
+  (`installer_signing_fingerprint`), before the ISO's checksum is taken from it. A missing or bad signature,
+  a signature by any other key, or a checksum mismatch stops the run. To inspect the shipped keys:
+  `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg tools/os-catalog-keys/*.asc`.
 - SSH public keys come from `https://github.com/<github_user>.keys` over HTTPS. Only lines that look like
   public keys are used, and they reach the installer configuration as data written with `to_nice_yaml`, so they can't add other
   configuration or commands.
@@ -422,6 +442,9 @@ in the trust store, and how to do the same in the web UI's data volume.
   Fail2Ban until the baseline has run; `make site` runs it straight away.
 - **Upstream components.** Vulnerabilities in Ubuntu, Proxmox VE, OpenSSH, Ansible or its collections
   are fixed upstream; how the project tracks them is in [dependencies.md](dependencies.md).
-- **Ubuntu's signing key itself.** The ISO is trusted because Ubuntu's CD image signing key signed its
-  checksum. If Ubuntu replaces that key, the role stops until a release ships the new key; if the key were
-  compromised, the check would not catch it.
+- **The vendors' signing keys and mirrors themselves.** An image is trusted because its vendor's key signed
+  its checksum (Ubuntu, Rocky Linux, AlmaLinux), or, for CentOS Stream and Debian's cloud images, which
+  publish no signature, because the vendor's HTTPS site served that checksum when the catalog was built. If a
+  vendor replaces its key, `make catalog` and the weekly check stop until a release ships the new key; if a
+  key or a vendor's site were compromised when the catalog was built, the check would not catch it. The
+  reviewed, pinned checksum means a compromise after that can't reach a run.

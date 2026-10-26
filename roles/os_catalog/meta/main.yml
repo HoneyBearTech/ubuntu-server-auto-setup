@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: HoneyBearTech
-  description: Shared Ubuntu release and ISO storage defaults, and the task that finds the ISO storage's folder
+  description: The OS catalog (pinned images), the shared ISO storage defaults, and the task that finds the ISO storage's folder
   license: MIT
   min_ansible_version: "2.20"
   platforms:

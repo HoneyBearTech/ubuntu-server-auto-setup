@@ -2,16 +2,17 @@
 name: Installer ISO
 
 # The integration tests use a small stand-in ISO. This job remasters the real Ubuntu 26.04 live-server ISO
-# (about 3 GB) in the test "Proxmox node" container and checks the result: Ubuntu's signature on
-# SHA256SUMS (with the key that ships in the role), the checksum from it, the autoinstall kernel argument,
-# and BIOS and UEFI boot records identical to the original. Then it installs Ubuntu from that ISO in a VM
+# (about 3 GB) that the OS catalog pins, in the test "Proxmox node" container, and checks the result: the
+# checksum the catalog pins, Ubuntu's signature on SHA256SUMS (with the key that ships in the role, as a run
+# checks a point release the catalog doesn't pin), the autoinstall kernel argument, and BIOS and UEFI boot
+# records identical to the original. Then it installs Ubuntu from that ISO in a VM
 # with Secure Boot (OVMF, Microsoft's keys enrolled) and a TPM 2.0, as Proxmox runs the role's VMs, with
 # the role's user-data for an encrypted disk, and checks Secure Boot, LUKS2, unlocking with the TPM and the
 # recovery passphrase (tests/secure-boot-install.sh).
-# Weekly (Ubuntu can publish a new point release or change the ISO layout at any time) and on changes to
-# the installer roles or the installer's configuration. The ISO is cached by its SHA-256, so only a new point
-# release downloads it again; the role still checks the cached copy against the signed SHA256SUMS, so a bad
-# cache entry is re-downloaded.
+# Weekly (Ubuntu can move or change what the catalog pins; the catalog workflow reports new point releases) and on
+# changes to the installer roles, the catalog or the installer's configuration. The ISO is cached by its SHA-256,
+# so only a new pin downloads it again; the role still checks the cached copy against the catalog's checksum, so a
+# bad cache entry is re-downloaded.
 on:  # yamllint disable-line rule:truthy
   schedule:
     - cron: "23 4 * * 3" # weekly, Wednesday 04:23 UTC
@@ -19,7 +20,7 @@ on:  # yamllint disable-line rule:truthy
   pull_request:
     paths:
       - "roles/installer_iso/**"
-      - "roles/ubuntu_release/**"
+      - "roles/os_catalog/**"
       - "roles/proxmox_vm/templates/**"
       - "tests/real-iso.sh"
       - "tests/show-failures.sh"
@@ -64,13 +65,15 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           df -h /
 
-      - name: Find the current live-server ISO
+      - name: Find the live-server ISO the OS catalog pins
         id: iso
         run: |
-          line="$(curl -fsS --retry 3 https://releases.ubuntu.com/26.04/SHA256SUMS \
-            | grep -E '^[0-9a-f]{64} \*ubuntu-26\.04(\.[0-9]+)?-live-server-amd64\.iso$' | sort -V -k2 | tail -n 1)"
+          line="$(python3 -c 'import yaml
+          catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))["os_catalog"]
+          iso = next(e for e in catalog if e["id"] == "ubuntu-26.04")["methods"]["autoinstall"]
+          print(iso["checksum"].removeprefix("sha256:"), iso["file"])')"
           sha="${line%% *}"
-          name="${line#*\*}"
+          name="${line#* }"
           [[ "$sha" =~ ^[0-9a-f]{64}$ && "$name" =~ ^ubuntu-26\.04(\.[0-9]+)?-live-server-amd64\.iso$ ]]
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
