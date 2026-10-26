@@ -86,8 +86,8 @@ def one_input(data):
         rows[vmid] = {
             "vmid": vmid, "name": text(fdp, 70), "node": text(fdp, 10),
             "type": fdp.PickValueInList(["qemu", "qemu", "lxc", ""]), "template": fdp.ConsumeBool(),
-            "status": fdp.PickValueInList(STATUS), "lock": fdp.PickValueInList(["", "", "backup", text(fdp, 5)]),
-            "support": fdp.PickValueInList(SUPPORT), "reason": text(fdp),
+            "status": fdp.PickValueInList(list(STATUS)), "lock": fdp.PickValueInList(["", "", "backup", text(fdp, 5)]),
+            "support": fdp.PickValueInList(list(SUPPORT)), "reason": text(fdp),
             "addresses": [maybe_ip(fdp) for _ in range(fdp.ConsumeIntInRange(0, 3))], "ip": maybe_ip(fdp),
             "ip_source": fdp.PickValueInList(["agent", "ipconfig0", "inventory", None]),
         }
