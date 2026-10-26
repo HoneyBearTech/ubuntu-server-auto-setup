@@ -78,8 +78,12 @@ describe("the VMs page", () => {
     expect(win.getByText("Not supported")).toBeTruthy();
     expect(within(row("ct-dns")).getByText("Container (LXC)")).toBeTruthy();
     expect(within(row("golden")).getByText("Template")).toBeTruthy();
-    // Nothing can be selected yet.
-    expect(document.querySelectorAll("tbody input")).toHaveLength(0);
+    // Only the running Ubuntu VMs can be selected; the others say why not.
+    const boxes = [...document.querySelectorAll<HTMLInputElement>("tbody input[type=checkbox]")];
+    expect(boxes.filter((b) => !b.disabled).map((b) => b.id)).toEqual(["vm-select-101", "vm-select-102"]);
+    const stopped = document.getElementById("vm-select-103") as HTMLInputElement;
+    expect(document.getElementById(stopped.getAttribute("aria-describedby") ?? "")?.textContent)
+      .toBe("Can't be selected: It isn't running.");
     // The nav has the page, first in the Playbooks group.
     const playbooks = document.querySelector('[aria-labelledby="nav-playbooks"]') as HTMLElement;
     expect(within(playbooks).getAllByRole("link")[0].getAttribute("aria-current")).toBe("page");

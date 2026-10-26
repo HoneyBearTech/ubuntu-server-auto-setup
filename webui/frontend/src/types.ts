@@ -57,6 +57,46 @@ export interface Run {
   returncode: number | null;
   done: boolean;
   playbook: string | null;
+  // Runs from the VMs page (older runs have none of these).
+  kind?: "playbook" | "vms" | string;
+  tags?: string[];
+  targets?: RunTarget[];
+  plan?: string;
+}
+
+// A host a VMs page run was planned for (vmplan.Plan.summary).
+export interface RunTarget {
+  vmid: number;
+  name: string;
+  pve_name: string;
+  node: string;
+  static: boolean;
+  address: string;
+  source: string;
+  port: number | null;
+  user: string;
+  fingerprints: string[];
+  manage_hostname: boolean;
+  override: boolean;
+}
+
+// The summary callback's results per host (runs/<id>.hosts.json).
+export interface HostResult {
+  ok: number;
+  changed: number;
+  failed: number;
+  unreachable: number;
+  skipped: number;
+  rescued: number;
+  ignored: number;
+  changed_tasks: string[];
+  failed_tasks: { task: string; message: string }[];
+}
+
+export interface HostResults {
+  finished: boolean;
+  updated: number;
+  hosts: Record<string, HostResult>;
 }
 
 export interface Step {
@@ -110,6 +150,7 @@ export interface RunDetailData {
   run: Run;
   log: string;
   offset: number;
+  hosts?: HostResults | null;
 }
 
 export interface HostKey {
@@ -184,6 +225,28 @@ export interface Vm {
   inventory_name: string;
   ours: boolean;
   name_ok: boolean;
+  // Selecting it for a run: whether it can be, why not, and its host keys pinned by cluster and VM ID.
+  selectable: boolean;
+  why_not: string;
+  alias: string;
+  pinned: HostKey[];
+}
+
+export interface VmPreset {
+  key: string;
+  label: string;
+  tags: string[] | null; // null: choose the tags
+}
+
+export interface VmRunInfo {
+  presets: VmPreset[];
+  default_preset: string;
+  tags: string[];
+  max_hosts: number;
+  user: string; // the admin user, the default login for VMs outside the inventory
+  ssh_port: number;
+  busy: boolean; // a run is going
+  key: boolean; // the web UI has an SSH key
 }
 
 export interface VmsData {
@@ -194,6 +257,23 @@ export interface VmsData {
   notes: Notice[];
   cluster: string;
   fetched: number;
+  run: VmRunInfo;
+}
+
+// POST /api/vms/plan: the plan to review before a run.
+export interface VmPlanTarget extends Omit<RunTarget, "fingerprints"> {
+  alias: string;
+  fingerprints: string[];
+  ufw: string[];
+}
+
+export interface VmPlan {
+  preset: string;
+  preset_label: string;
+  tags: string[];
+  targets: VmPlanTarget[];
+  warnings: string[];
+  digest: string;
 }
 
 // Passkeys (main.py /api/session and /api/account).
