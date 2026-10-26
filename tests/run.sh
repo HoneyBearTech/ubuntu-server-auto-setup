@@ -401,6 +401,10 @@ play_fails "usas-build can't write to /mnt/pve/squash-nfs/template/iso (mktemp: 
   -e "@$build_user" -e '{"proxmox_node_user_iso_storages": ["local", "squash-nfs"]}'
 play playbooks/prepare-node.yml -e "@$build_user"
 play --idempotent playbooks/prepare-node.yml -e "@$build_user"
+# A work directory whose owner has no name (as after usermod -u usas-build): refused with the reason, not a crash.
+docker exec "$PVE" chown 4242 /var/tmp/ubuntu-server-auto-setup
+play_fails "isn't a folder that root or usas-build owns (owner: UID 4242)" playbooks/prepare-node.yml -e "@$build_user"
+docker exec "$PVE" chown usas-build:usas-build /var/tmp/ubuntu-server-auto-setup
 play_fails 'logs in to pve-test as root, but pve_ssh_user is usas-build' playbooks/build-installer.yml \
   -e pve_ssh_user=usas-build -e ansible_user=root
 play_fails 'pve_ssh_user must be a lowercase Linux user name' playbooks/build-installer.yml -e 'pve_ssh_user=x;id'

@@ -8,6 +8,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
+  owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
+  now refuses that directory with its reason and the owner's UID, and says how to hand it over.
+
+### Documentation
+
+- How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
+  write on the ISO folder, and the same UID for the node user on every node
+  ([installing.md](docs/installing.md#6-optional-a-node-user-other-than-root)).
+
 ## [0.6.0] - 2026-10-25
 
 An opt-in, read-only status API lets a dashboard such as Heimdall show whether a run is going, how the last
