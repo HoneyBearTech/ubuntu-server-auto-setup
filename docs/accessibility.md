@@ -60,11 +60,17 @@ On **every pull request** (the required "Web UI tests" check):
     fields, and the count is a polite live region that changes only when the count does; a refresh every
     30 seconds neither reorders the rows nor moves focus; each status is an icon and a word, and CPU and
     memory are `<meter>` elements with the numbers beside them; at 375 pixels each row becomes a block
-    with its cells labelled, without sideways scrolling.
+    with its cells labelled, without sideways scrolling. Selecting VMs: each row's checkbox is labelled
+    with the VM's name and toggles with Space, a VM that can't be selected has a disabled checkbox
+    described by the reason, "Select all VMs shown" is a labelled checkbox above the table that shows a
+    mixed state, the selection survives refreshes, and the count says how many are selected. **Review the
+    plan** with problems puts focus on the error summary, whose links move focus to each VM's field or its
+    host-key heading. The run section, with every fixture VM selected and the summary showing, passes
+    axe-core at 375 pixels in both themes, without sideways scrolling (a hostile guest's long word wraps).
   - **axe-core 4.14** (the WCAG 2.0 and 2.1 A and AA rules) with real layout, so **with contrast**, on
     every page (overview, Proxmox, SSH key, defaults, servers, hardening, VMs, run, history, a finished run,
     account, sign-in), on the Proxmox page with an error, at 375 pixels with the menu open, and the VMs
-    page at 375 pixels, filtered and not, in the dark and light themes: in the
+    page at 375 pixels, filtered and not and with a run being set up, in the dark and light themes: in the
     dark (default) and light themes and in "System" with the browser preferring each, with every accent
     palette the UI offers (one, Ember). Any violation fails.
 
@@ -131,6 +137,12 @@ nothing uses the accent to mean a warning.
 - On narrow screens the navigation is behind a **Menu** button (`aria-expanded`, `aria-controls`).
   Escape closes it and returns focus to the button; moving focus out of it closes it too, so it never
   covers the part of the page that has focus.
+- The VMs page's run is set up in sections of the page, not dialogs: each selected VM's settings are a
+  group labelled by its heading, host-key fingerprints are listed as text with a checkbox to confirm the
+  comparison, and the review takes focus at its heading when it appears. A real run is offered on the
+  check run's page behind a labelled confirmation checkbox. Each host's result is a table row with the
+  outcome as an icon and a word; failed tasks are in `<details>`; the table refreshes while the run goes
+  without moving focus or announcing every change.
 - Run output is in a labelled, focusable region that scrolls with the keyboard. It isn't a live region, so
   a screen reader doesn't read every line of Ansible's output; the run's status is, and is announced when
   the run ends. Line numbers are drawn by CSS, so they aren't copied or read out with the text.
@@ -231,7 +243,20 @@ important is missing or read twice.
 11. **The phone layout** (optional). Make the window narrow or zoom to 400%: the navigation is behind
     "Menu, button, collapsed". Press it: "expanded", and Tab goes through the navigation. Escape:
     "collapsed", with focus back on the Menu button.
-12. **Sign out and in.** Choose **Sign out**: the sign-in page, its heading "Sign in", and focus in
+12. **The VMs page** (needs a VM on the cluster that the baseline may change, such as the release
+    checklist's test VM). The table "VMs and containers on cluster …, sorted by VMID, ascending"; each row
+    starts with "Select …, checkbox" (a VM that can't be selected: "dimmed", then why, for example "It
+    isn't running."). Select one with Space: the count says "… VMs, 1 selected", and the section "Run the
+    baseline on 1 selected VM" appears below the table. Its parts: "What to run" with four radio buttons;
+    the VM's group, named by its heading, with "Address, pop-up button", "SSH port", "Login user" and
+    "Extra firewall rules" with their help. Choose **Review the plan** before pinning the key: "There is a
+    problem" read at once; its link moves to the "Host key" heading. Scan, and check that the fingerprints
+    are read as text and "The fingerprints match what … shows, checkbox" follows them. After pinning,
+    **Review the plan**: focus moves to "Review: Full baseline", level 2, and the warnings are a list.
+    On the check run's page, "Results per host" is a table whose result cells are read as words; when the
+    check passed, "Run it for real" has a list of the VMs and the checkbox "I have read what would change,
+    …"; **Run the baseline for real** without it: the error is read at once.
+13. **Sign out and in.** Choose **Sign out**: the sign-in page, its heading "Sign in", and focus in
     "Password, secure edit text". A wrong password: "That password is wrong.", read at once. The right
     one: the overview, with its heading read.
 
