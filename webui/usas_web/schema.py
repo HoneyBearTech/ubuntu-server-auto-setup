@@ -17,7 +17,7 @@ import yaml
 
 from .problems import Problem
 
-ROLES = ("ubuntu_release", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
+ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
          "hardening")
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
@@ -184,17 +184,17 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("pve_efidisk_format", "EFI disk format", "choice", "proxmox_vm", ui_choices=("raw", "qcow2")),
         S("pve_bridge", "Network bridge", "text", "proxmox_vm", pattern_var="provision_bridge_pattern"),
         S("pve_vlan", "VLAN tag", "int", "proxmox_vm", minimum=1, maximum=4094),
-        S("pve_iso_storage", "ISO storage", "text", "ubuntu_release", pattern_var="pve_storage_id_pattern",
+        S("pve_iso_storage", "ISO storage", "text", "os_catalog", pattern_var="pve_storage_id_pattern",
           advanced=True, help="A Proxmox storage that allows ISO images (Content: ISO image), such as local or an NFS "
           "share for the whole cluster. Its folder on the node is found automatically."),
         S("pve_api_timeout", "API request timeout (seconds)", "int", "proxmox_vm", minimum=5, maximum=600,
           advanced=True, help="How long one Proxmox API request may take. Allocating disks can keep the API busy."),
-        S("pve_ssh_user", "Node SSH user", "text", "ubuntu_release", pattern_var="pve_ssh_user_pattern",
+        S("pve_ssh_user", "Node SSH user", "text", "os_catalog", pattern_var="pve_ssh_user_pattern",
           advanced=True, help="The UI and the playbooks log in to the node over SSH as this user."),
         # The ISO file name is built from it, and installer_iso checks that name against this pattern.
-        S("ubuntu_point_release", "Ubuntu point release", "text", "ubuntu_release",
+        S("ubuntu_point_release", "Ubuntu point release", "text", "os_catalog",
           pattern_var="installer_iso_name_pattern", advanced=True,
-          help="The installer ISO's version, such as 26.04.1. Change it when Ubuntu replaces the point release."),
+          help="The installer ISO's version, such as 26.04.1."),
     ),
     "defaults": (
         S("github_user", "GitHub user", "text", "common", ui_pattern=GITHUB_USER,

@@ -1,7 +1,7 @@
 ---
 # Finds the folder of the ISO storage (pve_iso_storage) on the Proxmox node, unless pve_iso_dir is set:
 # local is /var/lib/vz/template/iso, an NFS or CIFS storage /mnt/pve/<id>/template/iso, and so on.
-# Run on the node itself (installer_iso), or from a server's play with ubuntu_release_node set to the
+# Run on the node itself (installer_iso), or from a server's play with os_catalog_node set to the
 # inventory host that reaches the node (proxmox_vm). Also checks that Ansible logs in as pve_ssh_user and
 # can write to the folder.
 - name: Check the ISO storage name and the node's SSH user
@@ -17,85 +17,85 @@
 - name: Ask the node who Ansible logs in as
   ansible.builtin.command:
     argv: [id, -u, -n]
-  register: ubuntu_release_login
+  register: os_catalog_login
   changed_when: false
   check_mode: false
-  delegate_to: "{{ ubuntu_release_node | default(inventory_hostname) }}"
+  delegate_to: "{{ os_catalog_node | default(inventory_hostname) }}"
 
 # A user other than root works only once prepare-node.yml has set it up, and root works only with the
 # privileges it always had: either way, the inventory and pve_ssh_user must agree.
 - name: Fail unless Ansible logs in to the node as pve_ssh_user
   ansible.builtin.assert:
-    that: ubuntu_release_login.stdout == pve_ssh_user
+    that: os_catalog_login.stdout == pve_ssh_user
     fail_msg: >-
-      Ansible logs in to {{ ubuntu_release_node | default(inventory_hostname) }} as {{ ubuntu_release_login.stdout }},
+      Ansible logs in to {{ os_catalog_node | default(inventory_hostname) }} as {{ os_catalog_login.stdout }},
       but pve_ssh_user is {{ pve_ssh_user }}. Set pve_ssh_user, and the proxmox_nodes' ansible_user to
       "{{ '{{' }} pve_ssh_user {{ '}}' }}" (see inventory/hosts.example.yml).
     quiet: true
 
 - name: Ask Proxmox where the ISO storage is
   when: pve_iso_dir | default('') | length == 0 and pve_ssh_user == 'root'
-  delegate_to: "{{ ubuntu_release_node | default(inventory_hostname) }}"
+  delegate_to: "{{ os_catalog_node | default(inventory_hostname) }}"
   block:
     - name: List the storages that allow ISO images
       ansible.builtin.command:
         argv: [pvesm, status, --content, iso]
-      register: ubuntu_release_iso_storages
+      register: os_catalog_iso_storages
       changed_when: false
       check_mode: false
 
     - name: Fail if the ISO storage doesn't exist or doesn't allow ISO images
       vars:
         # The header row, then one row per storage: name, type, status, ...
-        ubuntu_release_rows: "{{ ubuntu_release_iso_storages.stdout_lines[1:] | map('split') | list }}"
-        ubuntu_release_active: "{{ ubuntu_release_rows | selectattr('2', 'defined') | selectattr('2', 'equalto', 'active')
+        os_catalog_rows: "{{ os_catalog_iso_storages.stdout_lines[1:] | map('split') | list }}"
+        os_catalog_active: "{{ os_catalog_rows | selectattr('2', 'defined') | selectattr('2', 'equalto', 'active')
                                    | map('first') | list }}"
       ansible.builtin.assert:
-        that: pve_iso_storage in ubuntu_release_active
+        that: pve_iso_storage in os_catalog_active
         fail_msg: >-
-          Storage '{{ pve_iso_storage }}' doesn't exist on {{ ubuntu_release_node | default(inventory_hostname) }},
+          Storage '{{ pve_iso_storage }}' doesn't exist on {{ os_catalog_node | default(inventory_hostname) }},
           isn't active, or doesn't allow ISO images (Datacenter → Storage → {{ pve_iso_storage }} → Content:
-          ISO image). Storages that do: {{ ubuntu_release_active | join(', ') or 'none' }}.
+          ISO image). Storages that do: {{ os_catalog_active | join(', ') or 'none' }}.
         quiet: true
 
     - name: Ask Proxmox where the storage keeps ISO images
       ansible.builtin.command:
         argv: [pvesm, path, "{{ pve_iso_storage }}:iso/{{ ubuntu_iso_name }}"]
-      register: ubuntu_release_iso_path
+      register: os_catalog_iso_path
       changed_when: false
       check_mode: false
 
     - name: Use that folder
       ansible.builtin.set_fact:
-        pve_iso_dir: "{{ ubuntu_release_iso_path.stdout | trim | dirname }}"
+        pve_iso_dir: "{{ os_catalog_iso_path.stdout | trim | dirname }}"
 
 # pvesm runs for root only, so for any other user prepare-node.yml asked it (as root) and wrote the answer down.
 - name: Read where prepare-node.yml found the ISO storage
   when: pve_iso_dir | default('') | length == 0 and pve_ssh_user != 'root'
-  delegate_to: "{{ ubuntu_release_node | default(inventory_hostname) }}"
+  delegate_to: "{{ os_catalog_node | default(inventory_hostname) }}"
   block:
     - name: Read {{ pve_iso_dirs_file }}
       ansible.builtin.slurp:
         src: "{{ pve_iso_dirs_file }}"
-      register: ubuntu_release_iso_dirs
+      register: os_catalog_iso_dirs
       failed_when: false
 
     - name: Use the folder recorded for the ISO storage
       ansible.builtin.set_fact:
         # Only an absolute path without line breaks; anything else is treated as not recorded.
         pve_iso_dir: >-
-          {{ ubuntu_release_recorded if ubuntu_release_recorded is string
-             and ubuntu_release_recorded is match(pve_iso_dir_pattern) else '' }}
+          {{ os_catalog_recorded if os_catalog_recorded is string
+             and os_catalog_recorded is match(pve_iso_dir_pattern) else '' }}
       vars:
-        ubuntu_release_dirs: >-
-          {{ ubuntu_release_iso_dirs.content | b64decode | from_json if ubuntu_release_iso_dirs.content is defined else {} }}
-        ubuntu_release_recorded: "{{ ubuntu_release_dirs.get(pve_iso_storage, '') if ubuntu_release_dirs is mapping else '' }}"
+        os_catalog_dirs: >-
+          {{ os_catalog_iso_dirs.content | b64decode | from_json if os_catalog_iso_dirs.content is defined else {} }}
+        os_catalog_recorded: "{{ os_catalog_dirs.get(pve_iso_storage, '') if os_catalog_dirs is mapping else '' }}"
 
     - name: Fail if prepare-node.yml hasn't set up the ISO storage
       ansible.builtin.assert:
         that: pve_iso_dir | length > 0
         fail_msg: >-
-          {{ pve_iso_dirs_file }} on {{ ubuntu_release_node | default(inventory_hostname) }} doesn't name a folder for
+          {{ pve_iso_dirs_file }} on {{ os_catalog_node | default(inventory_hostname) }} doesn't name a folder for
           storage '{{ pve_iso_storage }}', so {{ pve_ssh_user }} can't use it. Run playbooks/prepare-node.yml (it logs in
           as root) with '{{ pve_iso_storage }}' in proxmox_node_user_iso_storages, or set pve_ssh_user back to root.
         quiet: true
@@ -106,20 +106,20 @@
   ansible.builtin.stat:
     path: "{{ pve_iso_dir }}"
     get_checksum: false
-  register: ubuntu_release_iso_dir
+  register: os_catalog_iso_dir
   failed_when: false
-  delegate_to: "{{ ubuntu_release_node | default(inventory_hostname) }}"
+  delegate_to: "{{ os_catalog_node | default(inventory_hostname) }}"
 
 - name: Fail unless the node user can write to the ISO folder
   ansible.builtin.assert:
     that:
-      - ubuntu_release_iso_dir.stat.isdir | default(false)
-      - ubuntu_release_iso_dir.stat.writeable | default(false)
+      - os_catalog_iso_dir.stat.isdir | default(false)
+      - os_catalog_iso_dir.stat.writeable | default(false)
     fail_msg: >-
-      {{ pve_iso_dir }} on {{ ubuntu_release_node | default(inventory_hostname) }}
-      {{ ("can't be reached by " ~ pve_ssh_user ~ " (" ~ ubuntu_release_iso_dir.msg | default('') ~ ")")
-         if ubuntu_release_iso_dir.stat is not defined
-         else ("isn't writable by " ~ pve_ssh_user) if ubuntu_release_iso_dir.stat.isdir | default(false)
+      {{ pve_iso_dir }} on {{ os_catalog_node | default(inventory_hostname) }}
+      {{ ("can't be reached by " ~ pve_ssh_user ~ " (" ~ os_catalog_iso_dir.msg | default('') ~ ")")
+         if os_catalog_iso_dir.stat is not defined
+         else ("isn't writable by " ~ pve_ssh_user) if os_catalog_iso_dir.stat.isdir | default(false)
          else "isn't a folder" }}.
       {{ 'Run playbooks/prepare-node.yml again; for an NFS or CIFS storage, its export must let that user write,
          or keep pve_ssh_user root for it.' if pve_ssh_user != 'root' else 'Is the storage mounted and writable?' }}

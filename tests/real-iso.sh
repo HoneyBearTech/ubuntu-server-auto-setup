@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Remasters the real Ubuntu live-server ISO in the test "Proxmox node" container and checks the result,
 # including that the BIOS and UEFI boot records match the original. Downloads about 3 GB. The role's own
-# defaults apply (not tests/run.sh's test key), so Ubuntu's real signature on SHA256SUMS is checked with
-# the CD image signing key that ships in roles/installer_iso/files/.
+# defaults and the real OS catalog apply (not tests/run.sh's stand-ins), so the ISO must have the checksum the
+# catalog pins, which tools/update_os_catalog.py took from Ubuntu's signed SHA256SUMS.
 # build-installer asks the Proxmox API where to build, so tests/mock_pve.py answers; only the one node container
 # this script starts is in the run (--limit pve-test).
 # Used by .github/workflows/installer-iso.yml; runs locally too (needs Docker). Each play's full log goes to
@@ -33,8 +33,13 @@ docker exec -i "$PVE" sh -c 'cat > /root/.ssh/authorized_keys && chmod 600 /root
   <"$TEST_TMP/id_ed25519.pub"
 for _ in $(seq 1 30); do ssh-keyscan -T 2 -p 2211 127.0.0.1 >"$TEST_TMP/known_hosts" 2>/dev/null && break; sleep 1; done
 for _ in $(seq 1 30); do curl -fsk https://127.0.0.1:8006/mock/state >/dev/null 2>&1 && break; sleep 1; done
+# The ISO the catalog pins for Ubuntu 26.04.
+ISO="$(python3 -c 'import yaml
+catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))["os_catalog"]
+print(next(e for e in catalog if e["id"] == "ubuntu-26.04")["methods"]["autoinstall"]["file"])')"
+[[ "$ISO" =~ ^ubuntu-26\.04(\.[0-9]+)?-live-server-amd64\.iso$ ]]
 # A copy of the original ISO from an earlier run (CI caches it) saves the 3 GB download. The role still checks
-# it against the signed SHA256SUMS and downloads it again if it doesn't match.
+# it against the catalog's checksum and downloads it again if it doesn't match.
 if [ -n "${USAS_ISO_CACHE:-}" ]; then
   cache="${USAS_ISO_CACHE/#\~/$HOME}"
   for iso in "$cache"/ubuntu-*-live-server-amd64.iso; do
@@ -62,20 +67,35 @@ if sed -n '/PLAY RECAP/,$p' "$LOGS/build-installer-second.log" | grep -Eq 'chang
   echo "ERROR: the second run changed something" >&2
   exit 1
 fi
-play verify-installer tests/verify-installer.yml
+# The same ISO as a point release the catalog doesn't pin: checked against Ubuntu's signed SHA256SUMS with the
+# key that ships in the role. The ISO is already there, so only the files the check needs are new in the work
+# folder (the runs above, checked against the catalog, never fetched them); nothing is downloaded or built again.
+echo "=== build-installer, checked against Ubuntu's signed SHA256SUMS instead of the catalog"
+play build-installer-signed playbooks/build-installer.yml -e ubuntu_iso_base_url=https://releases.ubuntu.com/26.04 \
+  -e '{"os_catalog": []}' -e "ubuntu_point_release=$(sed -E 's/^ubuntu-(.*)-live-server-amd64\.iso$/\1/' <<<"$ISO")"
+grep -q 'Pick the checksum for' "$LOGS/build-installer-signed.log"
+fetched="Copy the keyring with Ubuntu's CD image signing key|Fetch Ubuntu's SHA256SUMS|Fetch SHA256SUMS\.gpg"
+signed_changes="$(awk '/^TASK \[/ { task = $0 } /^changed:/ { print task }' "$LOGS/build-installer-signed.log" \
+  | grep -vE "^TASK \[installer_iso : ($fetched)\]" || true)"
+if [ -n "$signed_changes" ]; then
+  echo "$signed_changes"
+  echo "ERROR: checking against the signed SHA256SUMS changed more than the files it fetches" >&2
+  exit 1
+fi
+play verify-installer tests/verify-installer.yml -e "verify_installer_iso=${ISO%.iso}-autoinstall.iso"
 
 echo "=== Boot records (original, then remastered); everything but the block addresses must match"
 records() {
   docker exec "$PVE" xorriso -indev "$ISO_DIR/$1" -report_el_torito plain 2>/dev/null \
     | grep -E '^El Torito (boot img|img path|img opts|img blks)' | awk '{ $NF = ($3 == "boot") ? "" : $NF; print }'
 }
-records ubuntu-26.04.1-live-server-amd64.iso | tee "$TEST_TMP/orig.txt"
-records ubuntu-26.04.1-live-server-amd64-autoinstall.iso | tee "$TEST_TMP/new.txt"
+records "$ISO" | tee "$TEST_TMP/orig.txt"
+records "${ISO%.iso}-autoinstall.iso" | tee "$TEST_TMP/new.txt"
 grep -q 'UEFI' "$TEST_TMP/orig.txt"
 grep -q 'BIOS' "$TEST_TMP/orig.txt"
 diff -u "$TEST_TMP/orig.txt" "$TEST_TMP/new.txt"
 # For tests/secure-boot-install.sh, which boots it.
 if [ -n "${USAS_KEEP_ISO:-}" ]; then
-  docker cp "$PVE:$ISO_DIR/ubuntu-26.04.1-live-server-amd64-autoinstall.iso" "$USAS_KEEP_ISO"
+  docker cp "$PVE:$ISO_DIR/${ISO%.iso}-autoinstall.iso" "$USAS_KEEP_ISO"
 fi
 echo "=== The real ISO remasters correctly"
