@@ -98,8 +98,8 @@ updates_window: {days: [sun], start: "02:00", duration: "3h", timezone: "Europe/
 ```
 
 The window opens at `start` on each listed day, in its time zone, and stays open for `duration`. On the
-day clocks go forward, a start time that doesn't exist opens an hour later; on the day they go back, the
-first of the two opens it. Outside its window a server is skipped, and a server isn't started once its
+day clocks go forward, a start time that doesn't exist opens when the clocks jump past it (02:30 opens at
+03:00); on the day they go back, the first of the two opens it. Outside its window a server is skipped, and a server isn't started once its
 window has closed. Check runs ignore the window and say whether an apply would run.
 `updates_ignore_window: true` overrides it for a run by hand. `updates_enabled: false` opts a server out
 of every run.

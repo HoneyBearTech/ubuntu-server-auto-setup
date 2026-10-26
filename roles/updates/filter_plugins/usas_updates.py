@@ -343,11 +343,27 @@ def _now(now):
     return value if value.tzinfo else value.replace(tzinfo=datetime.UTC)
 
 
+def _opening(day, hour, minute, zone):
+    """The first moment, in UTC, at which the clocks in zone show day hour:minute or later. A time that happens
+    twice (clocks going back) opens the first time; one that doesn't exist (clocks skipping ahead) opens when
+    the clocks jump past it."""
+    wall = datetime.datetime(day.year, day.month, day.day, hour, minute)
+    opens = wall.replace(tzinfo=zone).astimezone(datetime.UTC)
+    if opens.astimezone(zone).replace(tzinfo=None) == wall:
+        return opens
+    moment = wall.replace(tzinfo=zone, fold=1).astimezone(datetime.UTC)  # before the jump
+    for _ in range(24 * 60):
+        if moment.astimezone(zone).replace(tzinfo=None) >= wall:
+            break
+        moment += datetime.timedelta(minutes=1)
+    return moment
+
+
 def usas_window_openings(window, now=None):
     """The window's openings around now, as (start, end) in UTC: one for each listed day from 8 days before now
     to the day after. Each opens at its start time on that day in its time zone (a start time that doesn't
-    exist that day, in the hour clocks skip, opens an hour later; one that happens twice opens the first time)
-    and stays open for its duration."""
+    exist that day, in the hour clocks skip, opens when the clocks jump past it; one that happens twice opens
+    the first time) and stays open for its duration."""
     zone = _zone(window.get("timezone", "UTC"))
     duration = _duration(window.get("duration"))
     start = TIME.match(str(window.get("start", "")))
@@ -360,8 +376,7 @@ def usas_window_openings(window, now=None):
         day = local_now.date() + datetime.timedelta(days=offset)
         if DAYS[day.weekday()] not in [str(d) for d in days]:
             continue
-        opens = datetime.datetime(day.year, day.month, day.day, int(start.group(1)), int(start.group(2)),
-                                  tzinfo=zone).astimezone(datetime.UTC)
+        opens = _opening(day, int(start.group(1)), int(start.group(2)), zone)
         openings.append((opens, opens + duration))
     return openings
 
