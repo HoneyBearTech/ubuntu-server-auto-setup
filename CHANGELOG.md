@@ -8,6 +8,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Changed
+
+- Groundwork for a playbook that keeps existing servers updated, with no change in behaviour: the SSH-port
+  probe the baseline runs first is now a shared task file (`playbooks/tasks/ssh_port.yml`); the classic-sudo
+  check reads a new variable, `classic_sudo_needs_password`, which follows `admin_sudo_nopasswd` unless set;
+  and the VMs page's parsing moved to `plugins/module_utils/usas_vms.py`, so the playbooks' own plugins can
+  share it (the container image now carries `plugins/`).
+
 ### Fixed
 
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
