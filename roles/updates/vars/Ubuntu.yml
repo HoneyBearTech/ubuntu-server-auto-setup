@@ -1,0 +1,3 @@
+---
+# Ubuntu publishes security updates in its -security pockets (and ESM with Ubuntu Pro).
+os_security_errata: true

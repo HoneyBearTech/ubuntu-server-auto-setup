@@ -21,6 +21,8 @@
   console before the first run, for one node or a cluster, from a checkout or the web UI.
 - [The web UI and the container image](web-ui.md): run everything from Docker on Windows, Linux or macOS,
   with forms for every option.
+- [Keeping servers updated](updates.md): the updates playbook, for the servers this project installed and
+  others: report-only checks, what gets installed, reboots, health checks, windows and the report.
 
 ## Using it
 

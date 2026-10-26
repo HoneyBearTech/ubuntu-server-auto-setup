@@ -53,6 +53,8 @@ macOS.
   stores, and how it is secured; its [accessibility](docs/accessibility.md).
 - [Architecture](docs/architecture.md): the playbooks and roles, and how a VM goes from nothing to a
   hardened server.
+- [Keeping servers updated](docs/updates.md): report and install package updates on every server,
+  including ones this project didn't install, with opt-in reboots and health checks.
 - [Security requirements](docs/security.md): what this project does and doesn't protect against, and the
   [assurance case](docs/assurance-case.md) behind it.
 - [External interfaces](docs/interfaces.md): the inventory variables, the commands, and every system
@@ -104,6 +106,14 @@ Three playbooks, run from your own machine (the "control node") or from the cont
      an AppArmor check, and notifications (unattended-upgrades reports and Fail2Ban bans by mail through an
      msmtp relay, or bans to an ntfy, Gotify, Slack or Discord webhook). See
      [docs/security.md](docs/security.md#optional-hardening-and-notifications).
+
+Afterwards, **`playbooks/updates.yml`** keeps the servers updated, the ones this project installed and any
+others you add to the group `other_servers`. Ubuntu 22.04, 24.04 and 26.04 are supported. It never
+configures a server: `make updates-check` reports what each would install (security, held and phased
+packages included) and what its automatic updates already do. `make updates` installs the updates, a batch
+of servers at a time. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
+holds the reboot on an encrypted VM after a Secure Boot update. It then checks each server's health and
+starts no more servers after a failure. Every run writes a JSON report. See [docs/updates.md](docs/updates.md).
 
 ## Getting started
 
@@ -199,7 +209,7 @@ You need:
 | --- | --- |
 | `make deps` | Install the Python packages (`requirements.txt`, `requirements-dev.txt`, `requirements-webui.in`) and the Ansible collections (`requirements.yml`). |
 | `make lint` | `yamllint .`, `ansible-lint` and `ruff check`. |
-| `make syntax` | Syntax-check `playbooks/site.yml` against the example inventory. |
+| `make syntax` | Syntax-check every playbook against the example inventory. |
 | `make test` | Run the integration tests against containers and a mock Proxmox API (needs Docker; see [docs/testing.md](docs/testing.md)). |
 | `make app` | Install the web UI app's npm packages and build it (needs Node 24). |
 | `make webui-test` | Run the web UI's unit tests with coverage: the server's (pytest) and the app's (TypeScript check, Vitest). |
@@ -210,6 +220,9 @@ You need:
 | `make provision` | Create and auto-install the VMs that don't exist yet. |
 | `make baseline` | Apply the baseline to the servers. |
 | `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
+| `make updates-check` | Report the package updates each server would get, changing nothing. |
+| `make updates` | Install the package updates, with health checks; reboots only with `updates_reboot: if_required` ([docs/updates.md](docs/updates.md)). |
+| `make test-updates` | Run the updates playbook's integration tests (needs Docker; `OS=ubuntu-24.04` picks the release). |
 
 Two variables apply to every target: `LIMIT=<host or group>` narrows the run (`--limit`), and
 `ARGS="..."` passes anything else to `ansible-playbook`, for example `ARGS="--ask-vault-pass"`,

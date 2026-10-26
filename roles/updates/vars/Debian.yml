@@ -1,0 +1,18 @@
+---
+# Ubuntu and Debian: apt.
+updates_os_kernel_packages:
+  - linux-image-*
+  - linux-modules-*
+  - linux-headers-*
+  - linux-generic*
+  - linux-virtual*
+  - linux-kvm*
+  - linux-signed-*
+# The Secure Boot chain: the shim, the signed GRUB and the revocation list (dbx).
+updates_os_pcr7_packages: [shim-signed, grub-efi-amd64-signed, grub-efi-arm64-signed, secureboot-db]
+# Updates that usually want a reboot: the kernel, the C library, systemd and D-Bus, and the boot chain.
+updates_os_reboot_packages: [linux-image-*, linux-modules-*, linux-generic*, linux-virtual*, linux-kvm*, libc6,
+                             systemd, dbus, dbus-broker, shim-signed, grub-efi-*-signed, secureboot-db]
+# What automatic updates run as, and the locks apt and dpkg take.
+updates_os_busy_units: [apt-daily.service, apt-daily-upgrade.service]
+updates_os_locks: [/var/lib/dpkg/lock-frontend, /var/lib/dpkg/lock, /var/lib/apt/lists/lock, /var/cache/apt/archives/lock]

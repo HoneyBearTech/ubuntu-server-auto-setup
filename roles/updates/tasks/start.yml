@@ -1,0 +1,136 @@
+---
+# First on every host, before any connection: the run's settings, the opt-out, the window and the sudo password.
+# A host that won't be updated gets its result here and leaves the run (meta: end_host).
+
+# Once for the run (run_once sets it on every host): its ID and start time, for the report.
+- name: Name the run
+  ansible.builtin.set_fact:
+    usas_updates_run:
+      id: "{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}-{{ '%04x' | format(65535 | random) }}"
+      mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
+      started: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+  run_once: true
+
+- name: Start the host's result
+  ansible.builtin.set_fact:
+    usas_updates_result:
+      host: "{{ inventory_hostname }}"
+      status: pending
+      reason: ""
+      check_mode: "{{ ansible_check_mode }}"
+      installed_by_usas: "{{ updates_installed_by_usas }}"
+      os: {facts: "", hint: "{{ usas_os_hint | default('') | usas_clean_text(80) }}", warning: ""}
+      scope: "{{ updates_scope }}"
+      apt_upgrade: "{{ updates_apt_upgrade }}"
+      window: "{{ updates_window | usas_window_text }}"
+      pending: []
+      planned: []
+      security_count: 0
+      held: []
+      excluded: []
+      deferred: []
+      upgraded: []
+      removals: []
+      reboot: {expected: false, required: false, packages: [], done: false, held: false, why: ""}
+      restart_services: []
+      auto_updates: ""
+      health: {status: skipped, problems: []}
+      snapshot: ""
+      started: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+      finished: ""
+  vars:
+    # In the static inventory as a server this project installed (by its VM ID), not just named like one.
+    updates_installed_by_usas: >-
+      {{ inventory_hostname in (groups['servers'] | default([]) + groups['ubuntu_servers'] | default([]))
+      and pve_vmid is defined }}
+
+- name: Count the server in the run's report
+  ansible.builtin.group_by:
+    key: usas_updates_targets
+  changed_when: false
+
+- name: Check the update settings
+  ansible.builtin.assert:
+    that:
+      - updates_scope in updates_scope_values
+      - updates_apt_upgrade in updates_apt_upgrade_values
+      - updates_reboot in updates_reboot_values
+      - updates_restart_services in updates_restart_values
+      - updates_exclude_packages is sequence and updates_exclude_packages is not string
+      - updates_exclude_packages | reject('match', updates_package_glob_pattern) | list | length == 0
+      - updates_health_services is sequence and updates_health_services is not string
+      - updates_health_services | map('string') | reject('match', updates_service_pattern) | list | length == 0
+      - updates_health_ignore_services | map('string') | reject('match', updates_service_pattern) | list | length == 0
+      - updates_health_urls is sequence and updates_health_urls is not string
+      - updates_health_urls | map(attribute='url', default='') | map('string') | reject('match', updates_url_pattern) | list | length == 0
+      - >-
+        [updates_refresh_max_age, updates_lock_wait, updates_task_timeout, updates_reboot_timeout,
+        updates_post_reboot_delay, updates_health_timeout, updates_max_fail_percentage]
+        | map('string') | reject('match', updates_seconds_pattern) | list | length == 0
+      - updates_max_fail_percentage | int <= 100
+    fail_msg: >-
+      updates_scope must be one of {{ updates_scope_values | join(', ') }}, updates_apt_upgrade one of
+      {{ updates_apt_upgrade_values | join(', ') }}, updates_reboot one of {{ updates_reboot_values | join(', ') }}
+      and updates_restart_services one of {{ updates_restart_values | join(', ') }}. updates_exclude_packages must be
+      a list of package-name globs (letters, digits, + . - * ?), updates_health_services and
+      updates_health_ignore_services lists of systemd unit names, updates_health_urls a list of {url, status} with
+      http(s) URLs, and the waits, timeouts and updates_max_fail_percentage whole numbers.
+    quiet: true
+
+- name: Check the update windows
+  ansible.builtin.assert:
+    that: problems | length == 0
+    fail_msg: "{{ problems | join('; ') }}"
+    quiet: true
+  vars:
+    problems: >-
+      {{ updates_window | usas_window_problems('updates_window')
+      + updates_reboot_window | usas_window_problems('updates_reboot_window') }}
+
+# dist may remove packages to install others: with packages left out, apt could remove what depends on them.
+- name: Refuse dist upgrades of part of the updates
+  ansible.builtin.assert:
+    that: >-
+      updates_apt_upgrade != 'dist'
+      or (updates_scope == 'all' and updates_exclude_packages | length == 0 and updates_kernel | bool)
+    fail_msg: >-
+      updates_apt_upgrade: dist installs every update and may remove packages, so it can't be combined with
+      updates_scope: security, updates_exclude_packages or updates_kernel: false. Use safe for those.
+    quiet: true
+
+# Root on a server this project didn't install could read the sudo password Ansible sends it.
+- name: Refuse to send the Vault admin password to a server this project didn't install
+  ansible.builtin.assert:
+    that: >-
+      usas_updates_result.installed_by_usas or updates_allow_shared_become_password | bool
+      or (ansible_become_password | default('') | string | length == 0)
+      or (vault_admin_password | default('') | string | length == 0)
+      or (ansible_become_password | string) != (vault_admin_password | string)
+    fail_msg: >-
+      {{ inventory_hostname }} isn't a server this project installed (it isn't in ubuntu_servers with a pve_vmid),
+      but its ansible_become_password is the Vault admin password: root on it could read it. Give its group its
+      own sudo password in the Vault, use passwordless sudo there, or set updates_allow_shared_become_password:
+      true for it.
+    quiet: true
+  no_log: true
+
+- name: Skip a server that opted out
+  ansible.builtin.set_fact:
+    usas_updates_result: "{{ usas_updates_result | combine({'status': 'skipped', 'reason': 'opted out (updates_enabled is false)'}) }}"
+  when: not updates_enabled | bool
+
+# Check runs report whatever the window; an apply outside it leaves the server alone.
+- name: Skip a server outside its update window
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'skipped',
+      'reason': 'outside its update window (' ~ (updates_window | usas_window_text) ~ ')'}) }}
+  when:
+    - usas_updates_result.status == 'pending'
+    - not ansible_check_mode
+    - not updates_ignore_window | bool
+    - not updates_window | usas_in_window
+
+- name: End here for a server that is skipped
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'

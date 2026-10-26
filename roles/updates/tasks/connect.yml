@@ -1,0 +1,28 @@
+---
+# The first connection: a server that can't be reached, or has no Python for Ansible's modules, is reported and
+# left out (the play ignores unreachable hosts so that their results still reach the report).
+- name: Look for Python on the server
+  ansible.builtin.raw: command -v python3
+  become: false
+  register: updates_python
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Report a server that can't be reached
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'unreachable',
+      'reason': (updates_python.msg | default('no answer') | usas_clean_text(200))}) }}
+  when: updates_python is unreachable
+
+# Ansible's modules need Python; this playbook doesn't install it on a server as a side effect.
+- name: Skip a server without Python
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'skipped', 'reason': 'needs python3, which it does not have'}) }}
+  when: updates_python is not unreachable and updates_python.rc | default(1) != 0
+
+- name: End here for a server that can't be updated
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'

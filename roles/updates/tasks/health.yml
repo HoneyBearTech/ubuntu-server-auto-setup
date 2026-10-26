@@ -1,0 +1,53 @@
+---
+# After an update or a reboot: the server has finished starting, every enabled service that ran before still
+# runs, so do updates_health_services, the system state is no worse than before, and updates_health_urls answer
+# (from the control node, certificates checked). Any problem fails the server, which stops later batches.
+- name: Wait for the server to finish starting
+  ansible.builtin.command:
+    argv: [timeout, "{{ updates_health_timeout | int }}", systemctl, is-system-running, --wait]
+  register: updates_state_after
+  changed_when: false
+  failed_when: updates_state_after is unreachable
+
+- name: Note which services run after the update
+  ansible.builtin.service_facts:
+  register: updates_services_after
+
+- name: Call the health URLs
+  ansible.builtin.uri:
+    url: "{{ item.url }}"
+    status_code: "{{ item.status | default(200) | int }}"
+    validate_certs: true
+    timeout: 30
+  loop: "{{ updates_health_urls }}"
+  loop_control:
+    label: "{{ item.url }}"
+  delegate_to: localhost
+  become: false
+  register: updates_health_calls
+  ignore_errors: true
+
+- name: Note the health of the server
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'health': {'status': 'failed' if problems else 'ok', 'problems': problems}}) }}
+  vars:
+    services: >-
+      {{ updates_services_before.ansible_facts.services | usas_running_services
+      | usas_health_problems(updates_services_after.ansible_facts.services, updates_health_services,
+      updates_health_ignore_services) }}
+    state: >-
+      {{ ['system state ' ~ (updates_state_after.stdout | usas_clean_text(20)) ~ ' (was '
+      ~ (updates_state_before.stdout | usas_clean_text(20)) ~ ')']
+      if updates_state_before.stdout | usas_system_state_worse(updates_state_after.stdout) else [] }}
+    urls: >-
+      {{ updates_health_calls.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+      | map(attribute='item.url') | list }}
+    problems: >-
+      {{ (services | map('regex_replace', '^', 'not running: ') | list) + state
+      + (urls | unique | map('regex_replace', '^', 'health URL failed: ') | list) }}
+
+- name: Fail a server that isn't healthy
+  ansible.builtin.fail:
+    msg: "Unhealthy after the update: {{ usas_updates_result.health.problems | join('; ') }}"
+  when: usas_updates_result.health.status == 'failed'

@@ -86,3 +86,18 @@ all:
         #   vm_extra_nics:
         #     - { bridge: vmbr1, vlan: 20, mode: static, address: 10.20.0.64, prefix: 24, mtu: 9000 }
         #     - { bridge: vmbr1, vlan: 30, mode: dhcp }
+
+    # Servers this project didn't install, for the updates playbook only (make updates-check, make updates);
+    # the other playbooks never touch them. Each needs its own login and sudo: passwordless sudo, or its own
+    # password in the Vault. Never the admin password above: root on such a server could read it
+    # (docs/updates.md).
+    other_servers:
+      hosts: {}
+      # vars:
+      #   ansible_user: ops
+      #   ansible_become_password: "{{ vault_become_password_other_servers }}"
+      #   updates_reboot: if_required
+      #   updates_window: {days: [sun], start: "02:00", duration: "3h", timezone: "Europe/Berlin"}
+      # hosts:
+      #   legacy-web:
+      #     ansible_host: 10.10.10.90

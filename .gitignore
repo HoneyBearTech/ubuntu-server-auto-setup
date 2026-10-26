@@ -19,6 +19,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .webui-data/
+# Reports of the updates playbook (updates_report_dir)
+/reports/
 
 # Project notes live in Chronos, never here
 .obsidian-docs/
