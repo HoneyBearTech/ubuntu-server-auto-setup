@@ -14,7 +14,9 @@ exclusive lock on runs/.lock, which a command-line tool can take as well.
 """
 
 import fcntl
+import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -23,6 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -74,6 +77,8 @@ class Run:
     plan: str = ""  # the plan's hash: a real run needs a check run of the same plan first
     inventory: bool = False  # it had its own inventory, runs/<id>.inventory.yml
     extra_vars: bool = False  # it had extra variables, runs/<id>.vars.yml
+    settings: str = ""  # a hash of the saved inventory (every setting) when it started
+    applied_from: str = ""  # a real run's check run
 
     @property
     def done(self) -> bool:
@@ -150,8 +155,9 @@ def inventory_names(text: str) -> set[str]:
 
 
 class Runner:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, on_finish: Callable[[Run], None] | None = None):
         self.settings = settings
+        self.on_finish = on_finish  # called with each run that ends
         self.dir = settings.runs_dir
         self._lock = threading.Lock()
         self._current: tuple[Run, subprocess.Popen] | None = None
@@ -204,6 +210,13 @@ class Runner:
             except (ValueError, TypeError):
                 continue
         return runs
+
+    def settings_digest(self) -> str:
+        """A hash of the saved inventory: it changes with any setting saved since."""
+        try:
+            return hashlib.sha256(self.settings.inventory_file.read_bytes()).hexdigest()
+        except OSError:
+            return ""
 
     def hosts(self, run_id: str, redact: list[str] | tuple[str, ...] = ()) -> dict[str, Any] | None:
         """The summary callback's per-host results of a run, or None if it wrote none; the values of redact are
@@ -308,7 +321,7 @@ class Runner:
     def start(self, action: str, check: bool, diff: bool, limit_text: str, names: set[str],
               redact: list[str], *, kind: str = "playbook", inventory: str | None = None,
               tags: tuple[str, ...] | list[str] = (), extra_vars: dict[str, Any] | None = None,
-              targets: list[dict[str, Any]] | None = None, plan: str = "") -> Run:
+              targets: list[dict[str, Any]] | None = None, plan: str = "", applied_from: str = "") -> Run:
         """Starts a run. limit_text is checked against names, the inventory's host and group names, plus those
         of inventory: YAML text for a second inventory, written by the caller from validated values only."""
         action = next((k for k in PLAYBOOKS if k == action), "")
@@ -329,7 +342,8 @@ class Runner:
                 run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
                 run = Run(id=run_id, action=action, check=check, diff=diff, limit=limit, status="running",
                           started=time.time(), kind=kind, tags=tags, targets=list(targets or []), plan=plan,
-                          inventory=inventory is not None, extra_vars=variables is not None)
+                          inventory=inventory is not None, extra_vars=variables is not None,
+                          settings=self.settings_digest(), applied_from=applied_from)
                 log = self.log_path(run_id)
                 write_private(log, "")
                 if inventory is not None:
@@ -372,6 +386,11 @@ class Runner:
             self._save(run)
             self._current = None
             self._release_file_lock()
+        if self.on_finish is not None:
+            try:
+                self.on_finish(run)
+            except Exception:  # a hook's failure must not stop the runner
+                logging.getLogger("usas_web").exception("Recording the end of run %s failed", run.id)
 
     def stop(self, run_id: str) -> bool:
         """Interrupts the current run like Ctrl-C; terminates it if it hasn't stopped after 15 seconds."""

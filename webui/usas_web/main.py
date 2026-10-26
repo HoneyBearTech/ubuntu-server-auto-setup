@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import __version__, nodes, status, vmplan, vms
+from .audit import AuditLog, session_fingerprint
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
@@ -82,6 +83,7 @@ THEME_COOKIE = "usas_theme"
 FRONTEND_ENTRY = "src/main.tsx"
 VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
 PLAN_TTL = 600  # a reviewed plan can be run for 10 minutes
+CHECK_TTL = 1800  # a real run needs a passing check run of the same plan from the last 30 minutes
 # Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
 log = logging.getLogger("usas_web")
 
@@ -172,7 +174,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store = Store(settings, schema)
     auth = Auth(settings)
     passkeys = Passkeys(settings)
-    runner = Runner(settings)
+    audit = AuditLog(settings.data_dir / "audit.jsonl")
+
+    def run_ended(run: Run) -> None:
+        if run.kind == "vms":
+            hosts = (runner.hosts(run.id) or {}).get("hosts") or {}
+            audit.record("run.finished", run=run.id, check=run.check, status=run.status, returncode=run.returncode,
+                         hosts={name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
+                                for name, r in hosts.items() if isinstance(r, dict)})
+
+    runner = Runner(settings, on_finish=run_ended)
     keys = Keys(settings)
     lister = VmLister()
     tokens = status.StatusTokens(settings.status_token_file, store.vault_password)
@@ -192,6 +203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings, app.state.auth, app.state.store, app.state.runner = settings, auth, store, runner
     app.state.schema, app.state.keys, app.state.vm_lister = schema, keys, lister
     app.state.passkeys = passkeys
+    app.state.audit = audit
     app.state.status_tokens, app.state.status_throttle, app.state.cluster_counts = tokens, throttle, counts
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
@@ -309,6 +321,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if path in PAGES or (path.startswith("/runs/") and "/" not in path[6:] and runner.get(path[6:])):
             return path
         return "/"
+
+    def who(request: Request) -> dict[str, str]:
+        """The session and the client, as the audit log names them."""
+        return {"session": session_fingerprint(request.state.session.sid), "client": client(request)}
 
     def client(request: Request) -> str:
         return request.client.host if request.client else "?"
@@ -1158,14 +1174,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         alias = alias_of(vmid)
         try:
             if action == "forget":
+                forgotten = [k.fingerprint for k in keys.trusted(alias)]
                 keys.forget(alias)
                 session.pending_vm_keys.pop(vmid, None)
+                audit.record("hostkey.forget", **who(request), vmid=vmid, alias=alias, fingerprints=forgotten)
                 return reply(message=f"Forgot VM {vmid}'s host keys.", vmid=vmid)
             if action == "trust":
                 pending = session.pending_vm_keys.pop(vmid, None)
                 if not pending or pending[0].host != alias or form.get("confirm") is None:
                     return reply(422, vmid=vmid, error="Scan again, compare the fingerprints and tick the box.")
                 keys.trust(alias, pending)
+                audit.record("hostkey.pin", **who(request), vmid=vmid, alias=alias,
+                             fingerprints=[k.fingerprint for k in pending], **session.pending_vm_from.pop(vmid, {}))
                 return reply(message=f"Pinned VM {vmid}'s host keys.", vmid=vmid,
                              pinned=[hostkey(k) for k in pending])
             address = check_host(str(form.get("address", "")))
@@ -1173,6 +1193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if action == "scan":
                 found = await asyncio.to_thread(keys.scan, address, port, alias)
                 session.pending_vm_keys[vmid] = found
+                session.pending_vm_from[vmid] = {"address": address, "port": port}
                 return reply(vmid=vmid, scanned=[hostkey(k) for k in found], address=address, port=port)
             user = vmplan.check_user(str(form.get("user", "")),
                                      vmplan.Formats(ipv4="", users=schema.by_name["admin_user"].patterns))
@@ -1224,8 +1245,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             row = rows.get(vmid)
             if vmid in static and row is not None:
                 address = static[vmid]["ansible_host"] or str(row.get("ip") or "")
-                if address:
-                    keys.adopt(alias_of(vmid), address)
+                adopted = keys.adopt(alias_of(vmid), address) if address else []
+                if adopted:
+                    audit.record("hostkey.adopt", **who(request), vmid=vmid, alias=alias_of(vmid), address=address,
+                                 fingerprints=[k.fingerprint for k in adopted])
         pins = {alias: [k.fingerprint for k in found] for alias, found in keys.pins().items()}
         formats = vmplan.Formats(ipv4=str(next(c for c in schema.server_columns if c.name == "ansible_host").pattern),
                                  users=schema.by_name["admin_user"].patterns)
@@ -1249,14 +1272,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if plan is None:
             return reply(422, error="That plan has expired (plans last 10 minutes). Review it again.")
         if form.get("mode") != "check":
-            return reply(422, error="Only check runs are possible from the VMs page so far.")
+            return reply(422, error="A plan runs in check mode first; its run's page then offers the real run.")
         try:
             started = runner.start("baseline", True, True, plan.limit, store.host_names(), secret_values(),
                                    kind="vms", inventory=plan.inventory, tags=plan.tags, targets=plan.summary(),
                                    plan=plan.digest)
         except RunError as exc:
             return reply(422, error=exc.message)
+        for target in plan.targets:
+            if target.override:
+                audit.record("vm.override", **who(request), run=started.id, vmid=target.vmid, name=target.name,
+                             reason="the playbooks aren't tested on its OS; the user confirmed it runs Ubuntu Server")
+        audit.record("run.check", **who(request), run=started.id, plan=plan.digest, tags=plan.tags,
+                     targets=plan.summary())
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
+
+    def apply_problem(check: Run | None) -> str:
+        """Why a check run's plan can't be run for real now, or "" if it can."""
+        if check is None or check.kind != "vms" or not check.check or check.applied_from:
+            return "Only a check run started from the VMs page can be run for real."
+        if check.status != "succeeded":
+            return "The check run didn't succeed: fix what failed and run the check again."
+        if time.time() - (check.finished or 0) > CHECK_TTL:
+            return "The check run is more than 30 minutes old: run the check again."
+        if any(r.applied_from == check.id for r in runner.history()):
+            return "This check run's plan has been run already: run the check again first."
+        if check.settings != runner.settings_digest():
+            return "Settings were saved since the check run: run the check again."
+        try:
+            inventory = runner.path(check.id, ".inventory.yml").read_text()
+        except OSError:
+            return "The check run's inventory is gone: run the check again."
+        pins = {t.get("alias", alias_of(int(t["vmid"]))): [k.fingerprint for k in
+                                                           keys.trusted(t.get("alias") or alias_of(int(t["vmid"])))]
+                for t in check.targets}
+        if vmplan.digest(check.tags, inventory, pins) != check.plan:
+            return "A VM's pinned host keys changed since the check run: run the check again."
+        return ""
+
+    def apply_json(run: Run) -> dict[str, Any] | None:
+        """For a VMs page check run: whether its plan can be run for real, and until when."""
+        if run.kind != "vms" or not run.check:
+            return None
+        problem = apply_problem(run)
+        return {"possible": not problem, "problem": problem,
+                "until": int((run.finished or 0) + CHECK_TTL) if run.finished else None}
+
+    @app.post("/api/vms/apply")
+    async def vm_apply(request: Request):
+        """Runs a passing check run's plan for real: the same hosts, inventory, tags and pinned keys, within 30
+        minutes of the check, once, after the user confirmed it."""
+        require_login(request)
+        form = await checked_form(request)
+        check = runner.get(str(form.get("run_id", "")))
+        problem = apply_problem(check)
+        if not problem and form.get("confirm") is None:
+            problem = "Tick the box to confirm the real run."
+        if problem:
+            audit.record("run.refused", **who(request), check=check.id if check else None, reason=problem)
+            return reply(422, error=problem)
+        inventory = runner.path(check.id, ".inventory.yml").read_text()
+        try:
+            started = runner.start("baseline", False, True, check.limit, store.host_names(), secret_values(),
+                                   kind="vms", inventory=inventory, tags=check.tags, targets=check.targets,
+                                   plan=check.plan, applied_from=check.id)
+        except RunError as exc:
+            audit.record("run.refused", **who(request), check=check.id, reason=exc.message)
+            return reply(422, error=exc.message)
+        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan, tags=check.tags,
+                     targets=check.targets, confirmed=True)
+        return reply(redirect=f"/runs/{started.id}", run=run_json(started))
+
+    @app.get("/audit.jsonl")
+    async def audit_download(request: Request):
+        """The audit log, oldest entry first (the rotated files, then the current one)."""
+        require_login(request, api=False)
+        return Response(audit.read(), media_type="application/x-ndjson", headers={
+            "Content-Disposition": 'attachment; filename="usas-audit.jsonl"'})
 
     # --- Runs ---------------------------------------------------------------------------------------------
 
@@ -1301,7 +1393,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = runner.log_path(run.id)
         log = path.read_bytes() if path.exists() else b""
         return reply(run=run_json(run), log=log.decode("utf-8", "replace"), offset=len(log),
-                     hosts=runner.hosts(run.id, secret_values()))
+                     hosts=runner.hosts(run.id, secret_values()), apply=apply_json(run))
 
     @app.get("/api/runs/{run_id}/hosts")
     async def run_hosts(request: Request, run_id: str):
