@@ -72,12 +72,14 @@ export function Field({ field, values, error, list }: {
       <div className="select">
         <select id={id} name={field.name} defaultValue={String(value ?? "")} aria-describedby={describedBy(id, error)}
                 aria-invalid={invalid}>
-          {(field.choices ?? []).map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+          {(field.choices ?? []).map((choice) => (
+            <option key={choice} value={choice}>{field.choice_labels?.[choice] ?? choice}</option>
+          ))}
         </select>
       </div>
     );
   } else if (field.kind === "list") {
-    const rows = field.name === "admin_extra_ssh_keys" || field.name === "ufw_allow" ? 4 : 3;
+    const rows = field.name === "admin_extra_ssh_keys" || field.name === "firewall_allow" ? 4 : 3;
     control = (
       <textarea id={id} name={field.name} rows={rows} spellCheck={false} defaultValue={String(value ?? "")}
                 aria-describedby={describedBy(id, error)} aria-invalid={invalid} />

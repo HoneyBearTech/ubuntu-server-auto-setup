@@ -152,6 +152,8 @@ def field_json(f: Field, config: Config | None = None) -> dict[str, Any]:
     data = {"name": f.name, "label": f.label, "kind": f.kind, "help": f.help, "required": f.required,
             "advanced": f.advanced, "variable": f.vault or f.name, "default": shown_default,
             "choices": list(f.choices) if f.choices else None}
+    if f.choice_labels:
+        data["choice_labels"] = dict(f.choice_labels)
     if f.kind == "secret":
         data["saved"] = bool(config and config.secret_is_set(f.vault))
     return data
@@ -960,7 +962,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_login(request)
         config = store.load()
         return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config),
-                     nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node)
+                     nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node,
+                     default_os=str(setting(config, "vm_os")))
 
     @app.post("/api/servers")
     async def servers(request: Request):
@@ -1128,7 +1131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return data
 
     def plan_settings(config: Config) -> vmplan.Settings:
-        rules = [vmplan.rule_text(r) for r in config.values.get("ufw_allow") or [] if isinstance(r, dict)]
+        rules = [vmplan.rule_text(r) for r in config.values.get("firewall_allow") or [] if isinstance(r, dict)]
         return vmplan.Settings(
             admin_user=str(setting(config, "admin_user")), ssh_port=int(setting(config, "ssh_port")),
             github_user=str(config.values.get("github_user") or ""),
@@ -1363,7 +1366,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 for k, (p, d, x) in PLAYBOOKS.items()],
                      names=sorted(store.host_names()), steps=readiness(config),
                      current_run=run_json(runner.current()),
-                     iso_plan=nodes.iso_plan(plan, config, str(setting(config, "pve_iso_storage")), store.cluster()))
+                     iso_plan=nodes.iso_plan(plan, config, str(setting(config, "pve_iso_storage")), store.cluster(),
+                                             schema.installer_isos, str(setting(config, "vm_os"))))
 
     @app.post("/api/run")
     async def run(request: Request):
