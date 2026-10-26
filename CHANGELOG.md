@@ -41,8 +41,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `security` updates (`safe` by default, which never removes a package; `dist` opt-in), a batch at a time.
   It waits for a busy package manager and then skips the server as `busy`. It reboots only with
   `updates_reboot: if_required`, inside `updates_reboot_window`, and holds the reboot on an encrypted VM
-  after a Secure Boot update. It then checks the server's health (services, system state, optional URLs)
-  and stops starting servers after a failure. Maintenance windows (`updates_window`) and an opt-out
+  after a Secure Boot update. It then checks the server's health (services, system state, units that
+  failed, optional URLs) and stops starting servers after a failure. Maintenance windows (`updates_window`) and an opt-out
   (`updates_enabled: false`) are per server or group, and every run writes a JSON and a text report on
   the control node.
   **New attack surface:** the control node now connects with sudo to servers this project didn't install,

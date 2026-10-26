@@ -1,6 +1,7 @@
 ---
 # After an update or a reboot: the server has finished starting, every enabled service that ran before still
-# runs, so do updates_health_services, the system state is no worse than before, and updates_health_urls answer
+# runs, so do updates_health_services, the system state is no worse than before and no unit has failed since
+# (each one is named), and updates_health_urls answer
 # (from the control node, certificates checked). Any problem fails the server, which stops later batches.
 - name: Wait for the server to finish starting
   ansible.builtin.command:
@@ -8,6 +9,13 @@
   register: updates_state_after
   changed_when: false
   failed_when: updates_state_after is unreachable
+
+- name: List the failed units
+  ansible.builtin.command:
+    argv: [systemctl, list-units, --failed, --plain, --no-legend]
+  register: updates_failed_after
+  changed_when: false
+  failed_when: updates_failed_after is unreachable
 
 - name: Note which services run after the update
   ansible.builtin.service_facts:
@@ -36,10 +44,15 @@
       {{ updates_services_before.ansible_facts.services | usas_running_services
       | usas_health_problems(updates_services_after.ansible_facts.services, updates_health_services,
       updates_health_ignore_services) }}
+    # Units that failed since before the update, named so the report says what broke.
+    newly_failed: >-
+      {{ updates_failed_after.stdout | usas_failed_units
+      | difference(updates_failed_before.stdout | default('') | usas_failed_units) }}
     state: >-
-      {{ ['system state ' ~ (updates_state_after.stdout | usas_clean_text(20)) ~ ' (was '
+      {{ (['system state ' ~ (updates_state_after.stdout | usas_clean_text(20)) ~ ' (was '
       ~ (updates_state_before.stdout | usas_clean_text(20)) ~ ')']
-      if updates_state_before.stdout | usas_system_state_worse(updates_state_after.stdout) else [] }}
+      if updates_state_before.stdout | usas_system_state_worse(updates_state_after.stdout) else [])
+      + (newly_failed | map('regex_replace', '^', 'unit failed: ') | list) }}
     urls: >-
       {{ updates_health_calls.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
       | map(attribute='item.url') | list }}

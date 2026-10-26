@@ -280,6 +280,20 @@ def usas_health_problems(running_before, services_after, required=(), ignore=())
     return sorted({str(n) for n in wanted if not runs(n) and not usas_glob_any(n, ignore)})
 
 
+def usas_failed_units(stdout, limit=50):
+    """The unit names of systemctl list-units --failed --plain --no-legend (the first word of each line), those
+    that pass the unit-name check, once each, at most limit."""
+    units = []
+    for line in _lines(stdout):
+        words = line.split()
+        name = words[0] if words and words[0] != "●" else (words[1] if len(words) > 1 else "")
+        if SERVICE.match(name) and name not in units:
+            units.append(name)
+        if len(units) >= limit:
+            break
+    return units
+
+
 SYSTEM_STATES = {"running": 0, "degraded": 1}
 
 
@@ -510,6 +524,7 @@ class FilterModule:
             "usas_running_services": usas_running_services,
             "usas_health_problems": usas_health_problems,
             "usas_system_state_worse": usas_system_state_worse,
+            "usas_failed_units": usas_failed_units,
             "usas_window_problems": usas_window_problems,
             "usas_in_window": usas_in_window,
             "usas_window_text": usas_window_text,
