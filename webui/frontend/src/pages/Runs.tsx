@@ -115,12 +115,13 @@ function IsoPlanCard({ plan }: { plan: IsoPlan }) {
   return (
     <section className="card" aria-labelledby="iso-plan-heading">
       <div className="card-body">
-        <h2 id="iso-plan-heading">Where build-installer puts the installer ISO</h2>
+        <h2 id="iso-plan-heading">Where build-installer puts the installer ISOs</h2>
         {plan.pairs.length ? (
           <p>
             ISO storage <code>{plan.storage}</code>
-            {plan.shared ? " is shared by the cluster: the ISO is built once, on " : " is each node's own: the ISO is built on "}
-            {builders === 1 ? "one node" : `${builders} nodes`}. A node already holding the current ISO is skipped.
+            {plan.shared ? " is shared by the cluster: each ISO is built once, on " : " is each node's own: each ISO is built on "}
+            {builders === 1 ? "one node" : `${builders} nodes`}, one per Ubuntu release the servers there install. A node
+            already holding the current ISO is skipped.
           </p>
         ) : <p>No server has a node yet: add servers on the <Link href="/servers">Servers</Link> page.</p>}
         {!plan.known && plan.pairs.length ? (
@@ -134,21 +135,23 @@ function IsoPlanCard({ plan }: { plan: IsoPlan }) {
         <div className="table-wrap" tabIndex={0} role="region" aria-labelledby="iso-plan-caption">
           <table>
             <caption id="iso-plan-caption" className="visually-hidden">The nodes the servers use, and which node builds
-              the installer ISO for each</caption>
+              each installer ISO they need</caption>
             <thead>
               <tr>
                 <th scope="col">Node</th>
                 <th scope="col">Servers</th>
                 <th scope="col">ISO storage</th>
+                <th scope="col">Installer ISO</th>
                 <th scope="col">Built by</th>
               </tr>
             </thead>
             <tbody>
               {plan.pairs.map((p) => (
-                <tr key={`${p.node}/${p.storage}`}>
+                <tr key={`${p.node}/${p.storage}/${p.iso}`}>
                   <th scope="row"><code>{p.node}</code>{p.address ? null : <span className="help"> (no SSH address yet)</span>}</th>
                   <td>{p.servers.join(", ")}</td>
                   <td><code>{p.storage}</code>{p.shared ? " (shared)" : ""}</td>
+                  <td><code>{p.iso}</code></td>
                   <td>{p.built_by === p.node ? "this node" : <code>{p.built_by}</code>}</td>
                 </tr>
               ))}

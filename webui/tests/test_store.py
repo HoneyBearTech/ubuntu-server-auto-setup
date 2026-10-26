@@ -28,7 +28,7 @@ def sample(store) -> Config:
     config.values.update({
         "pve_api_host": "pve.example.lan", "pve_node": "pve-1", "admin_user": "sysadmin",
         "timezone": "{{ lookup('pipe', 'touch /tmp/pwned') }}",  # can't come from the form; must stay data
-        "ssh_port": 22, "net_dns": ["10.0.0.1"], "ufw_allow": [{"port": "80", "proto": "tcp"}],
+        "ssh_port": 22, "net_dns": ["10.0.0.1"], "firewall_allow": [{"port": "80", "proto": "tcp"}],
         "admin_extra_ssh_keys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE extra@laptop"],
     })
     config.secrets.update({"vault_admin_password": "p {{ w }}", "vault_pve_api_token_id": "automation",
@@ -36,8 +36,8 @@ def sample(store) -> Config:
     config.node_addresses = {"pve-1": "10.0.0.2"}
     config.servers = [
         {"name": "web-01", "ansible_host": "10.0.0.11", "pve_vmid": 4001, "vm_cores": 4, "vm_memory_mb": None,
-         "ufw_ports": [{"port": "443", "proto": "tcp"}]},
-        {"name": "db-01", "ansible_host": "10.0.0.12", "pve_vmid": 4002, "ufw_ports": []},
+         "firewall_ports": [{"port": "443", "proto": "tcp"}]},
+        {"name": "db-01", "ansible_host": "10.0.0.12", "pve_vmid": 4002, "firewall_ports": []},
     ]
     return config
 
@@ -47,12 +47,12 @@ def test_round_trip(store):
     store.save(config)
     loaded = store.load()
     assert loaded.values["pve_api_host"] == "pve.example.lan"
-    assert loaded.values["ufw_allow"] == [{"port": "80", "proto": "tcp"}]
+    assert loaded.values["firewall_allow"] == [{"port": "80", "proto": "tcp"}]
     assert loaded.secrets == config.secrets
     assert loaded.node_addresses == {"pve-1": "10.0.0.2"}
     assert loaded.servers[0] == {"name": "web-01", "ansible_host": "10.0.0.11", "pve_vmid": 4001, "vm_cores": 4,
-                                 "ufw_ports": [{"port": "443", "proto": "tcp"}]}
-    assert loaded.servers[1]["ufw_ports"] == []
+                                 "firewall_ports": [{"port": "443", "proto": "tcp"}]}
+    assert loaded.servers[1]["firewall_ports"] == []
     assert "ssh_port" not in loaded.values  # equal to the role default, so left out
     text = store.settings.inventory_file.read_text()
     assert "fail2ban_webhook_url" not in text and "mail_relay_password" not in text  # not saved, so not referred to
@@ -62,7 +62,7 @@ def test_round_trip(store):
     text = store.settings.inventory_file.read_text()
     assert "fail2ban_webhook_url: '{{ vault_fail2ban_webhook_url }}'" in text and "auth=tk" not in text
     assert "mail_relay_password" not in text
-    assert store.host_names() >= {"web-01", "db-01", "pve-1", "all", "ubuntu_servers"}
+    assert store.host_names() >= {"web-01", "db-01", "pve-1", "all", "servers"}
 
 
 def test_files_are_private_and_the_vault_is_encrypted(store, settings):
@@ -79,7 +79,7 @@ def test_user_values_are_tagged_unsafe(store, settings):
     text = settings.inventory_file.read_text()
     assert "timezone: !unsafe '{{ lookup(''pipe'', ''touch /tmp/pwned'') }}'" in text
     assert "admin_password: '{{ vault_admin_password }}'" in text
-    assert "ufw_allow: '{{ webui_ufw_allow + (webui_ufw_allow_host | default([])) }}'" in text
+    assert "firewall_allow: '{{ webui_firewall_allow + (webui_firewall_allow_host | default([])) }}'" in text
 
 
 def test_the_ui_key_is_authorized_unless_turned_off(store, settings):
@@ -103,7 +103,7 @@ def test_ansible_reads_the_inventory_without_templating_user_values(store, setti
     result = subprocess.run(
         [ANSIBLE, "-i", str(settings.inventory_file), "--vault-password-file", str(settings.vault_password_file),
          "web-01", "-c", "local", "-m", "ansible.builtin.debug",
-         "-a", "msg={{ [timezone, admin_password, ufw_allow | length, pve_api_token_id, ansible_user] }}"],
+         "-a", "msg={{ [timezone, admin_password, firewall_allow | length, pve_api_token_id, ansible_user] }}"],
         capture_output=True, text=True, env=env, cwd=tmp_path, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout
@@ -195,6 +195,51 @@ def test_servers_on_several_nodes(store):
     assert loaded.nodes_in_use() == ["pve-1", "pve-2"]
     assert loaded.node_names() == ["pve-1", "pve-2", "pve-old"]
     assert {"pve-1", "pve-2", "pve-old"} <= store.host_names()
+
+
+def test_an_inventory_from_before_0_7_0_is_read_and_written_with_the_new_names(store, settings):
+    # What the web UI wrote before 0.7.0: the group ubuntu_servers, ufw_* names, the point release field.
+    store.save(sample(store))
+    settings.inventory_file.write_text(dump_yaml({"all": {
+        "vars": {"pve_api_host": "pve.example.lan", "ubuntu_point_release": "26.04.1", "ufw_ssh_limit": False,
+                 "ufw_ssh_sources": ["10.0.0.0/8"], "webui_ufw_allow": [{"port": "80", "proto": "tcp"}],
+                 "ufw_allow": "{{ webui_ufw_allow + (webui_ufw_allow_host | default([])) }}"},
+        "children": {"ubuntu_servers": {"hosts": {"web-01": {
+            "ansible_host": "10.0.0.11", "pve_vmid": 4001,
+            "webui_ufw_allow_host": [{"port": "443", "proto": "tcp"}]}}}}}}))
+    config = store.load()
+    assert config.values["firewall_ssh_limit"] is False and config.values["firewall_ssh_sources"] == ["10.0.0.0/8"]
+    assert config.values["firewall_allow"] == [{"port": "80", "proto": "tcp"}]
+    assert config.servers[0]["firewall_ports"] == [{"port": "443", "proto": "tcp"}]
+    store.save(config)
+    text = settings.inventory_file.read_text()
+    assert "ufw_" not in text and "ubuntu_point_release" not in text and "ubuntu_servers" not in text
+    inventory = load_yaml(text)["all"]
+    assert inventory["vars"]["firewall_ssh_sources"] == ["10.0.0.0/8"]
+    combined = "{{ webui_firewall_allow + (webui_firewall_allow_host | default([])) }}"
+    assert inventory["vars"]["firewall_allow"] == combined
+    assert inventory["children"]["servers"]["hosts"]["web-01"]["webui_firewall_allow_host"] == [
+        {"port": "443", "proto": "tcp"}]
+    # Rules set by hand under the old name, without the UI's split, are kept too.
+    settings.inventory_file.write_text(dump_yaml({"all": {"vars": {"ufw_allow": [{"port": "22", "proto": "tcp"}]}}}))
+    assert store.load().values["firewall_allow"] == [{"port": "22", "proto": "tcp"}]
+
+
+def test_a_server_and_the_default_os(store, settings):
+    config = sample(store)
+    config.values["vm_os"] = "ubuntu-24.04"
+    config.servers[1]["vm_os"] = "ubuntu-22.04"
+    store.save(config)
+    inventory = load_yaml(settings.inventory_file.read_text())["all"]
+    hosts = inventory["children"]["servers"]["hosts"]
+    assert inventory["vars"]["vm_os"] == "ubuntu-24.04" and "vm_os" not in hosts["web-01"]
+    assert hosts["db-01"]["vm_os"] == "ubuntu-22.04"
+    loaded = store.load()
+    assert loaded.values["vm_os"] == "ubuntu-24.04" and loaded.servers[1]["vm_os"] == "ubuntu-22.04"
+    # The role's default isn't written.
+    config.values["vm_os"] = "ubuntu-26.04"
+    store.save(config)
+    assert "vm_os" not in load_yaml(settings.inventory_file.read_text())["all"]["vars"]
 
 
 def test_the_app_repairs_the_vault_when_it_starts(store, settings, caplog):
