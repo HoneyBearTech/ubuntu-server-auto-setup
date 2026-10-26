@@ -175,3 +175,14 @@ def test_the_page_uses_the_playbooks_parser():
     assert v.parse_resources is shared.parse_resources and v.Vm is shared.Vm and v.VMID_PATTERN is shared.VMID_PATTERN
     assert "parse_resources" in v.__all__
     assert not {"re", "ipaddress", "dataclass", "field", "Any", "_number"} & set(v.__all__)
+
+
+def test_names_and_pins_for_runs():
+    assert v.vm_alias("Home-Lab", 101) == "usas-home-lab-101" and v.ALIAS_PATTERN.match("usas-home-lab-101")
+    assert v.vm_alias("", 4061) == v.vm_alias("not a name", 4061) == "usas-pve-4061"
+    with pytest.raises(ValueError):
+        v.vm_alias("lab", 12)
+    servers = [{"name": "web-00", "pve_vmid": 4000}, {"name": "db-01", "pve_vmid": None}]
+    assert v.host_name(4000, servers) == ("web-00", servers[0])
+    assert v.host_name(101, servers) == ("vm-101", None)
+    assert v.control_path(101) == "%(directory)s/v101-%%C"

@@ -141,3 +141,108 @@ def test_history_is_newest_first(runner):
                          status="succeeded", started=float(i)))
     assert [x.id[:8] for x in runner.history()] == ["20250103", "20250102", "20250101"]
     assert json.loads((runner.dir / "20250101-000000-aaaaaa.json").read_text())["action"] == "site"
+
+
+INVENTORY = ("---\nall:\n  children:\n    usas_vms:\n      hosts:\n        vm-101:\n"
+             "          ansible_host: !unsafe '10.0.1.1'\n")
+
+
+def test_a_run_with_its_own_inventory_and_tags(runner):
+    run = runner.start("baseline", True, True, "vm-101", NAMES, [], kind="vms", inventory=INVENTORY,
+                       tags=["fail2ban", "ssh"], targets=[{"vmid": 101}], plan="abc")
+    assert run.tags == ["ssh", "fail2ban"] and run.inventory and not run.extra_vars
+    done = wait(runner, run.id)
+    log = runner.log_path(run.id).read_text()
+    extra = runner.path(run.id, ".inventory.yml")
+    assert f"-i {runner.settings.inventory_file} -i {extra} " in log
+    assert "--tags=ssh,fail2ban --check --diff --limit=vm-101 playbooks/baseline.yml" in log
+    assert extra.read_text() == INVENTORY and extra.stat().st_mode & 0o777 == 0o600
+    assert (done.kind, done.targets, done.plan) == ("vms", [{"vmid": 101}], "abc")
+    # The VM's name is only known to the run that brought its inventory.
+    with pytest.raises(RunError, match="isn't a host"):
+        runner.start("baseline", True, True, "vm-101", NAMES, [])
+
+
+@pytest.mark.parametrize("tags", [["--become"], ["ssh_keys,firewall"], ["never"], ["all"], ["ssh\n"]])
+def test_tags_come_from_the_allowlist(runner, tags):
+    with pytest.raises(RunError, match="can't run with the tag"):
+        runner.start("baseline", True, False, "", NAMES, [], tags=tags)
+    with pytest.raises(RunError, match="can't run with the tag"):
+        runner.start("site", True, False, "", NAMES, [], tags=["ssh"])
+    assert runner.current() is None
+
+
+def test_extra_vars_come_from_the_allowlist(runner, monkeypatch):
+    import re
+
+    with pytest.raises(RunError, match="doesn't take the variable"):
+        runner.start("baseline", True, False, "", NAMES, [], extra_vars={"ansible_become_password": "x"})
+    monkeypatch.setitem(r.EXTRA_VARS, "baseline", {"usas_example": re.compile(r"^[a-z]{1,8}\Z")})
+    with pytest.raises(RunError, match="accepted format"):
+        runner.start("baseline", True, False, "", NAMES, [], extra_vars={"usas_example": "{{ lookup('pipe','id') }}"})
+    run = wait(runner, runner.start("baseline", True, False, "", NAMES, [], extra_vars={"usas_example": "abc"}).id)
+    variables = runner.path(run.id, ".vars.yml")
+    assert variables.read_text() == "---\nusas_example: !unsafe 'abc'\n"
+    assert f"-e @{variables}" in runner.log_path(run.id).read_text()
+
+
+def test_one_run_at_a_time_across_processes(runner):
+    import fcntl
+    import os
+
+    fd = os.open(runner.dir / ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another process (a command-line run) holds it
+    try:
+        with pytest.raises(RunError, match="outside the web UI"):
+            runner.start("baseline", True, False, "", NAMES, [])
+    finally:
+        os.close(fd)
+    run = wait(runner, runner.start("baseline", True, False, "", NAMES, []).id)
+    assert run.status == "succeeded" and runner._file_lock is None
+
+
+def test_the_lock_is_released_if_the_run_cannot_start(runner, monkeypatch):
+    def broken(*a, **kw):
+        raise OSError("no such program")
+
+    monkeypatch.setattr(r.subprocess, "Popen", broken)
+    with pytest.raises(OSError):
+        runner.start("baseline", True, False, "", NAMES, [])
+    assert runner._file_lock is None and runner.current() is None
+
+
+def test_per_host_results_are_redacted(runner):
+    run = wait(runner, runner.start("baseline", True, False, "", NAMES, []).id)
+    assert runner.hosts(run.id) is None
+    summary = runner.path(run.id, ".hosts.json")
+    summary.write_text(json.dumps({"finished": True, "hosts": {"vm-101": {
+        "ok": 3, "failed_tasks": [{"task": "x", "message": f"bad {TOKEN_SECRET}"}]}}}))
+    hosts = runner.hosts(run.id, [TOKEN_SECRET])
+    assert hosts["hosts"]["vm-101"]["failed_tasks"][0]["message"] == f"bad {r.REDACTED}"
+    summary.write_text("[1]")
+    assert runner.hosts(run.id) is None
+    assert runner.hosts("../etc") is None
+
+
+def test_old_run_files_still_load(runner):
+    (runner.dir / "20250101-000000-cccccc.json").write_text(json.dumps({
+        "id": "20250101-000000-cccccc", "action": "site", "check": False, "diff": False, "limit": "",
+        "status": "succeeded", "started": 1.0, "finished": 2.0, "returncode": 0, "from_the_future": 1}))
+    (runner.dir / "20250101-000000-cccccc.hosts.json").write_text("{}")
+    old = runner.get("20250101-000000-cccccc")
+    assert (old.kind, old.tags, old.targets, old.inventory) == ("playbook", [], [], False)
+    assert [x.id for x in runner.history()] == ["20250101-000000-cccccc"]
+
+
+def test_pruning_removes_a_runs_files(runner, monkeypatch):
+    run = wait(runner, runner.start("baseline", True, False, "vm-101", NAMES, [], inventory=INVENTORY).id)
+    runner.path(run.id, ".hosts.json").write_text("{}")
+    monkeypatch.setattr(r, "KEEP_RUNS", 0)
+    runner._prune()
+    assert sorted(p.name for p in runner.dir.iterdir()) == [".lock"]
+
+
+def test_inventory_names():
+    assert r.inventory_names(INVENTORY) == {"all", "usas_vms", "vm-101"}
+    assert r.inventory_names("") == set() and r.inventory_names("- 1") == set()
+    assert r.inventory_names("all:\n  children:\n    g: null\n") == {"all", "g"}

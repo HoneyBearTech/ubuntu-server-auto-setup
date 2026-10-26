@@ -1,9 +1,10 @@
-// The VMs page: a read-only list of the cluster's VMs and containers, with their addresses and whether the
-// playbooks support them. It asks the server again every 30 seconds while the tab is visible (sooner while
-// guest agents are still answering, later after an error), and a refresh never reorders the rows or moves the
-// focus: a new order comes only from the sort buttons.
+// The VMs page: the cluster's VMs and containers, with their addresses and whether the playbooks support them,
+// and the baseline run against the ones selected (VmRun). It asks the server again every 30 seconds while the tab
+// is visible (sooner while guest agents are still answering, later after an error), and a refresh never
+// reorders the rows, moves the focus or drops the selection: a new order comes only from the sort buttons.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { get } from "../api";
 import { Icon } from "../components/Icons";
 import type { IconName } from "../components/Icons";
@@ -12,6 +13,7 @@ import { errorText } from "../data";
 import { plural } from "../format";
 import { Link } from "../router";
 import type { IpSource, Vm, VmSupport, VmsData } from "../types";
+import { VmRun } from "./VmRun";
 
 export const POLL_MS = 30_000;
 export const FILL_MS = 5_000; // while guest agents are still answering
@@ -200,14 +202,21 @@ function Usage({ id, label, value, max, text }: { id: string; label: string; val
   );
 }
 
-function VmRow({ vm }: { vm: Vm }) {
+function VmRow({ vm, selected, onSelect }: { vm: Vm; selected: boolean; onSelect: (on: boolean) => void }) {
   const running = vm.status === "running";
+  const label = vm.name || `VM ${vm.vmid}`;
+  const why = `vm-why-${vm.vmid}`;
   const support = SUPPORT[vm.support] ?? SUPPORT.unknown;
   const kind = vm.type === "lxc" ? "container" : vm.template ? "template" : null;
   const others = vm.addresses.filter((a) => a !== vm.ip);
   const agentNote = AGENT_STATES[vm.agent];
   return (
-    <tr>
+    <tr className={selected ? "selected" : undefined}>
+      <td data-label="Select" className="select-cell">
+        <input type="checkbox" id={`vm-select-${vm.vmid}`} checked={selected && vm.selectable}
+               disabled={!vm.selectable} onChange={(e) => onSelect(e.target.checked)}
+               aria-label={`Select ${label}`} aria-describedby={vm.selectable ? undefined : why} />
+      </td>
       <th scope="row" data-label="Name">
         <span className="vm-name">{vm.name || `VM ${vm.vmid}`}</span>
         {kind ? <span className="sub">{kind === "container" ? "Container (LXC)" : "Template"}</span> : null}
@@ -254,6 +263,11 @@ function VmRow({ vm }: { vm: Vm }) {
         <div className="cell">
           <span className={`badge badge-${support.badge}`}>{support.label}</span>
           <span className="sub">{vm.reason}</span>
+          {!vm.selectable && vm.why_not !== vm.reason ? (
+            <span className="sub" id={why}>Can't be selected: {vm.why_not}</span>
+          ) : null}
+          {!vm.selectable && vm.why_not === vm.reason ? <span className="visually-hidden" id={why}>{vm.why_not}</span> : null}
+          {vm.pinned.length ? <span className="sub">Host key pinned</span> : null}
         </div>
       </td>
     </tr>
@@ -277,6 +291,8 @@ export function Vms() {
   const [sort, setSort] = useState<Sort>({ key: "vmid", ascending: true });
   const [order, setOrder] = useState<number[]>([]);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [selected, setSelected] = useState<number[]>([]);
+  const selectAll = useRef<HTMLInputElement>(null);
 
   // A refresh keeps the rows where they are; a click on a sort button sorts them again.
   const arranged = useMemo(() => (data ? arrange(order, data.vms, sort) : []), [order, data, sort]);
@@ -299,6 +315,24 @@ export function Vms() {
   const filtered = Object.values(filters).some(Boolean);
   const sortedBy = COLUMNS.find((c) => c.key === sort.key)?.label ?? "";
 
+  // The selection survives refreshes and filters; VMs that can't be selected any more are left out of the run.
+  const picked = selected.map((id) => byId.get(id)).filter((vm): vm is Vm => !!vm);
+  const chosen = picked.filter((vm) => vm.selectable);
+  const dropped = picked.filter((vm) => !vm.selectable);
+  const shownSelectable = shown.filter((vm) => vm.selectable);
+  const shownChosen = shownSelectable.filter((vm) => selected.includes(vm.vmid));
+  const allShown = shownSelectable.length > 0 && shownChosen.length === shownSelectable.length;
+  useEffect(() => {
+    if (selectAll.current) selectAll.current.indeterminate = shownChosen.length > 0 && !allShown;
+  });
+  const select = (vmid: number) => (on: boolean) =>
+    setSelected((now) => (on ? (now.includes(vmid) ? now : [...now, vmid]) : now.filter((id) => id !== vmid)));
+  const onSelectAll = (event: ChangeEvent<HTMLInputElement>) => {
+    const ids = shownSelectable.map((vm) => vm.vmid);
+    setSelected((now) => (event.target.checked ? [...now, ...ids.filter((id) => !now.includes(id))]
+      : now.filter((id) => !ids.includes(id))));
+  };
+
   const actions = (
     <button type="button" className="button secondary" onClick={refresh} aria-disabled={busy || undefined}>
       <Icon name="refresh" />{busy ? "Refreshing…" : "Refresh"}
@@ -320,8 +354,8 @@ export function Vms() {
       <PageHead title="VMs" crumb={crumb} actions={actions} />
       <p className="lead">
         Every VM and container on the cluster, with the address the playbooks would use and whether they support
-        it. The list refreshes every 30 seconds while this page is open. Selecting VMs to run the baseline
-        against them comes in a later release.
+        it. The list refreshes every 30 seconds while this page is open. Select running Ubuntu VMs to run the
+        baseline against them: first a check run, which changes nothing.
       </p>
       {error ? <Notice notice={{ kind: "error", message: `The last refresh failed: ${error}` }} /> : null}
       {data.notes.map((note) => <Notice key={note.message} notice={note} />)}
@@ -373,7 +407,14 @@ export function Vms() {
       </form>
       <p className="count" role="status" id="vm-count">
         {filtered ? `${shown.length} of ${plural(rows.length, "VM", "VMs")} shown` : plural(rows.length, "VM", "VMs")}
+        {chosen.length ? `, ${chosen.length} selected` : ""}
       </p>
+      {shownSelectable.length ? (
+        <div className="check select-all">
+          <input type="checkbox" id="vm-select-all" ref={selectAll} checked={allShown} onChange={onSelectAll} />
+          <label htmlFor="vm-select-all">Select all VMs shown that can be selected</label>
+        </div>
+      ) : null}
       {rows.length === 0 ? <p>The cluster has no VMs or containers.</p> : (
         <div className="card table-wrap" tabIndex={0} role="region" aria-labelledby="vms-caption">
           <table className="stacked vms">
@@ -383,6 +424,7 @@ export function Vms() {
             </caption>
             <thead>
               <tr>
+                <th scope="col" className="select-cell"><span className="visually-hidden">Selected</span></th>
                 {COLUMNS.map((column) => (
                   <th key={column.key} scope="col"
                       aria-sort={sort.key === column.key ? (sort.ascending ? "ascending" : "descending") : undefined}>
@@ -392,12 +434,17 @@ export function Vms() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((vm) => <VmRow key={vm.vmid} vm={vm} />)}
+              {shown.map((vm) => (
+                <VmRow key={vm.vmid} vm={vm} selected={selected.includes(vm.vmid)} onSelect={select(vm.vmid)} />
+              ))}
             </tbody>
           </table>
           {shown.length === 0 ? <p className="card-body">No VM matches the filters.</p> : null}
         </div>
       )}
+      {picked.length ? (
+        <VmRun vms={chosen} dropped={dropped} info={data.run} fetched={data.fetched} refresh={refresh} />
+      ) : null}
     </>
   );
 }

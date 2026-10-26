@@ -1146,6 +1146,44 @@ td a {
   min-width: 16rem;
 }
 
+.vms .select-cell {
+  width: 2.75rem;
+  padding-right: 0;
+}
+
+/* A selected row: the checkbox says so; the bar on its edge only repeats it. */
+.vms tr.selected > :first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.select-all {
+  margin: 0 0 var(--space-3);
+}
+
+/* What guests report can be one long word: it wraps rather than widening the page. */
+.vm-part,
+.review td,
+.error-summary li {
+  overflow-wrap: anywhere;
+}
+
+.vm-part h3 .sub {
+  display: inline;
+  margin-left: var(--space-2);
+}
+
+.vm-part h4 {
+  margin-top: var(--space-4);
+}
+
+.fieldset.nested {
+  margin-top: var(--space-4);
+}
+
+.review .fp {
+  display: block;
+}
+
 .vm-name {
   overflow-wrap: break-word;
 }
