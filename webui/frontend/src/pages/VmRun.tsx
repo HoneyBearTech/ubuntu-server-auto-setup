@@ -176,7 +176,6 @@ function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPi
 
   return (
     <fieldset className="card-body fieldset vm-part" aria-labelledby={heading}>
-      <legend className="visually-hidden">{label} (VM {vm.vmid})</legend>
       <h3 id={heading}>{label} <span className="sub">VM {vm.vmid} on {vm.node}</span></h3>
       {server ? (
         <p className="help">

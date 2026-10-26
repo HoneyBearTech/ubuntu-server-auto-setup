@@ -1160,6 +1160,13 @@ td a {
   margin: 0 0 var(--space-3);
 }
 
+/* What guests report can be one long word: it wraps rather than widening the page. */
+.vm-part,
+.review td,
+.error-summary li {
+  overflow-wrap: anywhere;
+}
+
 .vm-part h3 .sub {
   display: inline;
   margin-left: var(--space-2);
