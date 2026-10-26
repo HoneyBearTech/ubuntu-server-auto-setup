@@ -3,7 +3,8 @@ name: Fuzzing
 
 # Atheris fuzz targets (tests/fuzz) for the code that turns inventory values into configuration files and
 # shell commands: the installer's user-data, the authorized keys, the ISO checksum and the sshd and
-# Fail2Ban settings; the web UI's status API token header; and what the OS catalog tool reads from the vendors. A minute per target on every pull request
+# Fail2Ban settings; the web UI's status API token header; and what the OS catalog tool reads from the
+# vendors. A minute per target on every pull request
 # and push to main, ten minutes weekly. A finding fails the job and its input is uploaded as an artifact.
 on:  # yamllint disable-line rule:truthy
   push:
