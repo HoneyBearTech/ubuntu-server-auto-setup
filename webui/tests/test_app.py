@@ -1287,7 +1287,7 @@ def test_vms_pin_plan_and_check(ui, monkeypatch):
     assert any("firewall" in w for w in reviewed["plan"]["warnings"])
 
     r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "apply"})
-    assert r.status_code == 422 and "Only check runs" in r.json()["error"]
+    assert r.status_code == 422 and "check mode first" in r.json()["error"]
     r = post(ui, "/vms/run", {"plan_id": "nope", "mode": "check"})
     assert r.status_code == 422 and "expired" in r.json()["error"]
     r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"})
@@ -1367,3 +1367,118 @@ def test_vms_run_refused_while_another_runs(ui, monkeypatch):
         session_plans[key] = (0.0, plan)
     r = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"})
     assert r.status_code == 422 and "expired" in r.json()["error"]
+
+
+# --- VMs: real runs after a passing check run, and the audit log ------------------------------------------------
+
+
+def checked(ui, monkeypatch, override=False):
+    """A finished check run of a plan for VM 101 (outside the inventory), with its key pinned."""
+    configure(ui)
+    ui.app_state.keys.generate()
+    resources = [{"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu", "status": "running"}]
+    fake_pve(monkeypatch, resources=resources)
+    scan_answers(monkeypatch)
+    post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "10.0.0.51", "port": "2222"})
+    post(ui, "/vms/hostkey", {"action": "trust", "vmid": "101", "confirm": "on"})
+    form = {"vmid": ["101"], "preset": "keys", "vm-101-address": "10.0.0.51", "vm-101-user": "ubuntu"}
+    if override:
+        form["vm-101-override"] = "on"
+    reviewed = post(ui, "/vms/plan", form).json()
+    started = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"}).json()["run"]
+    return finished(ui, started["id"])
+
+
+def events(ui):
+    return [e["event"] for e in reversed(ui.app_state.audit.entries())]
+
+
+def test_a_passing_check_run_can_be_applied_once(ui, monkeypatch):
+    check = checked(ui, monkeypatch, override=True)
+    detail = get(ui, f"/api/runs/{check.id}").json()
+    assert detail["apply"]["possible"] and detail["apply"]["until"] == int(check.finished) + m.CHECK_TTL
+    r = post(ui, "/vms/apply", {"run_id": check.id})
+    assert r.status_code == 422 and "Tick the box" in r.json()["error"]
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 200, r.text
+    real = finished(ui, r.json()["run"]["id"])
+    assert (real.check, real.diff, real.applied_from, real.plan, real.tags) == (False, True, check.id, check.plan,
+                                                                               ["ssh_keys"])
+    runner = ui.app_state.runner
+    assert runner.path(real.id, ".inventory.yml").read_text() == runner.path(check.id, ".inventory.yml").read_text()
+    log = runner.log_path(real.id).read_text()
+    assert "--check" not in log and "--tags=ssh_keys --diff --limit=vm-101 playbooks/baseline.yml" in log
+    assert get(ui, f"/api/runs/{real.id}").json()["apply"] is None
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 422 and "run already" in r.json()["error"]
+    assert events(ui) == ["hostkey.pin", "vm.override", "run.check", "run.finished", "run.refused", "run.apply",
+                          "run.finished", "run.refused"]
+    entries = {e["event"]: e for e in ui.app_state.audit.entries()}
+    pin = entries["hostkey.pin"]
+    assert (pin["vmid"], pin["address"], pin["port"], pin["alias"]) == (101, "10.0.0.51", 2222, "usas-pve-101")
+    assert pin["session"] and pin["client"] and pin["fingerprints"][0].startswith("SHA256:")
+    applied = entries["run.apply"]
+    assert applied["check"] == check.id and applied["confirmed"] and applied["targets"][0]["address"] == "10.0.0.51"
+    assert entries["run.finished"]["status"] == "succeeded"
+    assert TOKEN_SECRET not in ui.app_state.audit.read().decode()
+    # Downloadable from History, signed in only.
+    r = ui.get("/audit.jsonl")
+    assert r.status_code == 200 and r.headers["content-disposition"].endswith('"usas-audit.jsonl"')
+    assert r.content == ui.app_state.audit.read()
+
+
+@pytest.mark.parametrize("change, words", [
+    ("failed", "didn't succeed"), ("old", "more than 30 minutes"), ("settings", "Settings were saved"),
+    ("pin", "pinned host keys changed"), ("inventory", "inventory is gone"), ("playbook", "started from the VMs"),
+])
+def test_a_real_run_needs_a_fresh_passing_check_of_the_same_plan(ui, monkeypatch, change, words):
+    check = checked(ui, monkeypatch)
+    runner = ui.app_state.runner
+    if change == "failed":
+        check.status = "failed"
+        runner._save(check)
+    elif change == "old":
+        check.finished -= m.CHECK_TTL + 1
+        runner._save(check)
+    elif change == "settings":
+        post(ui, "/hardening", HARDENING)
+    elif change == "pin":
+        from usas_web.sshkeys import HostKey as Key
+        ui.app_state.keys.trust("usas-pve-101", [Key("usas-pve-101", "ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIOMr")])
+    elif change == "inventory":
+        runner.path(check.id, ".inventory.yml").unlink()
+    elif change == "playbook":
+        check = finished(ui, post(ui, "/run", {"playbook": "baseline", "check": "on"}).json()["run"]["id"])
+    detail = get(ui, f"/api/runs/{check.id}").json()
+    assert detail["apply"] is None if change == "playbook" else not detail["apply"]["possible"]
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 422 and words in r.json()["error"]
+    assert ui.app_state.audit.entries()[0]["event"] == "run.refused"
+
+
+def test_apply_refused_while_another_runs_and_for_unknown_runs(ui, monkeypatch):
+    check = checked(ui, monkeypatch)
+    r = post(ui, "/vms/apply", {"run_id": "nope", "confirm": "on"})
+    assert r.status_code == 422 and "started from the VMs page" in r.json()["error"]
+    ui.app_state.runner.settings.run_env["FAKE_DELAY"] = "5"
+    other = post(ui, "/run", {"playbook": "keys"}).json()["run"]
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 422 and "Another run" in r.json()["error"]
+    ui.app_state.runner.stop(other["id"])
+    finished(ui, other["id"])
+
+
+def test_pins_forgotten_and_adopted_are_audited(ui, monkeypatch):
+    configure(ui)
+    ui.app_state.keys.generate()
+    fake_pve(monkeypatch)
+    scan_answers(monkeypatch)
+    known = ui.app_state.settings.known_hosts
+    known.write_text(f"10.0.0.10 ssh-ed25519 {ED}\n")
+    post(ui, "/vms/plan", {"vmid": ["4000"], "preset": "keys"})
+    post(ui, "/vms/hostkey", {"action": "forget", "vmid": "4000"})
+    adopt, forget = reversed(ui.app_state.audit.entries())
+    assert (adopt["event"], adopt["vmid"], adopt["address"]) == ("hostkey.adopt", 4000, "10.0.0.10")
+    assert forget["event"] == "hostkey.forget" and forget["fingerprints"] == adopt["fingerprints"]
+    post(ui, "/logout")
+    assert ui.get("/audit.jsonl", follow_redirects=False).status_code in (302, 303, 307)

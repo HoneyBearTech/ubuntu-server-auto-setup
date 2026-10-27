@@ -294,7 +294,8 @@ function Review({ reviewed, busy, onRun }: { reviewed: Reviewed; busy: boolean; 
         <h2 id="vm-review-heading" tabIndex={-1} ref={heading}>Review: {plan.preset_label}</h2>
         <p>
           The check run (<code>--check --diff</code>) changes nothing: it reports what a real run would change on
-          {" "}{plural(plan.targets.length, "VM", "VMs")}.
+          {" "}{plural(plan.targets.length, "VM", "VMs")}. If it passes, its page offers the real run of the same
+          plan for 30 minutes.
         </p>
         {plan.warnings.length ? (
           <div className="notice notice-warning">
