@@ -246,3 +246,21 @@ def test_inventory_names():
     assert r.inventory_names(INVENTORY) == {"all", "usas_vms", "vm-101"}
     assert r.inventory_names("") == set() and r.inventory_names("- 1") == set()
     assert r.inventory_names("all:\n  children:\n    g: null\n") == {"all", "g"}
+
+
+def test_on_finish_and_the_settings_digest(runner):
+    ended = []
+    runner.on_finish = ended.append
+    before = runner.settings_digest()
+    run = wait(runner, runner.start("baseline", True, False, "", NAMES, [], applied_from="20250101-000000-aaaaaa").id)
+    assert ended and ended[0].id == run.id and run.settings == before and run.applied_from
+    runner.settings.inventory_file.write_text("---\nall: {}\n")
+    assert runner.settings_digest() != before
+
+    def broken(run):
+        raise RuntimeError("hook failed")
+
+    runner.on_finish = broken
+    assert wait(runner, runner.start("baseline", True, False, "", NAMES, []).id).status == "succeeded"
+    runner.settings.inventory_file.unlink()
+    assert runner.settings_digest() == ""

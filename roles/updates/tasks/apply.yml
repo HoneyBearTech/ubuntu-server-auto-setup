@@ -38,6 +38,13 @@
       changed_when: false
       failed_when: updates_state_before is unreachable
 
+    - name: Note the failed units before the update
+      ansible.builtin.command:
+        argv: [systemctl, list-units, --failed, --plain, --no-legend]
+      register: updates_failed_before
+      changed_when: false
+      failed_when: updates_failed_before is unreachable
+
     - name: Note the installed packages before the update
       ansible.builtin.package_facts:
       register: updates_packages_before

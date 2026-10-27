@@ -6,9 +6,9 @@ import { Icon } from "../components/Icons";
 import { LogView } from "../components/LogView";
 import { ErrorMessage, Loading, Notice, PageHead, StatusBadge } from "../components/Parts";
 import { useData } from "../data";
-import { duration, isoTime, runOptions, when } from "../format";
+import { duration, isoTime, plural, runOptions, when } from "../format";
 import { Link, useRouter } from "../router";
-import type { IsoPlan, Notice as NoticeT, RunDetailData, RunPageData } from "../types";
+import type { ApplyInfo, IsoPlan, Notice as NoticeT, Run, RunDetailData, RunPageData } from "../types";
 import { RunsTable } from "./Overview";
 
 export function RunPage() {
@@ -173,7 +173,18 @@ export function RunsPage() {
   return (
     <>
       <PageHead title="Run history" crumb="Playbooks"
-                actions={<Link className="button" href="/run"><Icon name="play" />Run a playbook</Link>} />
+                actions={
+                  <>
+                    <a className="button secondary" href="/audit.jsonl" download>
+                      <Icon name="download" />Download the audit log
+                    </a>
+                    <Link className="button" href="/run"><Icon name="play" />Run a playbook</Link>
+                  </>
+                } />
+      <p className="lead">
+        The last 200 runs, with their logs. The audit log records what was done to VMs from the VMs page (pinned
+        host keys, check runs, real runs and their results), with the session and address it came from.
+      </p>
       {!data ? <Loading error={error} /> : data.runs.length ? (
         <RunsTable runs={data.runs} caption={`The last ${data.runs.length} runs, newest first`} />
       ) : <p>No runs yet. <Link href="/run">Start one</Link>.</p>}
@@ -189,6 +200,58 @@ function useNow(running: boolean): number {
     return () => clearInterval(timer);
   }, [running]);
   return now;
+}
+
+// After a VMs page check run that passed: the same plan for real, within 30 minutes, once, after a confirmation.
+function ApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
+  const { navigate } = useRouter();
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const hosts = run.targets ?? [];
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const reply = await post<{ redirect?: string; error?: string }>("/api/vms/apply",
+      confirm ? { run_id: run.id, confirm: "on" } : { run_id: run.id });
+    setBusy(false);
+    if (reply.ok && reply.data.redirect) navigate(reply.data.redirect);
+    else setError(reply.data.error ?? `The server answered ${reply.status}.`);
+  };
+  return (
+    <section className="card" aria-labelledby="apply-heading">
+      <div className="card-body">
+        <h2 id="apply-heading">Run it for real</h2>
+        {apply.possible ? (
+          <form noValidate onSubmit={submit} className="stack">
+            <ErrorMessage message={error} id="apply-error" />
+            <p>
+              The same plan without check mode: the same {plural(hosts.length, "VM", "VMs")}, settings, parts and
+              pinned host keys. It changes them as the results above say
+              {apply.until ? <>; possible until <time dateTime={isoTime(apply.until)}>{when(apply.until)}</time></> : null}.
+            </p>
+            <ul className="plain-list">
+              {hosts.map((t) => <li key={t.vmid}><code>{t.name}</code> (VM {t.vmid}{t.address ? `, ${t.address}` : ""})</li>)}
+            </ul>
+            <div className="check">
+              <input type="checkbox" id="apply-confirm" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+              <label htmlFor="apply-confirm">
+                I have read what would change, and want to change {hosts.length === 1 ? "this VM" : `these ${hosts.length} VMs`} now
+              </label>
+            </div>
+            <div className="actions">
+              <button type="submit" className="button danger" aria-disabled={busy || undefined}>
+                <Icon name="play" />Run the baseline for real
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p>{apply.problem} <Link href="/vms">Open the VMs page</Link></p>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export function RunDetail({ id }: { id: string }) {
@@ -241,7 +304,11 @@ export function RunDetail({ id }: { id: string }) {
         <div><dt>Options</dt><dd>{runOptions(run)}</dd></div>
         {run.playbook ? <div><dt>Playbook</dt><dd>{run.playbook}</dd></div> : null}
         {run.kind === "vms" ? <div><dt>Started from</dt><dd>The VMs page</dd></div> : null}
+        {run.applied_from ? (
+          <div><dt>Checked by</dt><dd><Link href={`/runs/${run.applied_from}`}>check run {run.applied_from}</Link></dd></div>
+        ) : null}
       </dl>
+      {data.apply && !running ? <ApplyPart run={run} apply={data.apply} /> : null}
       {run.kind === "vms" || data.hosts ? (
         <HostResults runId={run.id} initial={data.hosts ?? null} targets={run.targets ?? []} running={running}
                      check={run.check} />

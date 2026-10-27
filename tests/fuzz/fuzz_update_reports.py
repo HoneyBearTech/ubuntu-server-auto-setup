@@ -151,6 +151,10 @@ def one_input(data):
         security = {u["name"] for u in sim["upgrades"] if u["security"]}
         assert set(install) <= security, chosen
 
+    failed_units = U.usas_failed_units(text, limit + 1)
+    assert len(failed_units) <= limit + 1 and len(set(failed_units)) == len(failed_units)
+    assert all(SERVICE.match(u) for u in failed_units), failed_units
+
     restart = U.usas_needrestart(text)
     assert all(SERVICE.match(s) for s in restart["services"]) and restart["kernel_status"] in (None, 0, 1, 2, 3)
     clean(restart["kernel_expected"], 128)

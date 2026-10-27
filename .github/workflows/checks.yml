@@ -130,7 +130,17 @@ jobs:
       - name: Run the updates tests
         env:
           OS: ${{ matrix.os }}
+          USAS_LOG_DIR: ${{ runner.temp }}/updates-logs
         run: tests/updates.sh
+
+      - name: Keep the updates tests' logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: updates-logs-${{ matrix.os }}
+          path: ${{ runner.temp }}/updates-logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The required status check: passes only when every integration suite above passed, so the branch ruleset
   # names one check however the suites are split.
