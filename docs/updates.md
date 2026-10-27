@@ -80,7 +80,8 @@ Proxmox console and re-enroll the TPM, as [security.md](security.md#secure-boot-
 After an update or a reboot, the server must:
 
 - finish starting (`systemctl is-system-running --wait`, up to `updates_health_timeout`), and its state must
-  be no worse than before (`running`, then `degraded`, then anything else);
+  be no worse than before (`running`, then `degraded`, then anything else), with no unit failed since
+  before the update (the report names each one);
 - still run every enabled service that ran before, except those matching `updates_health_ignore_services`.
   Services started on demand are left out, since they stop on their own;
 - run each service in `updates_health_services`;

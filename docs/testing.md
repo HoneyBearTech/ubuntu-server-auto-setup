@@ -144,7 +144,9 @@ a service the update breaks fails its server's health check and keeps the other 
 stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
 `SSL_CERT_FILE`, sign-in checked) and a stand-in webhook, only when something changed, while a relay whose
 certificate isn't trusted fails the run and neither the relay password nor the webhook's token appears in
-the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. It takes about 6 minutes per release.
+the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
+keeps each play's log, the reports and each container's failed units and recent warnings there; CI
+uploads them as an artifact for 7 days. It takes about 6 minutes per release.
 
 ## Secure Boot and disk encryption in a VM
 
