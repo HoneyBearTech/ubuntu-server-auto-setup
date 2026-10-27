@@ -4,7 +4,7 @@
 # installed, the reports, reboots and health checks, that a second run changes nothing, and the role's task
 # coverage. OS picks the Ubuntu release (ubuntu-26.04 by default; CI runs each). Needs Docker (privileged
 # containers, for systemd), Python with requirements-ci.txt and the Ansible collections. Run it with
-# make test-updates. See docs/testing.md.
+# make test-updates. With USAS_LOG_DIR set, a failed run keeps its logs there. See docs/testing.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,8 +27,22 @@ MIN_COVERAGE="${MIN_COVERAGE:-80}"
 # A window that is never open: one minute, twelve hours from now.
 NEVER="{\"days\": [\"mon\", \"tue\", \"wed\", \"thu\", \"fri\", \"sat\", \"sun\"], \"start\": \"$(date -u -d '+12 hours' +%H:%M 2>/dev/null || date -u -v+12H +%H:%M)\", \"duration\": \"1m\", \"timezone\": \"UTC\"}"
 
+# On failure, with USAS_LOG_DIR set (CI uploads it): each play's log, the reports, the notification stand-ins'
+# log, and each container's failed units and recent warnings. No keys: they stay in TEST_TMP.
+keep_logs() {
+  [ -n "${USAS_LOG_DIR:-}" ] || return 0
+  mkdir -p "$USAS_LOG_DIR"
+  for log in "$TEST_TMP"/play.*; do [ -e "$log" ] && cp "$log" "$USAS_LOG_DIR/$(basename "$log").log"; done
+  cp "$TEST_TMP"/reports/*.json "$TEST_TMP"/sink.log "$TEST_TMP"/notified.jsonl "$USAS_LOG_DIR/" 2>/dev/null || true
+  for c in "$UPD1" "$UPD2"; do
+    docker exec "$c" sh -c 'systemctl list-units --failed --no-pager; journalctl -b -p warning --no-pager | tail -n 300' \
+      >"$USAS_LOG_DIR/$c-units.log" 2>&1 || true
+  done
+}
+
 cleanup() {
   status=$?
+  if [ "$status" -ne 0 ]; then keep_logs; fi
   docker rm -f "$UPD1" "$UPD2" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
 }

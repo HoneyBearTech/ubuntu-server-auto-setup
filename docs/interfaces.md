@@ -361,7 +361,9 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   --diff`) on up to 25 selected VMs, with `--tags` from a fixed list (`ssh_keys`, `common`, `firewall`,
   `ssh`, `fail2ban`, `hardening`) and a second inventory the UI writes (`runs/<id>.inventory.yml`). Exit
   status, logs and each host's result (`runs/<id>.hosts.json`, from `callback_plugins/usas_summary.py`) are
-  kept in the run history. One run at a time, also across processes (a lock on `runs/.lock`).
+  kept in the run history. A check run that passed can be run for real once, within 30 minutes, with the
+  same inventory, tags and pinned keys and no settings saved since. One run at a time, also across processes
+  (a lock on `runs/.lock`).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
@@ -369,8 +371,9 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   turn the password off ([web-ui.md](web-ui.md#passkeys)).
 - **Files in `/data`**: `inventory/hosts.yml` and `inventory/group_vars/all/vault.yml` are an ordinary
   inventory and Vault (the CLI can use them with `--vault-password-file /data/.vault-pass`); the UI also
-  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `status-token.json`, `webui.json`
-  and `runs/` there
+  keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `status-token.json`, `webui.json`,
+  `audit.jsonl` (one JSON object per line: `time`, `event`, `session`, `client`, then the event's fields;
+  rotated to `audit.jsonl.1` to `.3` at 5 MB) and `runs/` there
   ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
   (`webui_ufw_allow`, `webui_ufw_allow_host`, `webui_authorize_ui_key`).
 - **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.
@@ -424,7 +427,7 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
-| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline in check mode: nothing changes. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
+| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline, in check mode first; for real only after that check passed and the user confirmed it. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
 | Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |

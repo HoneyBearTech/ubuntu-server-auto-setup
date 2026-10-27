@@ -254,3 +254,60 @@ describe("a VMs page run's page", () => {
     expect(outcome(hosts.hosts["vm-106"], false, true).word).toBe("Changed");
   });
 });
+
+describe("the real run", () => {
+  const target = { ...plan.targets[0], fingerprints: ["SHA256:pin106"] };
+  const check = { ...fixtures.finished, id: "20261026-091500-abcdef", status: "succeeded", returncode: 0, check: true,
+                  diff: true, kind: "vms", tags: ["ssh_keys"], targets: [target], plan: "d1" };
+
+  it("is offered on a passing check run's page, after a confirmation", async () => {
+    const real = { ...check, id: "20261026-092000-fedcba", check: false, applied_from: check.id, done: false,
+                   status: "running", finished: null, returncode: null };
+    const api = new FakeApi({
+      [`GET /api/runs/${check.id}`]: () => ({ run: check, log: "", offset: 0, hosts: null,
+                                              apply: { possible: true, problem: "", until: 1792592000 } }),
+      [`GET /api/runs/${check.id}/hosts`]: () => ({ hosts: null, done: true }),
+      [`GET /api/runs/${real.id}`]: () => ({ run: real, log: "", offset: 0, hosts: null, apply: null }),
+      [`GET /api/runs/${real.id}/hosts`]: () => ({ hosts: null, done: false }),
+    });
+    let attempt = 0;
+    api.on("POST /api/vms/apply", (c) => (++attempt === 1 && !c.body.confirm
+      ? reply(422, { error: "Tick the box to confirm the real run." })
+      : { redirect: `/runs/${real.id}`, run: real }));
+    renderAt(`/runs/${check.id}`);
+    const heading = await screen.findByRole("heading", { name: "Run it for real" });
+    const part = within(heading.closest("section") as HTMLElement);
+    expect(part.getByText("vm-106")).toBeTruthy();
+    checkStructure(document.body, "a check run that can be applied");
+    await checkAxe("a check run that can be applied");
+    const user = userEvent.setup();
+    await user.click(part.getByRole("button", { name: "Run the baseline for real" }));
+    expect((await part.findByRole("alert")).textContent).toContain("Tick the box");
+    await user.click(part.getByLabelText(/want to change this VM now/));
+    await user.click(part.getByRole("button", { name: "Run the baseline for real" }));
+    expect(api.posts("/api/vms/apply").at(-1)?.body).toEqual({ run_id: check.id, confirm: "on" });
+    await waitFor(() => expect(window.location.pathname).toBe(`/runs/${real.id}`));
+    expect((await screen.findByText(`check run ${check.id}`)).getAttribute("href")).toBe(`/runs/${check.id}`);
+    expect(screen.queryByRole("heading", { name: "Run it for real" })).toBeNull();
+  });
+
+  it("says why when it can't be", async () => {
+    new FakeApi({
+      [`GET /api/runs/${check.id}`]: () => ({ run: check, log: "", offset: 0, hosts: null,
+                                              apply: { possible: false, problem: "The check run is more than 30 minutes old: run the check again.", until: 1 } }),
+      [`GET /api/runs/${check.id}/hosts`]: () => ({ hosts: null, done: true }),
+    });
+    renderAt(`/runs/${check.id}`);
+    expect(await screen.findByText(/more than 30 minutes old/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run the baseline for real" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open the VMs page" }).getAttribute("href")).toBe("/vms");
+  });
+
+  it("History offers the audit log and marks the VMs page's runs", async () => {
+    new FakeApi({ "GET /api/runs": () => ({ runs: [check, ...fixtures.runs] }) });
+    renderAt("/runs");
+    const link = await screen.findByRole("link", { name: "Download the audit log" });
+    expect(link.getAttribute("href")).toBe("/audit.jsonl");
+    expect(screen.getByText("VMs page, check")).toBeTruthy();
+  });
+});
