@@ -106,7 +106,7 @@ class Plan:
     def summary(self) -> list[dict[str, Any]]:
         """The targets as a run records them."""
         return [{"vmid": t.vmid, "name": t.name, "pve_name": t.pve_name, "node": t.node, "static": t.static,
-                 "address": t.address, "source": t.source, "port": t.port, "user": t.user,
+                 "address": t.address, "source": t.source, "port": t.port, "user": t.user, "alias": t.alias,
                  "fingerprints": t.fingerprints, "manage_hostname": t.manage_hostname, "override": t.override}
                 for t in self.targets]
 
@@ -250,9 +250,10 @@ def warnings(targets: list[Target], tags: list[str], settings: Settings) -> list
     return found
 
 
-def digest(tags: list[str], inventory: str, targets: list[Target]) -> str:
+def digest(tags: list[str], inventory: str, pins: dict[str, list[str]]) -> str:
+    """Names a plan: the same tags, the same run inventory and the same pinned keys give the same digest."""
     data = {"playbook": "baseline", "tags": tags, "inventory": inventory,
-            "pins": {t.alias: sorted(t.fingerprints) for t in targets}}
+            "pins": {alias: sorted(found) for alias, found in pins.items()}}
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
@@ -346,7 +347,7 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         raise PlanProblem(errors)
     inventory = inventory_text(targets, settings)
     return Plan(preset=preset, tags=tags, targets=targets, warnings=warnings(targets, tags, settings),
-                inventory=inventory, digest=digest(tags, inventory, targets))
+                inventory=inventory, digest=digest(tags, inventory, {t.alias: t.fingerprints for t in targets}))
 
 
 def plan_json(plan: Plan) -> dict[str, Any]:

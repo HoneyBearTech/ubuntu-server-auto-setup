@@ -54,6 +54,7 @@ class Session:
     passkey_challenge: object | None = None
     # VMs page: host keys scanned per VM ID but not pinned yet, and the plans reviewed (plan ID -> (time, plan)).
     pending_vm_keys: dict = field(default_factory=dict)
+    pending_vm_from: dict = field(default_factory=dict)  # the address and port they were scanned on
     vm_plans: dict = field(default_factory=dict)
 
 

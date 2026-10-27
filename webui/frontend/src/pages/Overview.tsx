@@ -25,7 +25,10 @@ export function RunsTable({ runs, caption }: { runs: Run[]; caption: string }) {
               <td data-label="Started">
                 <Link href={`/runs/${run.id}`}><time dateTime={isoTime(run.started)}>{when(run.started)}</time></Link>
               </td>
-              <td data-label="Playbook">{run.action}</td>
+              <td data-label="Playbook">
+                {run.action}
+                {run.kind === "vms" ? <span className="sub">{run.check ? "VMs page, check" : "VMs page"}</span> : null}
+              </td>
               <td data-label="Options" className="mono">{runOptions(run)}</td>
               <td data-label="Status"><StatusBadge status={run.status} returncode={run.returncode} /></td>
               <td data-label="Duration" className="mono">{duration(run)}</td>

@@ -224,7 +224,16 @@ The overview lists the steps and whether each is done.
    **Review the plan** checks it all on the server and lists the hosts and what the run would change on a
    server already in use (the firewall's default deny, SSH keys removed, every package upgraded, SSH
    settings, renamed hosts). **Run the check** starts the baseline with `--check --diff`: nothing on the VMs
-   changes, and the run's page shows each host's result above the log. Real runs come in a later release.
+   changes, and the run's page shows each host's result above the log.
+
+   **Running it for real.** When the check run passed, its page offers **Run it for real**: the same plan
+   (VMs, settings, parts, pinned host keys) without check mode, for 30 minutes after the check finished and
+   once. Tick **I have read what would change** and choose **Run the baseline for real**. A failed or older
+   check, settings saved in the meantime, or a host key pinned again means running the check again; there is
+   no way around it. The **audit log** records pinned, adopted and forgotten host keys, every check and real
+   run with its VMs, addresses and fingerprints, refused real runs, confirmed OS overrides and each run's
+   outcome, with the session (a hash of its ID) and the client's address: **History → Download the audit
+   log**.
 7. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
    only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers, nodes or groups,
    separated by commas). The page shows where `build-installer` puts the installer ISO: each node the
@@ -309,6 +318,7 @@ directories):
 | `passkeys.json` | The passkeys' public keys, IDs, names and signature counters, and whether a passkey is required. |
 | `status-token.json` | The status token's HMAC (never the token), its first 4 characters, when it was made and last used, and from which address. There is none until you make a token. |
 | `webui.json` | The cluster's name, nodes and ISO storages from the last connection test, for the node dropdowns and the ISO plan. |
+| `audit.jsonl` | The audit log of the VMs page: one JSON object per line. At 5 MB it is renamed `audit.jsonl.1` (and `.1` to `.2`, `.2` to `.3`; the oldest is dropped). |
 | `runs/` | The run history: one `.json` and one `.log` per run; for a VMs page run also its inventory (`.inventory.yml`, no secrets) and each host's result (`.hosts.json`). `.lock` is held while a run goes. |
 
 **The Vault password is in the same volume by default**, so the encryption protects `vault.yml` when it is
@@ -411,7 +421,8 @@ What it does to protect them:
 - **VMs it didn't create**: a run from the VMs page reaches only VMs whose host keys were pinned after a
   fingerprint comparison, by cluster and VM ID; credentials follow the Servers page's VM IDs, never a VM's
   tags or description, so a VM outside it gets none of the Vault's secrets. Every value of the run's
-  inventory is checked against the roles' formats and written `!unsafe`.
+  inventory is checked against the roles' formats and written `!unsafe`. A real run needs a passing check of
+  the same plan from the last 30 minutes and a confirmation, and every step is in the audit log.
 - **What guests report is untrusted.** The VMs page shows what each VM's guest agent says (its addresses,
   OS and host name), which whoever controls the VM can make up. The UI keeps IPv4 addresses that aren't
   special-use, at most 16 per VM, removes control and text-direction characters from the rest and shortens
@@ -482,6 +493,8 @@ For reference:
 | `/api/vms/hostkey` | POST | A VM's host keys: `scan` (address and port), `trust` (the scanned keys, with `confirm`), `forget`, or `test` the login. |
 | `/api/vms/plan` | POST | Check the selected VMs (`vmid`, up to 25) and their settings (`vm-<vmid>-address`, `-port`, `-user`, `-ufw`, `-hostname`, `-override`) with a `preset` (and `tags` for custom), and answer the plan to review with a plan ID that lasts 10 minutes, or the errors per field. |
 | `/api/vms/run` | POST | Run a reviewed plan (`plan_id`) in check mode (`mode=check`). |
+| `/api/vms/apply` | POST | Run a VMs page check run's plan for real (`run_id`, `confirm`): only if that check passed in the last 30 minutes, wasn't run for real yet, no settings were saved since and the pinned keys are the same. |
+| `/audit.jsonl` | GET | The audit log as a download (signed in). |
 | `/api/runs/<id>/hosts` | GET | Each host's result so far (the summary callback's), for the run's page. |
 | `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
 | `/api/run` | POST | Start a run. |
@@ -503,7 +516,8 @@ answers 401 with `WWW-Authenticate: Bearer` instead).
 - One user, no accounts. Passkeys replace the password rather than adding a second step to it; they work
   on `http://localhost` or under the host name in `USAS_PUBLIC_URL`, not at an IP address.
 - One run at a time, and sessions don't survive a restart of the container.
-- The VMs page runs only the baseline, in check mode so far, on up to 25 VMs at a time.
+- The VMs page runs only the baseline, on up to 25 VMs at a time, and for real only after a passing check.
+  The audit log names a session, not a person (there is one password and no accounts).
 - It needs JavaScript (any current browser).
 - English only.
 
