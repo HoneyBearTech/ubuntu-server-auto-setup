@@ -77,10 +77,12 @@
     that: >-
       not proxmox_node_user_work_dir.stat.exists
       or (proxmox_node_user_work_dir.stat.isdir and not proxmox_node_user_work_dir.stat.islnk
-          and proxmox_node_user_work_dir.stat.pw_name in ['root', pve_ssh_user])
+          and proxmox_node_user_work_dir.stat.pw_name | default('') in ['root', pve_ssh_user])
     fail_msg: >-
-      {{ installer_work_dir }} exists, but isn't a folder that root or {{ pve_ssh_user }} owns. Look at what it is,
-      remove it, and run this playbook again.
+      {{ installer_work_dir }} exists, but isn't a folder that root or {{ pve_ssh_user }} owns
+      (owner: {{ proxmox_node_user_work_dir.stat.pw_name | default('UID ' ~ proxmox_node_user_work_dir.stat.uid
+      | default('?')) }}). Look at what it is, remove it (or, if it is {{ pve_ssh_user }}'s from before its UID
+      changed, chown -R {{ pve_ssh_user }}: it), and run this playbook again.
     quiet: true
 
 - name: Create the work directory for {{ pve_ssh_user }}

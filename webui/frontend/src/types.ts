@@ -62,6 +62,14 @@ export interface Run {
   tags?: string[];
   targets?: RunTarget[];
   plan?: string;
+  applied_from?: string; // a real run's check run
+}
+
+// For a VMs page check run: whether its plan can now be run for real (main.py apply_json).
+export interface ApplyInfo {
+  possible: boolean;
+  problem: string;
+  until: number | null;
 }
 
 // A host a VMs page run was planned for (vmplan.Plan.summary).
@@ -151,6 +159,7 @@ export interface RunDetailData {
   log: string;
   offset: number;
   hosts?: HostResults | null;
+  apply?: ApplyInfo | null;
 }
 
 export interface HostKey {

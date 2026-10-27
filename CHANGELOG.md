@@ -63,7 +63,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   use, and the run's page shows each host's result. **New attack surface:** the web UI now connects over SSH
   to VMs it didn't create. A VM that isn't a server in the inventory is named `vm-<vmid>`, gets none of the
   Vault's secrets (no admin, sudo or relay password, no webhook URL) and keeps passwordless sudo; credentials
-  follow the inventory's `pve_vmid`, never a VM's tags or description. Real runs follow in a later release.
+  follow the inventory's `pve_vmid`, never a VM's tags or description.
+- VMs page: real runs. A check run that passed offers, on its page, the same plan for real: the same VMs,
+  settings, parts and pinned host keys, within 30 minutes, once, after you tick a confirmation. There is no
+  override: a failed or older check, settings saved since, or a host key pinned again since means running the
+  check again. An audit log (`/data/audit.jsonl`, rotated at 5 MB, three kept) records pinned and forgotten
+  host keys, check and real runs with their VMs, addresses and fingerprints, refusals, confirmed OS overrides
+  and each run's outcome, with the session and client address; History offers it as a download.
 
 ### Changed
 
@@ -90,6 +96,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
   [assurance case](docs/assurance-case.md).
+
+### Fixed
+
+- `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
+  owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
+  now refuses that directory with its reason and the owner's UID, and says how to hand it over.
+
+### Documentation
+
+- How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
+  write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left
+  handed over to it ([installing.md](docs/installing.md#6-optional-a-node-user-other-than-root)).
 
 ## [0.6.0] - 2026-10-25
 
