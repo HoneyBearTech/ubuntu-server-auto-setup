@@ -255,6 +255,21 @@ node that shares the storage) write on the file server, or keep that storage out
 `proxmox_node_user_iso_storages` and keep `pve_ssh_user` at `root` for an inventory that builds there: root is
 still the way for such a share.
 
+On a Synology share whose permissions are DSM ACLs (a folder can show mode `777` on the node and still refuse
+the user), with the NFS rule's **Squash** at **No mapping**, the share treats the client's UID as the DSM user with
+that UID. DSM picks its users' UIDs, so match the node user to it:
+
+1. In DSM, create a user (such as `usas-build`) with no application permissions and **Read only** on the share, and
+   give it **Read & Write** on the share's `template/iso` folder only (File Station: **Properties → Permission**).
+   Its UID: `grep '^usas-build:' /etc/passwd | cut -d: -f3` on the Synology.
+2. On every node, give `usas-build` that UID (`usermod -u <uid> usas-build`, after checking with
+   `getent passwd <uid>` that it is free) and hand it its work directory again:
+   `chown -R usas-build: /var/tmp/ubuntu-server-auto-setup`.
+3. Run `prepare-node.yml` again: its write test now passes.
+4. Hand the user the ISOs that earlier root builds left in that folder (`chown usas-build <folder>/ubuntu-*.iso`
+   on one node): the build sets their mode, which only their owner may do there, and stops with "Operation not
+   permitted" otherwise.
+
 **By hand.** The same, as root on the node, for the `local` storage:
 
 ```sh
