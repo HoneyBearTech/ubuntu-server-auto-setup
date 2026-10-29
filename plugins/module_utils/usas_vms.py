@@ -68,6 +68,8 @@ class Vm:
     mem: int = 0
     maxmem: int = 0
     uptime: int = 0
+    pool: str = ""  # the resource pool, if any
+    hastate: str = ""  # set when HA manages the VM ("started", "stopped", ...)
 
 
 def parse_tags(value: Any) -> list[str]:
@@ -97,7 +99,8 @@ def parse_resources(data: Any) -> list[Vm]:
             status=text(entry.get("status"), 20) or "unknown", template=bool(_number(entry.get("template"), int)),
             lock=text(entry.get("lock"), 32), tags=parse_tags(entry.get("tags")), cpu=cpu,
             maxcpu=int(_number(entry.get("maxcpu"), int)), mem=int(_number(entry.get("mem"), int)),
-            maxmem=int(_number(entry.get("maxmem"), int)), uptime=int(_number(entry.get("uptime"), int)))
+            maxmem=int(_number(entry.get("maxmem"), int)), uptime=int(_number(entry.get("uptime"), int)),
+            pool=text(entry.get("pool"), 64), hastate=text(entry.get("hastate"), 20))
     return [vms[k] for k in sorted(vms)]
 
 

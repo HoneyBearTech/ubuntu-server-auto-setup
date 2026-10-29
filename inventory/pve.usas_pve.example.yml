@@ -1,0 +1,23 @@
+---
+# The cluster inventory for the updates playbook (docs/updates.md, "Every VM on the cluster"). Copy it to
+# inventory/pve.usas_pve.yml (gitignored); make updates-check and make updates then add every VM of the cluster
+# to the run. By hand: ansible-playbook -i inventory/hosts.yml -i inventory/pve.usas_pve.yml playbooks/updates.yml
+#
+# The API settings come from your inventory (pve_api_host, pve_api_user, pve_api_token_id, pve_api_token_secret,
+# pve_validate_certs), so this can stay as short as the first line. The token needs VM.Audit, and
+# VM.GuestAgent.Audit for the addresses and OS the guest agents report; both are in the role docs/installing.md
+# describes.
+plugin: usas_pve
+
+# Optional filters, all of which a VM must pass. Servers in your static inventory are always in the run; these
+# only choose which other VMs are added.
+# nodes: [pve-1]
+# tags_any: [prod]
+# tags_all: []
+# pools: []
+# name_patterns: ["web-*"]
+# exclude: ["9000", "scratch"]
+
+# The cluster's name in the host key aliases (usas-<cluster>-<vmid>). By default the name Proxmox reports, or
+# "pve" when the token may not read it.
+# cluster: homelab

@@ -1,5 +1,6 @@
 # Real inventory and secrets stay local. Copy the *.example.yml files to start.
 inventory/hosts.yml
+inventory/pve.usas_pve.yml
 inventory/host_vars/
 inventory/group_vars/all/vault.yml
 .vault-pass

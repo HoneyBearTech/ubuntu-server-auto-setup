@@ -13,6 +13,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
+| VMs page integration | the image, the mock Proxmox API and an Ubuntu 26.04 systemd container standing in for a VM the project didn't create: host-key pinning, a check run, the real run after a confirmation, a second check run that changes nothing, a guest claiming another VM's address refused, the audit log, and no secret on the VM | `make webui-vms` (needs Docker) | every pull request (not a required check) |
 | Fuzzing | the code that turns inventory values into files and commands, and the OS catalog tool's parsers, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | OS catalog tool | `tools/update_os_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
 | OS catalog check | every image the catalog pins, against the real vendors: the signature on the checksum file (pinned keys), the checksum, and that the image can still be downloaded; newer builds are listed | `make catalog-check` | pull requests that change the catalog, the script or its keys; weekly, opening or updating an issue when a pin fails or a newer build is out (and closing it when the catalog checks out again) |
@@ -149,7 +150,12 @@ a service the update breaks fails its server's health check and keeps the other 
 stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
 `SSL_CERT_FILE`, sign-in checked) and a stand-in webhook, only when something changed, while a relay whose
 certificate isn't trusted fails the run and neither the relay password nor the webhook's token appears in
-the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
+the output; and the cluster inventory against `tests/mock_pve.py --fixture-updates` (a cluster of two nodes
+with a VM for each case): `upd-usas` keeps its name and gains its live node, a VM outside the inventory is
+`vm-<vmid>` and updated through its pinned alias, one whose address leads to the other container is refused
+by its pin, an excluded VM is absent, the VMs to leave alone (container, template, stopped, locked, Windows,
+no address, tag `usas-no-updates`) are reported without being contacted, and a cluster file with a bad
+filter stops the run. Each container gets host keys of its own for this. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
 keeps each play's log, the reports and each container's failed units and recent warnings there; CI
 uploads them as an artifact for 7 days. It takes about 6 minutes per release.
 
@@ -224,6 +230,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
+| `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 | `fuzz_vm_inventory.py` | `webui/usas_web/vmplan.py` (the VMs page's run plans and their inventory), `inventory_names`, `parse_limit` and `parse_tags` in `webui/usas_web/runner.py`, and `vm_alias`, `ALIAS` and `Keys.pins` in `webui/usas_web/sshkeys.py` | any listing and settings give a plan or a refusal, nothing else; a plan's inventory loads back to exactly the hosts planned (servers by name, other VMs as `vm-<vmid>` in `usas_vms`), with every typed or reported value `!unsafe` and no line break; a VM outside the inventory gets none of the Vault's secrets, passwordless sudo, a usable IPv4 address and its pinned alias; the plan's limit and tags pass the runner's own checks unchanged; aliases always match `ALIAS`, and any `known_hosts` text yields only aliases |
@@ -293,6 +300,18 @@ challenge for `localhost` that needs user verification. Finally it checks that t
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
+**The VMs page's runs** (`tests/webui-vms.sh`, `make webui-vms`) start the image, the mock (with
+`--vm-target`: VM 4071's guest agent reports a systemd container's address, and VM 4072 claims the same one)
+and that container, which has only its own user `ubuntu` with passwordless sudo, on a private network with
+names of their own (`usas-vms-*`), so it can run next to `make test`. `tests/webui_vms.py` pins VM 4071's
+host key after checking the scanned fingerprints against the container's own `ssh-keygen -lf`, refuses a
+plan before that and a real run before a passing check, runs the full baseline in check mode (nothing
+installed), then for real after the confirmation (the firewall is on with the VM's own rule, the host name
+and the user's password are unchanged, sudo stays passwordless, the UI's key stays), refuses a second real
+run of the same check, finds nothing to change in a second check run, and gets a refused connection for VM
+4072, whose pinned key isn't the container's. The audit log must name each step, and no secret of the UI may
+reach the VM, the run files or the audit log.
+
 ### The browser tests
 
 `tests/webui-browser.sh` (`make webui-browser`) runs the app in a real browser with
@@ -332,7 +351,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2347 and 2349 for `make test-updates`). The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install
