@@ -1,3 +1,5 @@
 ---
 # Ubuntu publishes security updates in its -security pockets (and ESM with Ubuntu Pro).
 os_security_errata: true
+# update-notifier writes /var/run/reboot-required, with the packages that asked for it.
+updates_os_reboot_check: file

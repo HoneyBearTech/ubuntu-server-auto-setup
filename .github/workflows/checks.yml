@@ -142,12 +142,45 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  baseline:
+    name: Integration tests (baseline, ${{ matrix.os }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # tests/run.sh covers Ubuntu 26.04; these are the other releases the baseline supports.
+        os: [ubuntu-22.04, ubuntu-24.04, debian-12, debian-13]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install the control-node packages
+        run: python -m pip install --require-hashes -r requirements-ci.txt
+
+      - name: Install the Ansible collections
+        run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
+
+      # Builds the stand-in server for the release, runs the baseline against it (check mode, two runs, the
+      # result, the reboot check, a move to port 2222) and fails below 80% task coverage of the baseline roles.
+      - name: Run the baseline tests
+        env:
+          OS: ${{ matrix.os }}
+        run: tests/baseline.sh
+
   # The required status check: passes only when every integration suite above passed, so the branch ruleset
   # names one check however the suites are split.
   test:
     name: Integration tests
     if: always()
-    needs: [playbooks, updates]
+    needs: [playbooks, updates, baseline]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
