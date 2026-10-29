@@ -39,7 +39,7 @@ SERVERS = [{"name": "web-00", "ansible_host": "10.0.0.10", "pve_vmid": 4000},
 SUPPORT = ("supported", "override", "unknown", "unsupported", "")
 STATUS = ("running", "stopped", "paused", "")
 # The values the web UI itself writes (no typed or reported text in them).
-OWN = {"ansible_ssh_common_args", "ansible_control_path", "ufw_allow", *vmplan.VAULT_VARS}
+OWN = {"ansible_ssh_common_args", "ansible_control_path", "firewall_allow", *vmplan.VAULT_VARS}
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="fuzz-vm-"))
 KEYS = sshkeys.Keys(from_env({"USAS_DATA_DIR": str(TMP), "USAS_PROJECT_DIR": str(TMP)}))
 
