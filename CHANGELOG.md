@@ -166,6 +166,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Documentation
 
+- The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
+  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing Ubuntu Server LTS and
+  hardening Ubuntu, Debian and RHEL-family servers, with a supported-versions badge row.
+
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left
   handed over to it ([installing.md](docs/installing.md#6-optional-a-node-user-other-than-root)).
