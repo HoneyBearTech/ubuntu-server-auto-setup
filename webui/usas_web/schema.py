@@ -8,6 +8,7 @@ playbooks. Fields marked ``ui_pattern`` have a format the roles don't check them
 token name); the UI checks them so that only plain values reach the inventory.
 """
 
+import datetime
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,12 @@ from .problems import Problem
 
 ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
          "hardening")
+
+# The OS catalog (roles/os_catalog/vars/catalog.yml): an OS field (choices_var=OS_CATALOG) offers its releases that
+# are still supported and that this release can install, with one of these methods.
+CATALOG = Path("roles/os_catalog/vars/catalog.yml")
+OS_CATALOG = "os_catalog"
+INSTALL_METHODS = ("autoinstall",)
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
 # doesn't edit, the rest are file paths and package or platform lists.
@@ -38,6 +45,8 @@ NOT_FORM_FORMATS = frozenset({
     "vm_os_image_sha256_pattern",
     # The inventory's server groups (servers, and ubuntu_servers before 0.7.0), for build-installer's plan.
     "pve_plan_server_group",
+    # The installer ISO's file name: it follows each server's OS (vm_os), which the forms set.
+    "installer_iso_name_pattern",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
@@ -76,7 +85,7 @@ class Spec:
     kind: str  # text, int, bool, choice, list, secret
     role: str | None = None  # role whose defaults/main.yml has the variable
     pattern_var: str | tuple[str, ...] | None = None  # vars/main.yml pattern(s) for the value (or each list item)
-    choices_var: str | None = None  # vars/main.yml list of allowed values
+    choices_var: str | None = None  # vars/main.yml list of allowed values, or OS_CATALOG
     ui_pattern: str | None = None  # format checked by the UI only
     ui_choices: tuple[str, ...] | None = None
     minimum: int | None = None
@@ -85,7 +94,7 @@ class Spec:
     vault: str | None = None  # stored in the Vault under this name instead of the inventory
     help: str = ""  # used when the defaults file has no comment for the variable
     advanced: bool = False
-    default: Any = None  # for variables no role defines (Vault values)
+    default: Any = None  # for variables no role defines (Vault values), or whose role default is a template
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,7 @@ class Field:
     choices: tuple[str, ...] | None
     patterns: tuple[str, ...] = ()  # every pattern the value must match (roles that read it may differ)
     formats: dict[str, Any] = field(default_factory=dict)  # NIC_FORMATS, for the network cards column
+    choice_labels: dict[str, str] = field(default_factory=dict)  # what the form shows for each choice, if not itself
 
     def __getattr__(self, item):
         return getattr(self.spec, item)
@@ -154,6 +164,18 @@ def _comments(text: str) -> dict[str, str]:
     return result
 
 
+def os_choices(catalog: list[dict[str, Any]], today: datetime.date) -> dict[str, str]:
+    """The catalog's releases the forms offer, id -> label such as "Debian 13 (trixie) · until 2030-06-30": those
+    still supported that this release can install."""
+    choices = {}
+    for entry in catalog:
+        if str(entry["eol"]) < today.isoformat() or not set(entry["methods"]) & set(INSTALL_METHODS):
+            continue
+        codename = f" ({entry['codename']})" if entry.get("codename") else ""
+        choices[str(entry["id"])] = f"{entry['name']} {entry['version']}{codename} · until {entry['eol']}"
+    return choices
+
+
 def load_roles(project_dir: Path) -> RoleData:
     data = RoleData()
     for role in ROLES:
@@ -197,10 +219,6 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           advanced=True, help="How long one Proxmox API request may take. Allocating disks can keep the API busy."),
         S("pve_ssh_user", "Node SSH user", "text", "os_catalog", pattern_var="pve_ssh_user_pattern",
           advanced=True, help="The UI and the playbooks log in to the node over SSH as this user."),
-        # The ISO file name is built from it, and installer_iso checks that name against this pattern.
-        S("ubuntu_point_release", "Ubuntu point release", "text", "os_catalog",
-          pattern_var="installer_iso_name_pattern", advanced=True,
-          help="The installer ISO's version, such as 26.04.1."),
     ),
     "defaults": (
         S("github_user", "GitHub user", "text", "common", ui_pattern=GITHUB_USER,
@@ -215,6 +233,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_password", "Admin password", "secret", required=True, vault="vault_admin_password", default="",
           help="For the console and sudo; SSH stays key-only. Hashed (SHA-512) before it reaches the installer."),
         S("timezone", "Time zone", "text", "common", ui_pattern=TIMEZONE),
+        S("vm_os", "Default OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="ubuntu-26.04",
+          help="For servers that don't choose their own on the Servers page."),
         S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern",
           help="Needed for servers with a static address (unless an extra network card has the default route)."),
         S("net_prefix", "Network prefix length", "int", "proxmox_vm", minimum=PREFIX_RANGE[0],
@@ -222,7 +242,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("net_dns", "DNS servers", "list", "proxmox_vm", pattern_var="provision_ipv4_pattern"),
         S("net_search", "Search domains", "list", "proxmox_vm", pattern_var="provision_hostname_pattern",
           help="Each part of a domain (between dots) must be a valid host name."),
-        S("autoinstall_storage_layout", "Disk layout", "choice", "proxmox_vm", ui_choices=("lvm", "direct", "zfs")),
+        S("autoinstall_storage_layout", "Disk layout", "choice", "proxmox_vm", ui_choices=("lvm", "direct", "zfs"),
+          help="For the Ubuntu installer; cloud images come with their own layout."),
         S("vm_secure_boot", "Secure Boot keys", "bool", "proxmox_vm", advanced=True),
         S("vm_disk_encryption", "Encrypt the root disk", "bool", "proxmox_vm",
           help="Only for VMs created from now on; existing VMs are left as they are."),
@@ -242,11 +263,11 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_sudo_nopasswd", "Passwordless sudo for the admin user", "bool", "common",
           help="Off by default: the first run removes the installer's passwordless sudo, and later runs use "
                "the admin password. On is convenient, but anyone with an authorized key has root."),
-        S("ufw_ssh_limit", "Rate-limit SSH in the firewall", "bool", "firewall",
-          help="6 new connections in 30 seconds per source, instead of a plain allow."),
-        S("ufw_ssh_sources", "SSH allowed from", "list", "firewall", ui_pattern=UFW_FROM,
+        S("firewall_ssh_limit", "Rate-limit SSH in the firewall", "bool", "firewall", default=True),
+        S("firewall_ssh_sources", "SSH allowed from", "list", "firewall", ui_pattern=UFW_FROM, default=["any"],
           help='"any", or addresses and networks (CIDR), one per line.'),
-        S("ufw_allow", "Extra firewall rules (all servers)", "list", "firewall", ui_pattern="ufw_rule",
+        S("firewall_allow", "Extra firewall rules (all servers)", "list", "firewall", ui_pattern="ufw_rule",
+          default=[],
           help='One rule per line: port or range, optional /tcp or /udp, optional "from" a network. '
                "Example: 443/tcp or 5432/tcp from 10.0.0.0/24."),
         S("fail2ban_ignoreip", "Never ban", "list", "fail2ban", pattern_var="fail2ban_ignoreip_pattern",
@@ -287,7 +308,7 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
     ),
 }
 
-# Columns of the servers table. "name" is the inventory host name; "ufw_ports" are extra rules for that host.
+# Columns of the servers table. "name" is the inventory host name; "firewall_ports" are extra rules for that host.
 SERVER_COLUMNS: tuple[Spec, ...] = (
     S("name", "Name", "text", pattern_var=("provision_hostname_pattern", "common_hostname_pattern"), required=True,
       default=""),
@@ -297,13 +318,15 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
     S("pve_vmid", "VM ID", "int", "proxmox_vm", minimum=100, maximum=999999999, required=True),
     S("pve_node", "Node", "text", "proxmox_vm", pattern_var="provision_hostname_pattern",
       help="The Proxmox node of this server's VM; empty uses the node on the Proxmox page."),
+    S("vm_os", "OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="",
+      help="Empty uses the default OS on the Defaults page."),
     S("vm_cores", "Cores", "int", "proxmox_vm", minimum=1, maximum=512),
     S("vm_memory_mb", "Memory (MB)", "int", "proxmox_vm", minimum=512, maximum=16777216),
     S("vm_disk_gb", "Disk (GB)", "int", "proxmox_vm", minimum=8, maximum=131072),
     S("vm_extra_nics", "Extra network cards", "list", "proxmox_vm", ui_pattern="network_cards",
       help="Comma-separated, each a bridge, then vlan and a tag, then dhcp, none or an address/prefix (optionally "
            "via a gateway), optionally mtu, model and mac. Example: vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 dhcp."),
-    S("ufw_ports", "Extra firewall rules", "list", ui_pattern="ufw_rule", default=[],
+    S("firewall_ports", "Extra firewall rules", "list", ui_pattern="ufw_rule", default=[],
       help="Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24."),
 )
 
@@ -311,6 +334,11 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
 class Schema:
     def __init__(self, project_dir: Path):
         self.roles = load_roles(project_dir)
+        catalog = yaml.safe_load((project_dir / CATALOG).read_text(encoding="utf-8"))["os_catalog"]
+        self.os_choices = os_choices(catalog, datetime.date.today())
+        # Each release's installer ISO, for the Run page's plan.
+        self.installer_isos = {str(e["id"]): str(e["methods"]["autoinstall"]["file"])
+                               for e in catalog if "autoinstall" in e["methods"]}
         self.sections = {name: [self._resolve(spec) for spec in specs] for name, specs in SECTIONS.items()}
         self.server_columns = [self._resolve(spec) for spec in SERVER_COLUMNS]
         self.by_name = {f.name: f for fields in self.sections.values() for f in fields}
@@ -318,6 +346,9 @@ class Schema:
     def _resolve(self, spec: Spec) -> Field:
         if spec.role:
             default = self.roles.default_for(spec.name, spec.role)
+            # A default the role works out from other settings (a template) shows as the field's own.
+            if spec.default is not None and isinstance(default, str) and "{{" in default:
+                default = spec.default
             comment = _sentence(self.roles.comments.get(spec.role, {}).get(spec.name, ""))
             help_text = " ".join(part for part in (spec.help, comment) if part)
         else:
@@ -325,20 +356,26 @@ class Schema:
         names = (spec.pattern_var,) if isinstance(spec.pattern_var, str) else (spec.pattern_var or ())
         patterns = tuple(self.roles.var(name) for name in names) or ((spec.ui_pattern,) if spec.ui_pattern else ())
         pattern = patterns[0] if patterns else None
-        choices = tuple(str(c) for c in self.roles.var(spec.choices_var)) if spec.choices_var else spec.ui_choices
+        labels = self.os_choices if spec.choices_var == OS_CATALOG else {}
+        if labels:
+            choices: tuple[str, ...] | None = tuple(labels)
+        elif spec.choices_var:
+            choices = tuple(str(c) for c in self.roles.var(spec.choices_var))
+        else:
+            choices = spec.ui_choices
         for p in patterns:
             if p not in ("ufw_rule", "network_cards"):
                 re.compile(p)
         formats = {name: self.roles.var(name) for name in NIC_FORMATS} if spec.ui_pattern == "network_cards" else {}
         return Field(spec=spec, default=default, help=help_text, pattern=pattern, choices=choices, patterns=patterns,
-                     formats=formats)
+                     formats=formats, choice_labels=labels)
 
     def pattern_vars_used(self) -> set[str]:
         specs = [s for specs in SECTIONS.values() for s in specs] + list(SERVER_COLUMNS)
         used = set()
         for s in specs:
             used.update((s.pattern_var,) if isinstance(s.pattern_var, str) else (s.pattern_var or ()))
-            if s.choices_var:
+            if s.choices_var and s.choices_var != OS_CATALOG:
                 used.add(s.choices_var)
             if s.ui_pattern == "network_cards":
                 used.update(NIC_FORMATS)
@@ -371,7 +408,7 @@ def _check(patterns: tuple[str, ...], value: str, what: str) -> None:
 
 
 def parse_ufw_rule(text: str) -> dict[str, str]:
-    """'443', '443/tcp', '6000:6007/udp', '5432/tcp from 10.0.0.0/24' -> a firewall role ufw_allow entry."""
+    """'443', '443/tcp', '6000:6007/udp', '5432/tcp from 10.0.0.0/24' -> a firewall role firewall_allow entry."""
     parts = text.split()
     if len(parts) not in (1, 3) or (len(parts) == 3 and parts[1] != "from"):
         raise Invalid(f"'{text}': write a port, optionally /tcp or /udp, and optionally 'from' a network.")
@@ -472,7 +509,7 @@ def parse_value(f: Field, raw: Any) -> Any:
     text = raw if isinstance(raw, str) else ("" if raw is None else str(raw))
     if f.kind == "list":
         # Keys contain spaces and no commas but may have comments with commas: one per line.
-        items = split_list(text, commas=f.name not in ("admin_extra_ssh_keys", "ufw_allow"))
+        items = split_list(text, commas=f.name not in ("admin_extra_ssh_keys", "firewall_allow"))
         for item in items:
             if f.name == "net_search":
                 for label in item.split("."):
