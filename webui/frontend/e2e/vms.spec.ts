@@ -110,3 +110,59 @@ for (const theme of ["dark", "light"] as const) {
     await checkAxe(page, `/vms at 375 pixels, ${theme}, filtered`);
   });
 }
+
+// Selecting VMs and getting the run ready, by keyboard. The fixture VMs' addresses don't answer SSH, so the
+// server's review stops at the host keys: that is what this checks, with the focus moving as it should.
+test("selects VMs and reviews a run by keyboard", async ({ page }) => {
+  await open(page);
+  const box = page.getByLabel("Select web-2604", { exact: true });
+  await tabTo(page, box);
+  await page.keyboard.press("Space");
+  await expect(box).toBeChecked();
+  await expect(page.getByRole("heading", { name: "Run the baseline on 1 selected VM" })).toBeVisible();
+  await expect(page.locator("#vm-count")).toContainText("1 selected");
+  // A VM that can't be selected says why, and its box can't be reached.
+  const windows = page.getByLabel("Select windows-11", { exact: true });
+  await expect(windows).toBeDisabled();
+  const why = await windows.getAttribute("aria-describedby");
+  await expect(page.locator(`#${why}`)).toContainText("Windows");
+
+  const part = page.getByRole("group", { name: /web-2604/ });
+  await expect(part.getByLabel("Address")).toHaveValue("10.10.10.21");
+  await tabTo(page, part.getByLabel("SSH port"));
+  await page.keyboard.type("2222");
+  await tabTo(page, page.getByRole("button", { name: "Review the plan" }));
+  await page.keyboard.press("Enter");
+  const summary = page.locator("#vm-errors");
+  await expect(summary).toBeFocused();
+  await expect(summary).toContainText("Trust VM 101's host key first");
+  await tabTo(page, summary.getByRole("link", { name: /Trust VM 101/ }));
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#f-vm-101-hostkey")).toBeFocused();
+  await checkAxe(page, "/vms with a run being set up");
+
+  // A scan of an address nothing answers on says so, politely, in the VM's part.
+  await tabTo(page, part.getByRole("button", { name: "Scan the host key" }));
+  await page.keyboard.press("Enter");
+  await expect(part.locator(".notice-error")).toBeVisible({ timeout: 30_000 });
+  await expect(part.locator(".notice-error")).toContainText("10.10.10.21");
+});
+
+for (const theme of ["dark", "light"] as const) {
+  test(`a run being set up passes axe-core at 375 pixels in the ${theme} theme`, async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: "usas_theme", value: theme, url: baseURL! }]);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await open(page);
+    await page.getByLabel("Select all VMs shown that can be selected").check();
+    await expect(page.getByRole("heading", { name: /Run the baseline on \d+ selected VMs/ })).toBeVisible();
+    // The presets are styled radio buttons: chosen with the keyboard, as a user would.
+    await page.getByRole("radio", { name: "Custom" }).focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("radio", { name: "Custom" })).toBeChecked();
+    await page.getByRole("button", { name: "Review the plan" }).click();
+    await expect(page.locator("#vm-errors")).toBeFocused();
+    await checkAxe(page, `/vms run section at 375 pixels, ${theme}`);
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(width, "the page fits the phone's width").toBeLessThanOrEqual(375);
+  });
+}

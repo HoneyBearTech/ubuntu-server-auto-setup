@@ -13,6 +13,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
+| VMs page integration | the image, the mock Proxmox API and an Ubuntu 26.04 systemd container standing in for a VM the project didn't create: host-key pinning, a check run, the real run after a confirmation, a second check run that changes nothing, a guest claiming another VM's address refused, the audit log, and no secret on the VM | `make webui-vms` (needs Docker) | every pull request (not a required check) |
 | Fuzzing | the code that turns inventory values into files and commands, and the OS catalog tool's parsers, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | OS catalog tool | `tools/update_os_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
 | OS catalog check | every image the catalog pins, against the real vendors: the signature on the checksum file (pinned keys), the checksum, and that the image can still be downloaded; newer builds are listed | `make catalog-check` | pull requests that change the catalog, the script or its keys; weekly, opening or updating an issue when a pin fails or a newer build is out (and closing it when the catalog checks out again) |
@@ -292,6 +293,18 @@ TLS; its log streams, contains no secret and lands in the history; adding a pass
 challenge for `localhost` that needs user verification. Finally it checks that the Vault in the
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
+
+**The VMs page's runs** (`tests/webui-vms.sh`, `make webui-vms`) start the image, the mock (with
+`--vm-target`: VM 4071's guest agent reports a systemd container's address, and VM 4072 claims the same one)
+and that container, which has only its own user `ubuntu` with passwordless sudo, on a private network with
+names of their own (`usas-vms-*`), so it can run next to `make test`. `tests/webui_vms.py` pins VM 4071's
+host key after checking the scanned fingerprints against the container's own `ssh-keygen -lf`, refuses a
+plan before that and a real run before a passing check, runs the full baseline in check mode (nothing
+installed), then for real after the confirmation (the firewall is on with the VM's own rule, the host name
+and the user's password are unchanged, sudo stays passwordless, the UI's key stays), refuses a second real
+run of the same check, finds nothing to change in a second check run, and gets a refused connection for VM
+4072, whose pinned key isn't the container's. The audit log must name each step, and no secret of the UI may
+reach the VM, the run files or the audit log.
 
 ### The browser tests
 
