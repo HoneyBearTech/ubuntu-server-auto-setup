@@ -7,7 +7,7 @@ LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 CLUSTER_INVENTORY ?= $(wildcard inventory/pve.usas_pve.yml)
 CLUSTER_ARG := $(if $(CLUSTER_INVENTORY),-i $(CLUSTER_INVENTORY),)
 
-.PHONY: help deps app lint syntax test test-updates catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys updates updates-check
+.PHONY: help deps app lint syntax test test-updates catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -58,6 +58,9 @@ image: ## Build the container image as ubuntu-server-auto-setup:dev
 
 smoke: ## Build the image and smoke-test it against the mock Proxmox API (needs Docker)
 	tests/webui-smoke.sh
+
+webui-vms: ## Build the image and test the VMs page's runs against a systemd container (needs Docker)
+	tests/webui-vms.sh
 
 ui: app ## Build the app, then run the web UI from this checkout on http://localhost:8080, data in .webui-data/
 	USAS_HOST=127.0.0.1 USAS_PROJECT_DIR=$(CURDIR) USAS_DATA_DIR=$(CURDIR)/.webui-data PYTHONPATH=webui python -m usas_web
