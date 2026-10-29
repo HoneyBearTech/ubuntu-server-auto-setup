@@ -127,7 +127,9 @@ can be just `plugin: usas_pve`, plus optional filters: `nodes`, `tags_any`, `tag
   Give that group its login in `inventory/group_vars/usas_pve_vms.yml` (as for `other_servers`: its own user,
   passwordless sudo or a sudo password of its own; never the admin password). A VM is reached at its
   `ansible_host` if you list `vm-<vmid>` in your inventory, otherwise at the address its guest agent reports
-  (`VM.GuestAgent.Audit`), otherwise its cloud-init `ipconfig0`.
+  (`VM.GuestAgent.Audit`), otherwise its cloud-init `ipconfig0`. If your inventory has a host named
+  `vm-<vmid>` whose `pve_vmid` is another VM, that VM is left out with a warning, never given the host's
+  variables.
 - **Their host keys are pinned by VM ID,** as `usas-<cluster>-<vmid>`, never trusted on first sight: see
   [host-keys.md](host-keys.md#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory). Until you pin
   one, its report says so and the run fails for it.

@@ -3,7 +3,8 @@
 
 Properties, for any cluster listing (as /cluster/resources reports it, through usas_vms.parse_resources), any
 configs and guest-agent answers, any static inventory and any filters:
-- every host is a static host whose pve_vmid is that VM's ID, or vm-<vmid>; no VM and no name appears twice;
+- every host is a static host whose pve_vmid is that VM's ID, or vm-<vmid>; no VM and no name appears twice, and
+  no VM takes the name of a static host that belongs to another VM (it is left out, as a conflict);
 - every group is usas_pve_vms, usas_pve_skipped or a pve_node_/pve_tag_/pve_pool_ group of lowercase letters,
   digits and _ (never a name a VM's owner chose as it is);
 - a VM the filters leave out, or exclude, never appears; one tagged usas-no-updates, stopped, locked, a template
@@ -75,7 +76,11 @@ def one_input(data):
     if problems:
         return
     cluster = opts["cluster"] or V.DEFAULT_CLUSTER
-    hosts = P.plan(vms, configs, agents, static, cluster, opts)
+    hosts, conflicts = P.plan(vms, configs, agents, static, cluster, opts)
+    owned = {n: str(h["pve_vmid"]) for n, h in static.items() if h.get("pve_vmid") not in (None, "")}
+    for host in hosts:  # never a name that is a static host of another VM
+        assert host["name"] not in owned or owned[host["name"]] == str(host["vars"]["usas_pve_vmid"]), (host, owned)
+    assert all(isinstance(c, str) and "left out" in c for c in conflicts), conflicts
 
     names = [h["name"] for h in hosts]
     assert len(names) == len(set(names)), names

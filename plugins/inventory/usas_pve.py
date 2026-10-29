@@ -226,18 +226,25 @@ def _skip(vm, config, address, static):
 
 
 def plan(vms, configs, agents, static_hosts, cluster, opts):
-    """Which hosts the cluster adds: a list of {"name", "static", "groups", "vars"}, at most one per VM ID.
+    """Which hosts the cluster adds, ([{"name", "static", "groups", "vars"}, ...], conflicts): at most one host
+    per VM ID and per name.
 
     vms: usas_vms.Vm list; configs: {vmid: VmConfig}; agents: {vmid: (addresses, OsInfo or None)};
     static_hosts: {inventory name: {"pve_vmid", "ansible_host"}}; cluster: the alias prefix's cluster name;
-    opts: the filter options. A VM that is a static host keeps that host's name; any other is vm-<vmid>."""
+    opts: the filter options. A VM that is a static host keeps that host's name; any other is vm-<vmid>.
+    A VM whose vm-<vmid> is a static host that belongs to another VM (its pve_vmid) is left out and listed in
+    conflicts: adding it would hand it that host's variables."""
     servers = [{"name": n, "pve_vmid": h.get("pve_vmid")} for n, h in static_hosts.items() if h.get("pve_vmid")]
-    hosts, seen = [], set()
+    hosts, seen, conflicts = [], set(), []
     for vm in vms:
         name, server = V.host_name(vm.vmid, servers)
         if vm.vmid in seen or not _wanted(vm, name, opts):
             continue
         seen.add(vm.vmid)
+        if server is None and (static_hosts.get(name) or {}).get("pve_vmid") not in (None, ""):
+            conflicts.append(f"VM {vm.vmid} is left out: {name} in the inventory is VM "
+                             f"{V.text(static_hosts[name]['pve_vmid'], 12)} (pve_vmid)")
+            continue
         config = configs.get(vm.vmid)
         addresses, osinfo = agents.get(vm.vmid, ([], None))
         declared = str((static_hosts.get(name) or {}).get("ansible_host") or "")
@@ -263,7 +270,7 @@ def plan(vms, configs, agents, static_hosts, cluster, opts):
             if address and not declared:
                 variables["ansible_host"] = address
         hosts.append({"name": name, "static": server is not None, "groups": groups, "vars": variables})
-    return hosts
+    return hosts, conflicts
 
 
 class InventoryModule(BaseInventoryPlugin):
@@ -286,7 +293,10 @@ class InventoryModule(BaseInventoryPlugin):
         configs, agents = self._details(api, [vm for vm in vms if vm.type == "qemu" and not vm.template])
         static_hosts = {name: {"pve_vmid": host.vars.get("pve_vmid"), "ansible_host": host.vars.get("ansible_host")}
                         for name, host in self.inventory.hosts.items()}
-        for entry in plan(vms, configs, agents, static_hosts, cluster, opts):
+        hosts, conflicts = plan(vms, configs, agents, static_hosts, cluster, opts)
+        for conflict in conflicts:
+            self.display.warning(f"usas_pve: {conflict}")
+        for entry in hosts:
             name = self.inventory.add_host(entry["name"])
             for group in entry["groups"]:
                 self.inventory.add_group(group)
