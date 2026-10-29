@@ -22,6 +22,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
+  copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and
+  `make updates` add the cluster's VMs, through a new inventory plugin (`usas_pve`) that reads the inventory's
+  own API settings. Your servers keep their names and settings (matched by `pve_vmid`); other VMs are
+  `vm-<vmid>` in `usas_pve_vms`, reached with their host key pinned as `usas-<cluster>-<vmid>`
+  ([docs/host-keys.md](docs/host-keys.md#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory)).
+  Containers, templates, stopped or locked VMs, Windows and VMs tagged `usas-no-updates` are reported, never
+  contacted. Filters by node, tag, pool and name, and an exclude list. **New attack surface:** VM names, tags
+  and guest-agent answers from the cluster now shape the updates run's inventory; names and groups are fixed,
+  values are never templated, and an address from a guest is used only with its pinned key (assurance case
+  B20).
+
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
   10, Rocky Linux 9 and 10, and AlmaLinux 9 and 10. This release installs only the Ubuntu installer ISOs from
@@ -72,6 +84,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   and each run's outcome, with the session and client address; History offers it as a download.
 
 ### Changed
+
+- An inventory source that can't be read now stops a run instead of being skipped with a warning
+  (`any_unparsed_is_failed` in `ansible.cfg`), so an unreachable cluster can't silently shrink an updates run.
 
 - **The Ubuntu ISO is checked against the checksum the OS catalog pins**, which was taken from Ubuntu's
   signed `SHA256SUMS` when the catalog was built, instead of fetching and verifying `SHA256SUMS` on every

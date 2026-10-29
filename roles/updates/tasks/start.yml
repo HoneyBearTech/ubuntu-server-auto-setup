@@ -36,6 +36,11 @@
       auto_updates: ""
       health: {status: skipped, problems: []}
       snapshot: ""
+      pve:
+        vmid: "{{ usas_pve_vmid | default(pve_vmid | default('')) }}"
+        node: "{{ usas_pve_node | default(pve_node | default('')) }}"
+        name: "{{ usas_pve_name | default('') | usas_clean_text(64) }}"
+        alias: "{{ usas_pve_alias | default('') }}"
       started: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
       finished: ""
   vars:
@@ -48,6 +53,19 @@
   ansible.builtin.group_by:
     key: usas_updates_targets
   changed_when: false
+
+# The cluster inventory (usas_pve) lists VMs that mustn't be updated (stopped, locked, a template or a
+# container, Windows, opted out by tag, no address) with the reason; they are reported, never contacted.
+- name: Leave alone a VM the cluster inventory says to skip
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': usas_pve_skip_status | default('skipped'),
+      'reason': usas_pve_skip_reason | usas_clean_text(200)}) }}
+  when: usas_pve_skip_reason is defined
+
+- name: End here for a VM the cluster inventory skips
+  ansible.builtin.meta: end_host
+  when: usas_pve_skip_reason is defined
 
 - name: Check the update settings
   ansible.builtin.assert:

@@ -44,7 +44,8 @@ RUN /usr/local/bin/test-repo.sh /srv/usas-test-repo
 # A server with updates waiting: the test packages' old versions installed (usas-test-held held), Ubuntu's own
 # archive replaced by the test repository so nothing comes from the network, and the tools a real server has
 # (unattended-upgrades and needrestart, whose reports the playbook reads). The apt timers never fire, so they
-# can't take the package lock in the middle of a test.
+# can't take the package lock in the middle of a test. Every test connection comes from Docker's one address, so
+# OpenSSH 9.8+'s per-source penalties (on 26.04) would soon refuse it after the tests' host key scans: off here.
 FROM target AS updates
 COPY --from=test-repo /srv/usas-test-repo /srv/usas-test-repo
 COPY boot-id.service /etc/systemd/system/usas-boot-id.service
@@ -64,4 +65,6 @@ RUN apt-get update \
  && printf '[Timer]\nOnCalendar=\nOnCalendar=2099-01-01\nPersistent=false\nRandomizedDelaySec=0\n' \
       | tee /etc/systemd/system/apt-daily.timer.d/never.conf > /etc/systemd/system/apt-daily-upgrade.timer.d/never.conf \
  && systemctl enable usas-boot-id.service \
+ && if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then \
+      echo 'PerSourcePenalties no' > /etc/ssh/sshd_config.d/50-usas-test.conf; fi \
  && apt-get update

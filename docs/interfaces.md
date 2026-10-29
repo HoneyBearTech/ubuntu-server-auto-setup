@@ -16,6 +16,7 @@ API for other programs. What should be reachable from where is described in the
 | Make targets | the operator | [below](#commands); `make help` |
 | Playbooks | the operator, or other automation calling `ansible-playbook` | [below](#commands) |
 | Tags | the operator (`ARGS="--tags ..."`) | [below](#commands) |
+| The cluster inventory (`inventory/pve.usas_pve.yml`, plugin `usas_pve`) | the operator, for the updates playbook | [below](#the-cluster-inventory); `inventory/pve.usas_pve.example.yml`; [updates.md](updates.md#every-vm-on-the-cluster) |
 | The updates report (`<run id>.json` in `updates_report_dir`) | the operator, or other automation reading it | [below](#the-updates-report); [updates.md](updates.md#the-report) |
 | The web UI (the USAS app and its JSON API on port 8080) | the operator, in a browser | [below](#the-web-ui); [web-ui.md](web-ui.md) |
 | The status API (`GET /api/status`, off by default) | dashboards such as Heimdall, with the status token | [below](#the-status-api); [web-ui.md](web-ui.md#dashboards-heimdall) |
@@ -30,6 +31,9 @@ API for other programs. What should be reachable from where is described in the
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
 | `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
+| `usas_pve_vms` | made by the cluster inventory (`usas_pve`): VMs of the cluster that aren't in the static inventory, as `vm-<vmid>`, to update | SSH with the group's own login (`group_vars/usas_pve_vms.yml`), host key pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
+| `usas_pve_skipped` | made by the cluster inventory: VMs the updates playbook reports but never contacts (containers, templates, stopped, locked, Windows, no address, tag `usas-no-updates`) | none |
+| `pve_node_<node>`, `pve_tag_<tag>`, `pve_pool_<pool>` | made by the cluster inventory, for every VM it lists (names lowercased, other characters as `_`) | as above |
 | `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `ubuntu_servers` and `other_servers` |
 | `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
@@ -305,6 +309,30 @@ and `INVENTORY=` selects the inventory file. The baseline's roles are tagged `co
 non-zero on any failed or unreachable host (for `updates`, busy, skipped and unsupported servers don't count). `--check --diff` is supported by the baseline and by `updates.yml` (where `--check` is the report-only mode) (provisioning
 needs to really create the VM, so it isn't meaningful there).
 
+### The cluster inventory
+
+`plugins/inventory/usas_pve.py`, enabled in `ansible.cfg`, reads a file whose name ends in `usas_pve.yml`. Its
+options, all optional except `plugin`:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `plugin` | (required) | `usas_pve`. |
+| `api_host`, `api_port`, `api_user`, `api_token_id`, `api_token_secret`, `validate_certs` | the inventory's `pve_api_host`, `pve_api_port` (8006), `pve_api_user`, `pve_api_token_id`, `pve_api_token_secret`, `pve_validate_certs` (true), with its group_vars and Vault | The Proxmox API connection. The secret can also come from `USAS_PVE_TOKEN_SECRET`. |
+| `ca_file` | the system's CAs | A CA bundle for the API's certificate. |
+| `timeout` | `10` | Seconds per API call. Guest agents get at most 5 seconds each, 4 at a time, 15 seconds in all. |
+| `cluster` | the name `/cluster/status` reports, or `pve` | The cluster's name in host key aliases (`^[a-z0-9][a-z0-9-]{0,31}\Z`). |
+| `agent` | `true` | Ask running VMs' guest agents for their addresses and OS (`VM.GuestAgent.Audit`). |
+| `nodes`, `tags_any`, `tags_all`, `pools`, `name_patterns`, `exclude` | `[]` | Filters, all of which a VM must pass: node names, tags (any or all), pools, shell globs of the Proxmox or inventory name, and VM IDs or names to leave out. |
+
+It sets these host variables: `usas_pve_vmid`, `usas_pve_name`, `usas_pve_node` (the node the VM runs on now),
+`usas_pve_tags`, `usas_pve_pool`, `usas_pve_hastate`, `usas_pve_status`, `usas_os_hint` (the guest's own
+claim); for VMs outside the static inventory also `usas_pve_alias`, `ansible_ssh_extra_args`
+(`-o HostKeyAlias=<alias>`), `ansible_control_path` and, unless the inventory gives one, `ansible_host`; and for
+skipped VMs `usas_pve_skip_status` and `usas_pve_skip_reason`. Values from the cluster and its guests are never
+templated. An inventory source that can't be parsed stops every playbook (`any_unparsed_is_failed`).
+`make updates-check` and `make updates` add `inventory/pve.usas_pve.yml` when it exists (`CLUSTER_INVENTORY=`
+names another file).
+
 ### The updates report
 
 `updates.yml` writes `<run id>.json` (and a text summary, `<run id>.txt`) to `updates_report_dir` on the
@@ -315,7 +343,8 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `installed_by_usas`, `scope`, `apt_upgrade`, `window`, `pending` (each `name`, `current`, `candidate`,
 `suites`, `security`, `new`), `security_count`, `planned`, `upgraded` (each `name`, `from`, `to`), `held`,
 `excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
-`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `started` and `finished`.
+`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `pve` (`vmid`, `node`, `name`,
+`alias`), `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
 

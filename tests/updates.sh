@@ -40,8 +40,11 @@ keep_logs() {
   done
 }
 
+mock_pid=""
+
 cleanup() {
   status=$?
+  if [ -n "$mock_pid" ]; then kill "$mock_pid" 2>/dev/null || true; fi
   if [ "$status" -ne 0 ]; then keep_logs; fi
   docker rm -f "$UPD1" "$UPD2" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
@@ -129,6 +132,9 @@ fresh() {
   fi
   docker exec -i "$name" sh -c "cat > /home/$user/.ssh/authorized_keys && chown $user: /home/$user/.ssh/authorized_keys \
     && chmod 600 /home/$user/.ssh/authorized_keys" <"$TEST_TMP/id_ed25519.pub"
+  wait_ssh "$port"
+  # Host keys of its own (the image's are shared by every container), so a host key pin tells them apart.
+  docker exec "$name" sh -c 'rm -f /etc/ssh/ssh_host_*_key* && ssh-keygen -A >/dev/null && systemctl restart ssh.service'
   wait_ssh "$port"
   ssh-keygen -q -R "[127.0.0.1]:$port" -f "$TEST_TMP/known_hosts" >/dev/null 2>&1 || true
   ssh-keyscan -p "$port" 127.0.0.1 2>/dev/null >>"$TEST_TMP/known_hosts"
@@ -320,6 +326,45 @@ if grep -lE 'relay-secret|tok-secret' "$TEST_TMP"/play.*; then
   echo "ERROR: the relay password or the webhook's token is in the output above" >&2
   exit 1
 fi
+
+step "Cluster discovery: every VM on the cluster, pinned by its alias; the ones to leave alone reported, not contacted"
+# The mock Proxmox API lists the cluster of tests/mock_pve.py's UPDATE_FIXTURE_VMS: VM 4091 is upd-usas (by its
+# pve_vmid); 4093 and 4094 are VMs nobody put in the inventory, reached at the addresses
+# tests/inventory/updates-cluster.yml gives vm-4093 and vm-4094 (upd2 and upd1). VM 4094's pinned key is upd2's,
+# as if its guest reported the address of another VM: the pin must refuse it.
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 -addext "subjectAltName=IP:127.0.0.1" \
+  -keyout "$TEST_TMP/api.key" -out "$TEST_TMP/api.crt" >/dev/null 2>&1
+python3 tests/mock_pve.py --cert "$TEST_TMP/api.crt" --key "$TEST_TMP/api.key" --keys-file "$TEST_TMP/id_ed25519.pub" \
+  --port 2348 --keys-port 2350 --fixture-updates >"$TEST_TMP/mock.log" 2>&1 &
+mock_pid=$!
+printf 'plugin: usas_pve\nexclude: ["4087"]\n' >"$TEST_TMP/cluster.usas_pve.yml"
+CLUSTER=(-i tests/inventory/updates-cluster.yml -i "$TEST_TMP/cluster.usas_pve.yml")
+fresh "$UPD1" 2341 sysadmin
+fresh "$UPD2" 2342 ops
+for vmid in 4093 4094; do
+  ssh-keyscan -t ed25519 -p 2342 127.0.0.1 2>/dev/null | sed "s/^\[127.0.0.1\]:2342 /usas-mock-cluster-$vmid /" >>"$TEST_TMP/known_hosts"
+done
+ansible-inventory "${INV[@]}" "${CLUSTER[@]}" --graph >"$TEST_TMP/cluster-graph.txt"
+grep -q "vm-4087" "$TEST_TMP/cluster-graph.txt" && { echo "ERROR: the excluded VM 4087 is in the inventory" >&2; exit 1; }
+play --idempotent --check "${CLUSTER[@]}" --limit 'all:!upd-other:!vm-4094'
+report "h['upd-usas']['pve']['node'] == 'pve-test-2' and h['upd-usas']['installed_by_usas']" \
+  "h['vm-4093']['status'] == 'pending' and not h['vm-4093']['installed_by_usas']" \
+  "h['vm-4093']['pve']['alias'] == 'usas-mock-cluster-4093' and h['vm-4093']['os']['hint'] == 'Ubuntu 24.04 LTS'" \
+  "h['vm-4085']['status'] == 'unsupported' and h['vm-4096']['status'] == 'busy'" \
+  "'no address' in h['vm-4086']['reason'] and 'container' in h['vm-4092']['reason']" \
+  "'stopped' in h['vm-4095']['reason'] and 'usas-no-updates' in h['vm-4097']['reason'] and 'template' in h['vm-4098']['reason']" \
+  "'vm-4087' not in h"
+play_fails "couldn't be reached" "${CLUSTER[@]}" --limit 'all:!upd-other' -e updates_scope=security
+report "h['vm-4094']['status'] == 'unreachable' and \"isn't trusted as usas-mock-cluster-4094\" in h['vm-4094']['reason']" \
+  "h['vm-4093']['status'] == 'updated' and h['upd-usas']['status'] == 'updated'"
+expect_versions "$UPD1" usas-test-tool=1.2 usas-test-extra=1.0
+expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.0
+# A cluster inventory that can't be read stops the run (any_unparsed_is_failed), rather than leaving its VMs out.
+printf 'plugin: usas_pve\nexclude: ["4087; rm -rf /"]\n' >"$TEST_TMP/bad.usas_pve.yml"
+play_fails "exclude has values that aren't plain names" -i tests/inventory/updates-cluster.yml \
+  -i "$TEST_TMP/bad.usas_pve.yml" --check
+kill "$mock_pid"
+mock_pid=""
 
 step "Task coverage of the updates role"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles updates

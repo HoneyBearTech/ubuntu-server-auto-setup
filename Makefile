@@ -3,6 +3,9 @@ PLAYBOOK  := ansible-playbook -i $(INVENTORY)
 LIMIT     ?=
 ARGS      ?=
 LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
+# The cluster inventory (inventory/pve.usas_pve.example.yml), added to the updates targets when it exists.
+CLUSTER_INVENTORY ?= $(wildcard inventory/pve.usas_pve.yml)
+CLUSTER_ARG := $(if $(CLUSTER_INVENTORY),-i $(CLUSTER_INVENTORY),)
 
 .PHONY: help deps app lint syntax test test-updates catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke ui site prepare-node build-installer provision baseline keys updates updates-check
 
@@ -78,7 +81,7 @@ keys: ## Re-sync GitHub SSH keys only
 	$(PLAYBOOK) playbooks/baseline.yml --tags ssh_keys $(LIMIT_ARG) $(ARGS)
 
 updates-check: ## Report the package updates each server would get, changing nothing
-	$(PLAYBOOK) playbooks/updates.yml --check $(LIMIT_ARG) $(ARGS)
+	$(PLAYBOOK) $(CLUSTER_ARG) playbooks/updates.yml --check $(LIMIT_ARG) $(ARGS)
 
 updates: ## Install package updates on the servers (reboots only with updates_reboot: if_required)
-	$(PLAYBOOK) playbooks/updates.yml $(LIMIT_ARG) $(ARGS)
+	$(PLAYBOOK) $(CLUSTER_ARG) playbooks/updates.yml $(LIMIT_ARG) $(ARGS)
