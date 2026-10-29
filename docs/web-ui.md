@@ -162,17 +162,21 @@ The overview lists the steps and whether each is done.
 3. **Defaults**: the GitHub user whose keys are installed (**Preview the keys** shows what GitHub returns,
    filtered exactly as the roles filter it), extra public keys, whether to authorize the UI's own key on the
    servers (on by default: the baseline logs in with it), the admin user and password, the time zone, the
+   **Default OS** (`vm_os`: a dropdown of the releases the project's OS catalog supports, such as
+   `Ubuntu 24.04 (noble) · until 2029-05-31`; a release drops out of it when its support ends), the
    gateway (needed for servers with a static address), prefix length, DNS servers and search domains, the
-   installer's disk layout, and **disk encryption** (`vm_disk_encryption`, off by default) with its
+   installer's disk layout (the Ubuntu installer's; cloud images come with their own), and **disk encryption** (`vm_disk_encryption`, off by default) with its
    passphrase. Encryption needs **Secure Boot keys** (under Installation, More settings) and the `lvm`
    layout, and the page refuses to save it without them or without a passphrase. The passphrase goes to the
    Vault as `vault_disk_passphrase`, is never shown again (keep a copy: it is the recovery key at the VM's
    console), and applies to VMs created after it is saved; see
    [security.md](security.md#secure-boot-and-disk-encryption).
 4. **Servers**: one row per VM: its name (also the VM's name in Proxmox), its address, VM ID, and
-   optionally its node, cores, memory, disk and extra firewall rules for that server (`443/tcp`, `53/udp`,
-   `5432/tcp from 10.0.0.0/24`, separated by commas). The node is a dropdown of the cluster's nodes after a
-   connection test; **Default** uses the node on the Proxmox page. Empty sizes use the role defaults. A
+   optionally its node, **OS**, cores, memory, disk and extra firewall rules for that server (`443/tcp`,
+   `53/udp`, `5432/tcp from 10.0.0.0/24`, separated by commas). The node is a dropdown of the cluster's nodes
+   after a connection test; **Default** uses the node on the Proxmox page. The OS is a dropdown of the same
+   releases as the Defaults page's; **Default** uses the Default OS. This release installs Ubuntu 22.04, 24.04
+   and 26.04 LTS; the catalog's other systems are offered once they can be installed. Empty sizes use the role defaults. A
    server can't be named like a node: both are hosts of the same inventory. **Address** is
    `static` (the IP address the installer configures) or `dhcp`: leave the IP address empty and the
    playbooks read the address from the VM's guest agent after the install (the token needs
@@ -236,9 +240,10 @@ The overview lists the steps and whether each is done.
    log**.
 7. **Run**: choose `build-installer`, `provision`, `baseline`, `site` or `keys` (the baseline's key sync
    only), optionally check mode (`--check`), differences (`--diff`) and a limit (servers, nodes or groups,
-   separated by commas). The page shows where `build-installer` puts the installer ISO: each node the
-   servers use, its ISO storage, and which node builds it (one node for a storage the cluster shares, each
-   node for its own storage), worked out by the playbooks' own code. With a limit, a node builds only if it
+   separated by commas). The page shows where `build-installer` puts the installer ISOs: each node the
+   servers use, its ISO storage, the installer ISO of each Ubuntu release its servers install, and which node
+   builds it (one node for a storage the cluster shares, each node for its own storage), worked out by the
+   playbooks' own code. With a limit, a node builds only if it
    is in the limit too. The run's output streams live, with Ansible's status lines coloured (`ok`,
    `changed`, `skipping`, `fatal`, the play recap's counts) and numbered. **Follow the output** keeps the
    newest line in view; scrolling up pauses it. **Wrap long lines** wraps instead of scrolling sideways.
@@ -359,6 +364,12 @@ users on the servers can do).
 
 `start.ps1 -Update`, or `docker pull` and recreate the container with the same volume. Read the
 [changelog](../CHANGELOG.md) first; variable changes between versions are listed under "Upgrading".
+
+From 0.7.0 the UI writes the servers' group as `servers` and the firewall settings as `firewall_*`
+(`webui_firewall_allow`, `webui_firewall_allow_host`). It reads an inventory written by an older version
+(`ubuntu_servers`, `ufw_*`, `webui_ufw_*`) and writes it back with the new names the next time you save any
+page. The **Ubuntu point release** field is gone: the OS catalog pins the point release, and a value saved
+before is dropped on that save.
 
 ## Settings
 

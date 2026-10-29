@@ -15,7 +15,19 @@ from usas_web.remote import PveResult, RemoteProblem
 from usas_web.sshkeys import HostKey, KeyProblem
 from usas_web.store import load_yaml
 
-from .conftest import DEFAULTS, HARDENING, PASSWORD, PROXMOX, TOKEN_SECRET, configure, csrf, make_client, post, sign_up
+from .conftest import (
+    DEFAULTS,
+    HARDENING,
+    PASSWORD,
+    PROXMOX,
+    REPO,
+    TOKEN_SECRET,
+    configure,
+    csrf,
+    make_client,
+    post,
+    sign_up,
+)
 
 PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account"]
 API = ["/api/overview", "/api/proxmox", "/api/ssh", "/api/defaults", "/api/servers", "/api/hardening", "/api/run",
@@ -556,14 +568,14 @@ def test_disk_passphrases_the_role_would_refuse_are_refused(ui, passphrase):
 
 
 def test_hardening(ui):
-    r = post(ui, "/hardening", {**HARDENING, "ssh_port": "2222", "ufw_allow": "443/tcp\n9100/tcp from 10.0.0.0/8"})
+    r = post(ui, "/hardening", {**HARDENING, "ssh_port": "2222", "firewall_allow": "443/tcp\n9100/tcp from 10.0.0.0/8"})
     assert r.json()["message"] == "Saved the hardening settings."
     values = ui.app_state.store.load().values
-    assert values["ssh_port"] == 2222 and len(values["ufw_allow"]) == 2
-    assert "9100/tcp from 10.0.0.0/8" in get(ui, "/api/hardening").json()["values"]["ufw_allow"]
+    assert values["ssh_port"] == 2222 and len(values["firewall_allow"]) == 2
+    assert "9100/tcp from 10.0.0.0/8" in get(ui, "/api/hardening").json()["values"]["firewall_allow"]
     r = post(ui, "/hardening", {**HARDENING, "ssh_allow_users": "deploy"})
     assert r.status_code == 422 and "Add the admin user (sysadmin)" in r.json()["errors"]["ssh_allow_users"]
-    r = post(ui, "/hardening", {**HARDENING, "fail2ban_ignoreip": "10.0.0.0/8 enabled=false", "ufw_allow": "x"})
+    r = post(ui, "/hardening", {**HARDENING, "fail2ban_ignoreip": "10.0.0.0/8 enabled=false", "firewall_allow": "x"})
     assert r.status_code == 422 and len(r.json()["errors"]) == 2
 
 
@@ -622,20 +634,20 @@ def test_servers(ui):
     configure(ui, servers=2)
     data = get(ui, "/api/servers").json()
     assert [c["name"] for c in data["columns"]][:4] == ["name", "ansible_host", "net_mode", "net_mac"]
-    assert data["rows"][1]["name"] == "web-01" and data["rows"][0]["ufw_ports"] == "443/tcp"
+    assert data["rows"][1]["name"] == "web-01" and data["rows"][0]["firewall_ports"] == "443/tcp"
     assert data["rows"][0]["vm_cores"] == ""
     base = {"server_count": "3", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
             "servers-0-pve_vmid": "4000", "servers-1-name": "web-01", "servers-1-ansible_host": "10.0.0.11",
             "servers-1-pve_vmid": "4001"}
     bad = {**base, "servers-1-name": "web-00", "servers-1-pve_vmid": "abc", "servers-2-name": "pve-1",
-           "servers-2-ansible_host": "10.0.0.10", "servers-2-pve_vmid": "4002", "servers-2-ufw_ports": "443/sctp"}
+           "servers-2-ansible_host": "10.0.0.10", "servers-2-pve_vmid": "4002", "servers-2-firewall_ports": "443/sctp"}
     r = post(ui, "/servers", {"action": "save", **bad})
     assert r.status_code == 422
     errors = r.json()["errors"]
     assert errors["servers-1-name"] == "Another server already uses this."
     assert "VM ID must be a whole number" in errors["servers-1-pve_vmid"]
     assert errors["servers-2-name"] == "That is the name of a Proxmox node."
-    assert "'443/sctp'" in errors["servers-2-ufw_ports"]
+    assert "'443/sctp'" in errors["servers-2-firewall_ports"]
     # Errors keep the row numbers of the form, also after an empty row.
     r = post(ui, "/servers", {"server_count": "2", "servers-1-name": "bad name", "servers-1-ansible_host": "10.0.0.9",
                               "servers-1-pve_vmid": "4009"})
@@ -646,6 +658,41 @@ def test_servers(ui):
     assert servers[0]["vm_cores"] == 4 and "vm_cores" not in servers[1]
     r = post(ui, "/servers", {"server_count": "lots"})
     assert r.json()["message"] == "Saved 0 server(s)."
+
+
+def test_servers_os(ui):
+    configure(ui)
+    data = get(ui, "/api/servers").json()
+    column = next(c for c in data["columns"] if c["name"] == "vm_os")
+    assert column["choices"] == ["ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"]
+    assert column["choice_labels"]["ubuntu-24.04"].startswith("Ubuntu 24.04 (noble) · until ")
+    assert data["default_os"] == "ubuntu-26.04"
+    row = {"server_count": "1", "servers-0-name": "app-01", "servers-0-ansible_host": "10.0.0.20",
+           "servers-0-pve_vmid": "4100"}
+    r = post(ui, "/servers", {**row, "servers-0-vm_os": "debian-13"})
+    assert r.status_code == 422 and "OS must be one of: ubuntu-22.04" in r.json()["errors"]["servers-0-vm_os"]
+    assert post(ui, "/servers", {**row, "servers-0-vm_os": "ubuntu-24.04"}).status_code == 200
+    assert get(ui, "/api/servers").json()["rows"][0]["vm_os"] == "ubuntu-24.04"
+    post(ui, "/servers", row)
+    assert "vm_os" not in ui.app_state.store.load().servers[0]
+    defaults = next(f for f in get(ui, "/api/defaults").json()["fields"] if f["name"] == "vm_os")
+    assert defaults["label"] == "Default OS" and defaults["default"] == "ubuntu-26.04"
+
+
+def test_run_page_plans_each_release_s_iso(ui, monkeypatch):
+    configure(ui, servers=2)
+    cluster_test(ui, monkeypatch, ["pve-1"], {"local": "dir"})
+    post(ui, "/servers", {"server_count": "3", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+                          "servers-0-pve_vmid": "4000", "servers-1-name": "web-01",
+                          "servers-1-ansible_host": "10.0.0.11", "servers-1-pve_vmid": "4001",
+                          "servers-1-vm_os": "ubuntu-24.04", "servers-2-name": "web-02",
+                          "servers-2-ansible_host": "10.0.0.12", "servers-2-pve_vmid": "4002"})
+    plan = get(ui, "/api/run").json()["iso_plan"]
+    catalog = {e["id"]: e for e in load_yaml((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]}
+    iso = {os: catalog[os]["methods"]["autoinstall"]["file"] for os in ("ubuntu-24.04", "ubuntu-26.04")}
+    assert [(p["node"], p["iso"], p["servers"]) for p in plan["pairs"]] == [
+        ("pve-1", iso["ubuntu-24.04"], ["web-01"]), ("pve-1", iso["ubuntu-26.04"], ["web-00", "web-02"])]
+    assert plan["builders"] == ["pve-1"]
 
 
 def test_servers_networks(ui):
@@ -683,7 +730,7 @@ def test_servers_networks(ui):
                               "servers-2-net_mode": "static"})
     assert r.json()["message"] == "Saved 2 server(s)."
     text = ui.app_state.settings.inventory_file.read_text()
-    hosts = load_yaml(text)["all"]["children"]["ubuntu_servers"]["hosts"]
+    hosts = load_yaml(text)["all"]["children"]["servers"]["hosts"]
     assert hosts["app-01"] == {"pve_vmid": 4100, "net_mode": "dhcp", "net_mac": "BC:24:11:00:00:01",
                                "vm_extra_nics": [{"mode": "dhcp", "bridge": "vmbr1", "vlan": 30},
                                                  {"mode": "none", "bridge": "vmbr2"}]}

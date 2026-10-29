@@ -224,18 +224,18 @@ def main() -> None:
 
     status, data = ui.post("/servers", {"server_count": "1", "servers-0-name": "srv-01",
                                         "servers-0-ansible_host": "10.10.10.61", "servers-0-pve_vmid": "4061",
-                                        "servers-0-ufw_ports": "443/tcp"})
+                                        "servers-0-firewall_ports": "443/tcp"})
     check(data.get("message") == "Saved 1 server(s).", "the servers table is saved", data)
     hardening = {"ssh_port": "22", "ssh_permit_root_login": "no", "fail2ban_sshd_mode": "normal",
                  "fail2ban_maxretry": "5", "fail2ban_findtime": "10m", "fail2ban_bantime": "1h",
-                 "fail2ban_bantime_maxtime": "1w", "ufw_ssh_sources": "any"}
+                 "fail2ban_bantime_maxtime": "1w", "firewall_ssh_sources": "any"}
     status, data = ui.post("/hardening", {**hardening, "ssh_allow_users": "someone-else"})
     check(status == 422 and "locked out" in data.get("errors", {}).get("ssh_allow_users", ""),
           "ssh_allow_users without the admin user is refused", data)
     status, data = ui.post("/hardening", {**hardening, "ssh_allow_users": "sysadmin",
                                           "fail2ban_bantime_increment": "on", "fail2ban_ignoreip": "10.10.10.0/24",
-                                          "ufw_ssh_limit": "on", "admin_sudo_nopasswd": "on",
-                                          "ufw_allow": "9100/tcp from 10.10.10.0/24"})
+                                          "firewall_ssh_limit": "on", "admin_sudo_nopasswd": "on",
+                                          "firewall_allow": "9100/tcp from 10.10.10.0/24"})
     check(data.get("message") == "Saved the hardening settings.", "the hardening settings are saved", data)
 
     # The VM exists already, so provisioning only checks the settings, asks the API and skips it: a real
