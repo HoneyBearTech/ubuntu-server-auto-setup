@@ -150,7 +150,12 @@ a service the update breaks fails its server's health check and keeps the other 
 stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
 `SSL_CERT_FILE`, sign-in checked) and a stand-in webhook, only when something changed, while a relay whose
 certificate isn't trusted fails the run and neither the relay password nor the webhook's token appears in
-the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
+the output; and the cluster inventory against `tests/mock_pve.py --fixture-updates` (a cluster of two nodes
+with a VM for each case): `upd-usas` keeps its name and gains its live node, a VM outside the inventory is
+`vm-<vmid>` and updated through its pinned alias, one whose address leads to the other container is refused
+by its pin, an excluded VM is absent, the VMs to leave alone (container, template, stopped, locked, Windows,
+no address, tag `usas-no-updates`) are reported without being contacted, and a cluster file with a bad
+filter stops the run. Each container gets host keys of its own for this. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
 keeps each play's log, the reports and each container's failed units and recent warnings there; CI
 uploads them as an artifact for 7 days. It takes about 6 minutes per release.
 
@@ -225,6 +230,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
+| `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 | `fuzz_vm_inventory.py` | `webui/usas_web/vmplan.py` (the VMs page's run plans and their inventory), `inventory_names`, `parse_limit` and `parse_tags` in `webui/usas_web/runner.py`, and `vm_alias`, `ALIAS` and `Keys.pins` in `webui/usas_web/sshkeys.py` | any listing and settings give a plan or a refusal, nothing else; a plan's inventory loads back to exactly the hosts planned (servers by name, other VMs as `vm-<vmid>` in `usas_vms`), with every typed or reported value `!unsafe` and no line break; a VM outside the inventory gets none of the Vault's secrets, passwordless sudo, a usable IPv4 address and its pinned alias; the plan's limit and tags pass the runner's own checks unchanged; aliases always match `ALIAS`, and any `known_hosts` text yields only aliases |
@@ -345,7 +351,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2347 and 2349 for `make test-updates`). The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install

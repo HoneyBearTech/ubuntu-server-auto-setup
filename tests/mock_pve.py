@@ -24,8 +24,12 @@ To stand in for pveproxy restarting a worker, POST /mock/drop with JSON {"method
 without answering, "after" carries the call out (a VM is created) and then closes it without answering. The
 dropped calls are listed in the state's "dropped".
 
+With --fixture-updates it lists the VMs of UPDATE_FIXTURE_VMS instead (or as well), the cluster tests/updates.sh
+discovers with the usas_pve inventory plugin: on both nodes, with tags, a pool and an HA state, and one VM for each
+reason the updates playbook leaves a VM alone.
+
 Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
-                   [--fixture-vms] [--vm-target VMID=IPV4 ...]
+                   [--fixture-vms] [--fixture-updates] [--vm-target VMID=IPV4 ...]
 The state (VMs, config changes, requests) is at GET /mock/state, for the tests' assertions.
 """
 
@@ -65,7 +69,7 @@ AGENT_POLLS_BEFORE_READY = 1
 
 LOCK = threading.Lock()
 STATE = {"vms": {}, "requests": [], "drops": [], "dropped": []}
-FIXTURES = {"enabled": False}
+FIXTURES = {"enabled": False, "updates": False}
 SLOW_AGENT_SECONDS = 7  # longer than the web UI waits for one agent call
 
 
@@ -124,13 +128,48 @@ FIXTURE_VMS = {
 }
 
 
+# With --fixture-updates: the cluster tests/updates.sh discovers with the usas_pve inventory plugin. 4091 is the
+# static upd-usas (on the other node than its inventory says nothing about); 4093 and 4094 are VMs nobody put in
+# the inventory, reached through the test inventory's vm-4093 and vm-4094 (the containers); the rest are VMs the
+# playbook must leave alone, one for each reason; 4087 is left out by the test's exclude.
+UPDATE_FIXTURE_VMS = {
+    4091: {"name": "upd-usas-pve", "node": "pve-test-2", "tags": "ubuntu;ansible",
+           "config": {"agent": "1", "ostype": "l26", "description": "Installed by ubuntu-server-auto-setup (Ubuntu 26.04.1)"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.91")], _ubuntu("26.04", "Resolute Raccoon"), "upd-usas")},
+    4092: {"name": "ct-cache", "type": "lxc"},
+    4093: {"name": "legacy-web", "tags": "prod;web", "pool": "prod", "hastate": "started",
+           "config": {"agent": "1", "ostype": "l26"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.93")], _ubuntu("24.04", "Noble Numbat"), "legacy-web")},
+    4094: {"name": "Legacy_DB", "tags": "prod",
+           "config": {"agent": "1", "ostype": "l26"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.94")], _ubuntu("24.04", "Noble Numbat"), "legacy-db")},
+    4095: {"name": "old-app", "status": "stopped", "tags": "prod", "config": {"agent": "1", "ostype": "l26"}},
+    4096: {"name": "backing-up", "lock": "backup", "tags": "prod", "config": {"agent": "1", "ostype": "l26"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.96")], _ubuntu("24.04", "Noble Numbat"), "backing-up")},
+    4097: {"name": "hands-off", "tags": "prod;usas-no-updates", "config": {"agent": "1", "ostype": "l26"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.97")], _ubuntu("24.04", "Noble Numbat"), "hands-off")},
+    4098: {"name": "golden-image", "status": "stopped", "template": 1, "config": {"ostype": "l26", "template": 1}},
+    4085: {"name": "win-desk", "tags": "prod", "config": {"agent": "1", "ostype": "win11"},
+           "agent": ("ok", [_iface("Ethernet", "10.99.0.85")],
+                     {"id": "mswindows", "version-id": "11", "pretty-name": "Windows 11 Pro"}, "WIN-DESK")},
+    4086: {"name": "no-address", "tags": "prod", "config": {"ostype": "l26"}},
+    4087: {"name": "scratch", "tags": "prod", "config": {"agent": "1", "ostype": "l26"},
+           "agent": ("ok", [_iface("ens18", "10.99.0.87")], _ubuntu("24.04", "Noble Numbat"), "scratch")},
+}
+
+
+def fixture_vms():
+    """The fixture VMs the mock lists: the VMs page's, the updates tests', or none."""
+    return {**(FIXTURE_VMS if FIXTURES["enabled"] else {}), **(UPDATE_FIXTURE_VMS if FIXTURES["updates"] else {})}
+
+
 def fixture_resources():
     data = []
-    for vmid, vm in FIXTURE_VMS.items():
+    for vmid, vm in fixture_vms().items():
         kind = vm.get("type", "qemu")
-        entry = {"vmid": vmid, "id": f"{kind}/{vmid}", "node": NODE, "type": kind,
+        entry = {"vmid": vmid, "id": f"{kind}/{vmid}", "node": vm.get("node", NODE), "type": kind,
                  "status": vm.get("status", "running")}
-        entry.update({k: v for k, v in vm.items() if k not in ("config", "agent", "type", "status")})
+        entry.update({k: v for k, v in vm.items() if k not in ("config", "agent", "type", "status", "node")})
         data.append(entry)
     return data
 
@@ -255,9 +294,14 @@ class PveHandler(BaseHTTPRequestHandler):
             self.silent = True
             if drop == "before":
                 return None
-        fixture = re.fullmatch(rf"/nodes/{NODE}/qemu/(\d+)/(config|agent/[a-z-]+)", path)
-        if FIXTURES["enabled"] and method == "GET" and fixture and int(fixture.group(1)) in FIXTURE_VMS:
-            return self._fixture(FIXTURE_VMS[int(fixture.group(1))], fixture.group(2))
+        fixture = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|agent/[a-z-]+)", path)
+        fixtures = fixture_vms()
+        if method == "GET" and fixture and int(fixture.group(2)) in fixtures:
+            vm = fixtures[int(fixture.group(2))]
+            if vm.get("node", NODE) != fixture.group(1):  # Proxmox looks for the config on the node the path names
+                return self._reply(500, {"vmid": f"Configuration file 'nodes/{fixture.group(1)}/qemu-server/"
+                                                 f"{fixture.group(2)}.conf' does not exist"})
+            return self._fixture(vm, fixture.group(3))
         with LOCK:
             return self._dispatch(method, path, query, form)
 
@@ -358,8 +402,7 @@ class PveHandler(BaseHTTPRequestHandler):
                  "status": listed_status(vm), "id": f"qemu/{v}"}
                 for v, vm in vms.items()
             ]
-            if FIXTURES["enabled"]:
-                data += fixture_resources()
+            data += fixture_resources()
             return self._reply(200, data)
         m = re.fullmatch(r"/nodes/([^/]+)/tasks/([^/]+)/(status|log)", path)
         if m and method == "GET":
@@ -463,6 +506,7 @@ def main():
     # given address, such as a test container's. Two VM IDs with one address make a guest that lies about it.
     parser.add_argument("--vm-target", action="append", default=[], metavar="VMID=IPV4",
                         help="also list a running Ubuntu 26.04 VM whose agent reports this address")
+    parser.add_argument("--fixture-updates", action="store_true", help="also list UPDATE_FIXTURE_VMS")
     args = parser.parse_args()
     FIXTURES["enabled"] = args.fixture_vms or bool(args.vm_target)
     if not args.fixture_vms:
@@ -474,6 +518,7 @@ def main():
             "config": {"agent": "1", "ostype": "l26"},
             "agent": ("ok", [_iface("lo", "127.0.0.1"), _iface("eth0", address)], _ubuntu("26.04", "Resolute Raccoon"),
                       f"app-{vmid}")}
+    FIXTURES["updates"] = args.fixture_updates
 
     with open(args.keys_file, "rb") as fh:
         KeysHandler.keys = fh.read()

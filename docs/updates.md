@@ -111,6 +111,37 @@ The playbook doesn't fight them: it waits for them, and then reports the server 
 masks or reconfigures their timers; on the servers this project installed, the baseline sets them up. The
 report shows what each server does on its own as one line, such as "Automatic: security daily, no reboot".
 
+## Every VM on the cluster
+
+The cluster inventory adds every VM of the Proxmox VE cluster to the run, whether you put it in the
+inventory or not. Copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`.
+`make updates-check` and `make updates` then use it; by hand, add `-i inventory/pve.usas_pve.yml` after your
+inventory. It reads the API settings from your inventory (`pve_api_host`, `pve_api_token_id`, ...), so the file
+can be just `plugin: usas_pve`, plus optional filters: `nodes`, `tags_any`, `tags_all`, `pools`,
+`name_patterns` and `exclude` (VM IDs or names). A VM must pass all of them.
+
+- **Your servers stay yours.** A VM whose ID is a server's `pve_vmid` is that server: same name, address,
+  login and settings. It only gains what the cluster knows, such as the node it runs on now, its tags and
+  the OS its guest reports.
+- **Other VMs are `vm-<vmid>`,** in the group `usas_pve_vms`, never named after their Proxmox name or tags.
+  Give that group its login in `inventory/group_vars/usas_pve_vms.yml` (as for `other_servers`: its own user,
+  passwordless sudo or a sudo password of its own; never the admin password). A VM is reached at its
+  `ansible_host` if you list `vm-<vmid>` in your inventory, otherwise at the address its guest agent reports
+  (`VM.GuestAgent.Audit`), otherwise its cloud-init `ipconfig0`. If your inventory has a host named
+  `vm-<vmid>` whose `pve_vmid` is another VM, that VM is left out with a warning, never given the host's
+  variables.
+- **Their host keys are pinned by VM ID,** as `usas-<cluster>-<vmid>`, never trusted on first sight: see
+  [host-keys.md](host-keys.md#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory). Until you pin
+  one, its report says so and the run fails for it.
+- **Some VMs are reported, never contacted** (group `usas_pve_skipped`, with the reason): containers (LXC),
+  templates, stopped or paused VMs (never started by this playbook), VMs Proxmox has locked (a backup,
+  migration or snapshot: `busy`), Windows, VMs with no address, and VMs tagged **`usas-no-updates`**. That tag
+  lets a VM's owner opt out; no tag ever opts a VM in or gives it credentials.
+- **Groups for ordering only:** each VM is also in `pve_node_<node>`, `pve_tag_<tag>` and `pve_pool_<pool>`
+  (lowercase, other characters as `_`).
+- **A cluster that doesn't answer stops the run** rather than updating only part of it
+  (`any_unparsed_is_failed` in `ansible.cfg`).
+
 ## Notifications
 
 Once per run, after the report, the control node can send its summary by mail and to a webhook. The summary
