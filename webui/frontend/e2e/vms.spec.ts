@@ -61,7 +61,7 @@ test("filters by keyboard, and announces the count", async ({ page }) => {
   await tabTo(page, support);
   await support.selectOption("override");
   await expect(count).toHaveText(`1 of ${total} VMs shown`);
-  expect(await names(page)).toEqual(["jammy"]);
+  expect(await names(page)).toEqual(["plucky"]);
 
   const clear = page.getByRole("button", { name: "Clear the filters" });
   await tabTo(page, clear);

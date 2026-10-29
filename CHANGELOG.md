@@ -149,6 +149,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - The OS catalog pins AlmaLinux 10's x86-64-v2 cloud image instead of the x86-64 (v3) one, so AlmaLinux 10 runs on
   CPUs without AVX2 too (Intel Ivy Bridge and earlier). CentOS Stream 10 and Rocky Linux 10 publish only x86-64-v3
   builds. `make catalog` keeps choosing the v2 build.
+- The VMs page's **Playbooks** column follows the OS catalog: Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13,
+  CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 are *Supported* (as the guest reports them), another release of
+  those systems needs **Run the baseline on it anyway**, and other systems can't be selected. Before, only Ubuntu
+  24.04 and 26.04 counted.
 - An inventory source that can't be read now stops a run instead of being skipped with a warning
   (`any_unparsed_is_failed` in `ansible.cfg`), so an unreachable cluster can't silently shrink an updates run.
 

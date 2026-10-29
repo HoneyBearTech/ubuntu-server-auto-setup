@@ -16,8 +16,8 @@ It also serves a public-keys file over plain HTTP, standing in for https://githu
 
 With --fixture-vms it also lists the fixed VMs in FIXTURE_VMS, for the web UI's VMs page: their configs and
 their guest agents (network-get-interfaces, get-osinfo, get-host-name), including an agent that isn't
-running, a slow one, one the token may not ask, Debian, Windows, a template, a container, and hostile
-strings. Off by default, so the playbook tests see only the VMs they create.
+running, a slow one, one the token may not ask, Debian, an Ubuntu and a Fedora release the OS catalog doesn't
+have, Windows, a template, a container, and hostile strings. Off by default, so the playbook tests see only the VMs they create.
 
 To stand in for pveproxy restarting a worker, POST /mock/drop with JSON {"method": "GET", "path": "<regex>",
 "when": "before" or "after", "times": 1} drops the next matching API calls: "before" closes the connection
@@ -134,6 +134,15 @@ FIXTURE_VMS = {
     112: {"name": "jammy", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
           "config": {"agent": "1", "ostype": "l26"},
           "agent": ("ok", [_iface("ens18", "10.10.10.32")], _ubuntu("22.04", "Jammy Jellyfish"), "jammy")},
+    # Releases the OS catalog doesn't have: an Ubuntu release (needs an override) and another system (not supported).
+    113: {"name": "plucky", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.33")],
+                    {"id": "ubuntu", "version-id": "25.04", "pretty-name": "Ubuntu 25.04"}, "plucky")},
+    114: {"name": "fedora-41", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.34")],
+                    {"id": "fedora", "version-id": "41", "pretty-name": "Fedora Linux 41"}, "fedora-41")},
     200: {"name": "ct-dns", "type": "lxc", "maxcpu": 1, "mem": 67_108_864, "maxmem": 536_870_912, "uptime": 99_999},
 }
 

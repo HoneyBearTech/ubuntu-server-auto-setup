@@ -10,6 +10,8 @@ from usas_web import remote
 from usas_web.remote import RemoteProblem, keys_url, preview_keys
 from usas_web.remote import test_proxmox as check_proxmox
 
+from .test_vms import RELEASES
+
 KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 
@@ -248,7 +250,7 @@ def by_id(data):
 def test_lister_lists_and_classifies(monkeypatch):
     calls = []
     monkeypatch.setattr(remote.requests, "get", pve(cluster(), calls))
-    data = remote.VmLister().list(API, {103: {"name": "old-01", "ansible_host": "10.0.0.33"}},
+    data = remote.VmLister(releases=RELEASES).list(API, {103: {"name": "old-01", "ansible_host": "10.0.0.33"}},
                                   remote.v.subnet("10.0.0.1", 24))
     assert data["version"] == "9.1.1" and data["complete"] and data["forbidden"] == 0
     rows = by_id(data)
@@ -275,7 +277,7 @@ def test_lister_caches(monkeypatch):
     calls = []
     monkeypatch.setattr(remote.requests, "get", pve(cluster(), calls))
     clock = Clock()
-    lister = remote.VmLister(clock)
+    lister = remote.VmLister(clock, releases=RELEASES)
     lister.list(API, {})
     first = len(calls)
     lister.list(API, {})
@@ -308,7 +310,7 @@ def test_lister_states(monkeypatch):
                         "/nodes/n1/qemu/102/agent/network-get-interfaces": requests.exceptions.ReadTimeout(),
                         "/nodes/n1/qemu/105/config": Response(500)})
     monkeypatch.setattr(remote.requests, "get", pve(routes))
-    data = remote.VmLister().list(API, {})
+    data = remote.VmLister(releases=RELEASES).list(API, {})
     rows = by_id(data)
     assert (rows[101]["agent"], rows[102]["agent"], rows[105]["agent"]) == ("forbidden", "timeout", "unknown")
     assert data["forbidden"] == 1
@@ -316,7 +318,7 @@ def test_lister_states(monkeypatch):
 
 def test_lister_keeps_the_last_config_when_it_cant_be_read(monkeypatch):
     clock = Clock()
-    lister = remote.VmLister(clock)
+    lister = remote.VmLister(clock, releases=RELEASES)
     monkeypatch.setattr(remote.requests, "get", pve(cluster()))
     lister.list(API, {})
     monkeypatch.setattr(remote.requests, "get", pve(cluster(**{"/nodes/n1/qemu/105/config": Response(500)})))
@@ -328,7 +330,7 @@ def test_lister_without_the_cluster(monkeypatch):
     monkeypatch.setattr(remote.requests, "get", pve(cluster(**{"/cluster/resources?type=vm": Response(401),
                                                                "/version": Response(401)})))
     with pytest.raises(remote.PveError, match="refused the token"):
-        remote.VmLister().list(API, {})
+        remote.VmLister(releases=RELEASES).list(API, {})
 
 
 def test_lister_waits_only_so_long_and_fills_in_later(monkeypatch):
@@ -354,7 +356,7 @@ def test_lister_waits_only_so_long_and_fills_in_later(monkeypatch):
         routes[f"/nodes/n1/qemu/{300 + i}/agent/get-osinfo"] = {"result": {"id": "ubuntu", "version-id": "24.04"}}
         routes[f"/nodes/n1/qemu/{300 + i}/agent/get-host-name"] = {"result": {"host-name": f"vm{i}"}}
     monkeypatch.setattr(remote.requests, "get", pve(routes))
-    lister = remote.VmLister()
+    lister = remote.VmLister(releases=RELEASES)
     data = lister.list(API, {}, budget=0.3)
     assert not data["complete"] and {r["agent"] for r in data["vms"]} == {"pending"}
     data = lister.list(API, {}, budget=0.1)  # a second listing doesn't ask again for what is on its way
