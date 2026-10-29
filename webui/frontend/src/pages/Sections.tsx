@@ -389,7 +389,7 @@ export function Hardening() {
   const { errors } = form;
   const groups = groupFields(data.fields, [
     { legend: "SSH", test: (f) => f.name.startsWith("ssh_") || f.name === "admin_sudo_nopasswd" },
-    { legend: "Firewall (UFW)", test: (f) => f.name.startsWith("ufw_") },
+    { legend: "Firewall", test: (f) => f.name.startsWith("firewall_") },
     { legend: "Fail2Ban", test: (f) => f.name.startsWith("fail2ban_") && !NOTIFICATION_FIELDS.includes(f.name) },
     { legend: "Extra hardening (off by default)", test: (f) => f.name.startsWith("hardening_") },
     { legend: "Notifications", test: named(...NOTIFICATION_FIELDS) },

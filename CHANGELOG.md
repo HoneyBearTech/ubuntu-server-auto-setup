@@ -15,6 +15,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `ufw_default_incoming` and `ufw_logging` are now `firewall_*`; `apt_upgrade` is now `pkg_upgrade`; and
   `ubuntu_release` is now `vm_os` (`ubuntu-<release>`). Nothing has to change now: each run lists the old names
   the inventory still uses. A new name set in the inventory wins over the old one.
+- The web UI reads an inventory written by an older version and saves it with the new names (`servers`,
+  `firewall_*`, `webui_firewall_*`) the next time any page is saved. Its "Ubuntu point release" field is gone:
+  the OS catalog pins the point release, and a value saved there before is dropped on that save.
 - The role `ubuntu_release` is now `os_catalog`. Only playbooks of your own that list `ubuntu_release` as a
   role or include it (`include_role: name: ubuntu_release`) need the new name; the inventory variables keep
   theirs.
@@ -101,6 +104,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   created or downloaded; a release past its end of support installs with a warning. Debian, CentOS Stream,
   Rocky Linux and AlmaLinux (`vm_install_method: cloud_image`) are refused until cloud-image installs land.
 
+- **The web UI chooses the OS**: a Default OS on the Defaults page and an OS column on the Servers page, each
+  a dropdown of the catalog's supported releases (`Ubuntu 24.04 (noble) · until 2029-05-31`); the Run page
+  shows each Ubuntu release's installer ISO and which node builds it.
 - **The baseline runs on Debian 12 and 13** (on servers you already have; installing Debian comes with
   cloud-image installs): unattended-upgrades gets Debian's own origins (point releases and Debian-Security, no
   ESM), and a waiting reboot is found by comparing the newest kernel in `/boot` with the one running, since

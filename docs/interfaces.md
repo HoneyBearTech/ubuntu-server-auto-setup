@@ -424,7 +424,8 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   `audit.jsonl` (one JSON object per line: `time`, `event`, `session`, `client`, then the event's fields;
   rotated to `audit.jsonl.1` to `.3` at 5 MB) and `runs/` there
   ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
-  (`webui_ufw_allow`, `webui_ufw_allow_host`, `webui_authorize_ui_key`).
+  (`webui_firewall_allow`, `webui_firewall_allow_host`, `webui_authorize_ui_key`; before 0.7.0 `webui_ufw_allow`
+  and `webui_ufw_allow_host`, which the UI still reads).
 - **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.
 
 ### The status API

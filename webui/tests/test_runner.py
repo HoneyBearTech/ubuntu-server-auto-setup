@@ -19,7 +19,7 @@ def runner(settings, fake_ansible):
     return Runner(s)
 
 
-NAMES = {"web-01", "db-01", "ubuntu_servers", "all"}
+NAMES = {"web-01", "db-01", "servers", "all"}
 
 HOSTILE_LIMITS = [
     "-e @/etc/passwd", "--become", "web-01 --become", "web-01;id", "web-01\nid", "web-01\n", "\nweb-01",
@@ -40,7 +40,7 @@ def wait(runner, run_id, timeout=20):
 def test_parse_limit():
     assert parse_limit("", NAMES) == ""
     assert parse_limit(" web-01, db-01 ", NAMES) == "web-01,db-01"
-    assert parse_limit("ubuntu_servers:!db-01,&web-01", NAMES) == "ubuntu_servers,!db-01,&web-01"
+    assert parse_limit("servers:!db-01,&web-01", NAMES) == "servers,!db-01,&web-01"
     with pytest.raises(RunError):
         parse_limit("web-02", NAMES)
 
