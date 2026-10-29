@@ -202,8 +202,8 @@ Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
   are hidden from the output (`pve_hide_secrets`, `no_log`).
 - **No inbound network exposure during install.** The installer reads its configuration from a local
   CD-ROM image, not from a network datasource.
-- **Works on servers it didn't install.** The baseline only assumes Ubuntu 22.04, 24.04 or 26.04 or Debian 12
-  or 13, and an account that can `sudo`. It goes by the server's facts (distribution and release), not by
+- **Works on servers it didn't install.** The baseline only assumes Ubuntu 22.04, 24.04 or 26.04, Debian 12
+  or 13, CentOS Stream, Rocky Linux or AlmaLinux 9 or 10, and an account that can `sudo`. It goes by the server's facts (distribution and release), not by
   `vm_os`: each role loads its settings for the OS family, then the distribution, then the release
   (`vars/Debian.yml`, `vars/Ubuntu.yml`, ...), each overriding the one before.
 

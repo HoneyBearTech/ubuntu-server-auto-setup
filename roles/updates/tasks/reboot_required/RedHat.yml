@@ -1,0 +1,40 @@
+---
+# The RHEL family: dnf needs-restarting -r (dnf-plugins-core) exits 1 when a reboot would load updated core
+# packages (the kernel, glibc, systemd...), and lists them; -s lists the services still running old code. Sets
+# updates_reboot_status like reboot_required/Debian.yml; the updates playbook adds it to its result, and the
+# baseline (roles/common) reads it too.
+- name: Ask dnf whether a reboot is needed
+  ansible.builtin.command:
+    argv: [dnf, needs-restarting, --reboothint]
+  register: updates_needs_reboot
+  changed_when: false
+  failed_when: updates_needs_reboot.rc not in [0, 1]
+  check_mode: false
+
+- name: Ask dnf which services run old code
+  ansible.builtin.command:
+    argv: [dnf, needs-restarting, --services]
+  register: updates_needs_services
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Note whether a reboot is needed
+  ansible.builtin.set_fact:
+    updates_reboot_status:
+      required: "{{ updates_needs_reboot.rc == 1 }}"
+      # "  * kernel" lines under "Core libraries or services have been updated since boot-up:".
+      packages: >-
+        {{ updates_needs_reboot.stdout_lines | select('match', '^\s+\*\s+\S+') | map('regex_replace', '^\s+\*\s+', '')
+           | map('regex_replace', '\s.*$', '') | join('\n') | usas_package_names(100) }}
+      restart_services: >-
+        {{ updates_needs_services.stdout_lines | default([]) | select('match', '^[A-Za-z0-9@._:-]+\.service$')
+           | list | unique | sort }}
+
+- name: Add it to the run's result
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot
+      | combine({'required': updates_reboot_status.required, 'packages': updates_reboot_status.packages}),
+      'restart_services': updates_reboot_status.restart_services}) }}
+  when: usas_updates_result is defined

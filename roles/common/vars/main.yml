@@ -11,6 +11,6 @@ common_mail_user_pattern: '^[A-Za-z0-9._@+=-]*\Z'
 common_mail_password_pattern: '^[^\x00-\x1f\x7f]*\Z'
 common_mail_report_values: [always, only-on-error, on-change]
 common_mail_tls_values: [starttls, tls, "off"]
-# Packages that are a mail transfer agent already; msmtp-mta would replace them.
-common_other_mtas: [postfix, exim4-daemon-light, exim4-daemon-heavy, sendmail-bin, opensmtpd, nullmailer, dma, ssmtp, courier-mta]
+# Packages that are a mail transfer agent already, which the relay would replace: the distribution's (vars/).
+common_other_mtas: "{{ common_os_other_mtas }}"
 common_msmtp_password_file: /etc/msmtp-password

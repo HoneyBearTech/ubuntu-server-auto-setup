@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: HoneyBearTech
-  description: UFW firewall with rate-limited SSH and inventory-driven allow rules
+  description: UFW or firewalld with rate-limited SSH and inventory-driven allow rules
   license: MIT
   min_ansible_version: "2.20"
   platforms:

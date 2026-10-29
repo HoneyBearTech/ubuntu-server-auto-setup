@@ -150,7 +150,8 @@ jobs:
       fail-fast: false
       matrix:
         # tests/run.sh covers Ubuntu 26.04; these are the other releases the baseline supports.
-        os: [ubuntu-22.04, ubuntu-24.04, debian-12, debian-13]
+        os: [ubuntu-22.04, ubuntu-24.04, debian-12, debian-13, centos-stream-9, centos-stream-10, rocky-9, rocky-10,
+             alma-9, alma-10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

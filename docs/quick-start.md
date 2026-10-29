@@ -88,7 +88,7 @@ SSH jail.
 
 - Add more hosts to `servers` and run `make site ARGS=--ask-vault-pass`: existing VMs are skipped,
   new ones are installed, and the baseline is applied (again) everywhere.
-- Point the baseline at servers you already have (Ubuntu 22.04, 24.04 or 26.04, Debian 12 or 13): add them to `servers`
+- Point the baseline at servers you already have (Ubuntu 22.04, 24.04 or 26.04, Debian 12 or 13, CentOS Stream, Rocky Linux or AlmaLinux 9 or 10): add them to `servers`
   with their `ansible_host` and `ansible_user`, and run `make baseline LIMIT=<host>`. `make provision` and
   `make site` expect every host in that group to have a `pve_vmid`: give a Proxmox VM its existing ID (it
   is then skipped), and keep servers elsewhere out of those runs with `LIMIT`.

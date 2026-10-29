@@ -91,6 +91,19 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
   job runs it on each of those releases and on Debian 12 and 13 (`make test-baseline`).
 
+- **The baseline runs on CentOS Stream, Rocky Linux and AlmaLinux 9 and 10**, with each family's own tools:
+  - dnf upgrades, and dnf-automatic for automatic updates: security updates on Rocky Linux and AlmaLinux,
+    every update on CentOS Stream, which publishes no security errata;
+  - firewalld instead of UFW, driven by the same `firewall_*` settings (SSH and the extra rules as rich rules;
+    `firewall_ssh_limit_rate`, 30 a minute, limits new SSH connections from all sources together);
+  - SELinux stays enforcing: a custom SSH port is labelled `ssh_port_t` before sshd moves;
+  - the admin user in `wheel`, sshd as `sshd.service`, no 127.0.1.1 line in `/etc/hosts`;
+  - Fail2Ban from EPEL, with `fail2ban-firewalld` (EPEL's key checked; `fail2ban_enabled: false` leaves both
+    out); the mail relay's msmtp from EPEL too;
+  - a waiting reboot found with `dnf needs-restarting`, the check the updates playbook will use on this family.
+
+  The CI baseline matrix runs every one of them.
+
 ### Changed
 
 - **The Ubuntu ISO is checked against the checksum the OS catalog pins**, which was taken from Ubuntu's
@@ -111,6 +124,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `tests/coverage.py` counts the per-family task files too, and each suite measures its own roles.
 
 ### Security
+
+- **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
+  needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
+  boundary B20 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
 
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the

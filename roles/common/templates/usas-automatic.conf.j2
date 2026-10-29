@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+# dnf-automatic: what the daily timer (dnf-automatic.timer) does.
+[commands]
+# security on Rocky Linux and AlmaLinux, default (every update) on CentOS Stream, which publishes no errata.
+upgrade_type = {{ common_os_dnf_upgrade_type }}
+random_sleep = 0
+network_online_timeout = 60
+download_updates = yes
+apply_updates = yes
+{% if unattended_upgrades_auto_reboot | bool %}
+reboot = when-needed
+reboot_command = "shutdown -r {{ unattended_upgrades_reboot_time }} 'Rebooting after applying package updates'"
+{% else %}
+reboot = never
+{% endif %}
+
+[emitters]
+{% if unattended_upgrades_mail | length > 0 %}
+emit_via = command_email
+{% else %}
+emit_via = stdio
+{% endif %}
+
+[command_email]
+# Mail through /usr/sbin/sendmail (the mail relay, or the server's own mail server), with the headers it needs.
+command_format = "{ printf 'Subject: %%s\nFrom: %%s\nTo: %%s\n\n' {subject} {email_from} {email_to}; cat; } | /usr/sbin/sendmail -f {email_from} {email_to}"
+stdin_format = "{body}"
+email_from = {{ mail_relay_from or ('root@' ~ server_hostname) }}
+email_to = {{ unattended_upgrades_mail or 'root' }}
+
+[base]
+debuglevel = 1

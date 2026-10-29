@@ -1,0 +1,3 @@
+---
+# firewalld's zone for the rules: its default one, which every interface is in unless set otherwise.
+firewall_os_zone: public

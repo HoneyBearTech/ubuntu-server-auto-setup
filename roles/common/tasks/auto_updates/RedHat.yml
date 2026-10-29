@@ -1,0 +1,17 @@
+---
+# The RHEL family: dnf-automatic's timer downloads and installs updates every day. Rocky Linux and AlmaLinux
+# publish security errata, so they get security updates only, as unattended-upgrades does; CentOS Stream publishes
+# none, so it gets every update (common_os_dnf_upgrade_type, from os_security_errata in vars/). Mail goes through
+# /usr/sbin/sendmail, as unattended-upgrades' does.
+- name: Configure dnf-automatic
+  ansible.builtin.template:
+    src: usas-automatic.conf.j2
+    dest: /etc/dnf/automatic.conf
+    mode: "0644"
+
+- name: Turn on automatic updates
+  ansible.builtin.systemd_service:
+    name: dnf-automatic.timer
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and common_base_packages is changed)

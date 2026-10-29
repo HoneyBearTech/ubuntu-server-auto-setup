@@ -309,6 +309,20 @@ then the ISO build and another test VM (`test-03`, VM ID `9003`, address `192.0.
 
   `auditctl -l` must list the `identity`, `sudoers`, `sshd`, `time-change`, `modules` and `audit-*` rules.
 
+- [ ] **A RHEL-family server**, if the release touches the baseline (containers have no SELinux): on a Rocky
+  Linux or AlmaLinux VM in the inventory (any one is enough; record which), run the baseline, then move SSH to
+  another port, which needs SELinux's port label:
+
+  ```bash
+  make baseline LIMIT=<rhel-vm>
+  make baseline LIMIT=<rhel-vm> ARGS="-e ssh_port=2222"
+  ssh -t -p 2222 <admin>@<address> 'getenforce; sudo semanage port -l | grep ^ssh_port_t; sudo firewall-cmd --list-rich-rules; sudo fail2ban-client status sshd; systemctl is-enabled dnf-automatic.timer'
+  make baseline LIMIT=<rhel-vm> ARGS="-e ssh_port=2222"
+  ```
+
+  `getenforce` must say `Enforcing`, `ssh_port_t` must list 2222, the rich rules must allow 2222 and not 22,
+  and the last run must report `changed=0`.
+
 Run the playbooks once through the web UI of the image under test, and the second runs from the CLI in a
 checkout of the same commit (`make build-installer`, `make provision LIMIT=test-01`,
 `make baseline LIMIT=test-01`), so both paths are covered. `make site LIMIT=test-01` runs all three.
