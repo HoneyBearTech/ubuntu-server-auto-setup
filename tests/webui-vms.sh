@@ -37,7 +37,9 @@ if [ -z "$IMAGE" ]; then
   IMAGE=usas:vms
   docker build -q -t "$IMAGE" . >/dev/null
 fi
-docker build -q -t usas-test-srv:latest tests/images/ubuntu-target >/dev/null
+# The stand-in VM is the integration tests' "target" stage (the "updates" stage swaps in a test package repository),
+# tagged for this test only so a make test running next to it keeps its own image.
+docker build -q --target target -t usas-vms-srv:latest tests/images/ubuntu-target >/dev/null
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=pve-mock \
   -addext "subjectAltName=DNS:pve-mock,IP:127.0.0.1" -keyout "$TMP/api.key" -out "$TMP/api.crt" >/dev/null 2>&1
@@ -51,7 +53,7 @@ docker network create "$NET" >/dev/null
 
 # A VM someone else set up: Ubuntu 26.04 with the image's own user "ubuntu", passwordless sudo, nothing of ours.
 docker run -d --name "$SRV" --hostname app-4071 --network "$NET" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock usas-test-srv:latest >/dev/null
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock usas-vms-srv:latest >/dev/null
 docker exec "$SRV" sh -c 'usermod -aG sudo ubuntu \
   && echo "ubuntu ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/91-ubuntu && chmod 0440 /etc/sudoers.d/91-ubuntu \
   && install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.ssh && echo "127.0.1.1 app-4071" >> /etc/hosts'
