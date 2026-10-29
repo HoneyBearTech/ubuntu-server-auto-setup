@@ -59,7 +59,7 @@ def test_a_server_in_the_inventory_keeps_its_own_settings():
     target = plan.targets[0]
     assert (target.name, target.static, target.address, target.source, target.user) == (
         "web-00", True, "10.0.0.10", "inventory", "sysadmin")
-    host = load_yaml(plan.inventory)["all"]["children"]["ubuntu_servers"]["hosts"]["web-00"]
+    host = load_yaml(plan.inventory)["all"]["children"]["servers"]["hosts"]["web-00"]
     # Only the pinned host key and its own SSH master connection: address, user and sudo come from the inventory.
     assert set(host) == {"ansible_ssh_common_args", "ansible_control_path"}
     assert "HostKeyAlias=usas-pve-4000" in host["ansible_ssh_common_args"]
@@ -78,9 +78,9 @@ def test_a_vm_outside_the_inventory_gets_no_secrets():
     assert "vault_" not in plan.inventory
     assert host["admin_sudo_nopasswd"] is True and host["manage_hostname"] is False
     assert host["ansible_user"] == host["admin_user"] == "ubuntu" and host["ansible_port"] == 2222
-    assert host["webui_ufw_allow_host"] == [{"port": "8080", "proto": "tcp"},
+    assert host["webui_firewall_allow_host"] == [{"port": "8080", "proto": "tcp"},
                                             {"port": "53", "proto": "udp", "from": "10.0.0.0/24"}]
-    assert host["ufw_allow"].startswith("{{") and host["usas_vmid"] == 101
+    assert host["firewall_allow"].startswith("{{") and host["usas_vmid"] == 101
     assert host["ansible_control_path"] == "%(directory)s/v101-%%C"
     # Typed values are !unsafe: Ansible never templates them.
     raw = yaml.safe_load(plan.inventory.replace("!unsafe", ""))

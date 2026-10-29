@@ -309,7 +309,7 @@ describe("the hardening page", () => {
     await loaded();
     const form = document.querySelector("main form") as HTMLFormElement;
     expect([...form.querySelectorAll("fieldset > legend")].map((l) => l.textContent)).toEqual(
-      ["SSH", "Firewall (UFW)", "Fail2Ban", "Extra hardening (off by default)", "Notifications", "Mail relay"]);
+      ["SSH", "Firewall", "Fail2Ban", "Extra hardening (off by default)", "Notifications", "Mail relay"]);
     expect(input("Kernel and network settings (sysctl)").checked).toBe(false);
     expect(input("Webhook for bans").type).toBe("password");
     // Nothing is saved yet, so there is nothing to remove.
@@ -576,7 +576,7 @@ describe("the run page", () => {
     expect(screen.getByText(/Some steps aren't done yet/)).toBeTruthy();
     expect((screen.getByLabelText("build-installer") as HTMLInputElement).checked).toBe(true);
     expect(screen.getByText(/playbooks\/baseline.yml --tags ssh_keys/)).toBeTruthy();
-    expect(screen.getByText(/Known: all, db-01, ubuntu_servers, web-01/)).toBeTruthy();
+    expect(screen.getByText(/Known: all, db-01, servers, web-01/)).toBeTruthy();
     await userEvent.click(screen.getByLabelText("provision"));
     await userEvent.click(screen.getByLabelText("Check mode"));
     await userEvent.type(input("Limit"), "web-01");
@@ -585,15 +585,15 @@ describe("the run page", () => {
     expect(api.posts("/api/run")[0].body).toEqual({ playbook: "provision", check: "on", limit: "web-01" });
   });
 
-  it("shows where build-installer puts the ISO", async () => {
+  it("shows where build-installer puts each ISO", async () => {
     new FakeApi();
     renderAt("/run");
     await loaded();
-    expect(screen.getByText(/is shared by the cluster: the ISO is built once, on one node/)).toBeTruthy();
+    expect(screen.getByText(/is shared by the cluster: each ISO is built once, on one node/)).toBeTruthy();
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows.map((r) => r.textContent)).toEqual([
-      "ares (no SSH address yet)db-01synology-nfs (shared)this node",
-      "hephaestusweb-01synology-nfs (shared)ares",
+      "ares (no SSH address yet)db-01synology-nfs (shared)ubuntu-26.04.1-live-server-amd64.isothis node",
+      "hephaestusweb-01synology-nfs (shared)ubuntu-26.04.1-live-server-amd64.isoares",
     ]);
   });
 
@@ -604,7 +604,7 @@ describe("the run page", () => {
     });
     renderAt("/run");
     await loaded();
-    expect(screen.getByText(/is each node's own: the ISO is built on one node/)).toBeTruthy();
+    expect(screen.getByText(/is each node's own: each ISO is built on one node/)).toBeTruthy();
     expect(screen.getByText(/to find out whether local is/)).toBeTruthy();
     cleanup();
     new FakeApi({ "GET /api/run": () => ({ ...fixtures.runPage, iso_plan: { ...fixtures.runPage.iso_plan, pairs: [], builders: [] } }) });

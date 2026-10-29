@@ -9,7 +9,7 @@ first and written as !unsafe.
 Credentials follow the static inventory, never the VM's tags or description (which anyone who may edit the VM
 can set): a VM whose VM ID is a server's pve_vmid on the Servers page runs as that server, with its address and
 settings. Any other VM is named vm-<vmid> (never its Proxmox name, which could match a host_vars file), goes in
-the group usas_vms (which inherits none of ubuntu_servers' variables), and gets none of the Vault's secrets: no
+the group usas_vms (which inherits none of the servers group's variables), and gets none of the Vault's secrets: no
 admin password, no sudo password, no relay password or webhook URL. Every host connects with its host keys
 pinned by cluster and VM ID (sshkeys.vm_alias).
 """
@@ -193,8 +193,8 @@ def host_vars(target: Target, settings: Settings) -> dict[str, Any]:
     if target.manage_hostname:
         host["server_hostname"] = Unsafe(target.pve_name)
     if target.ufw:
-        host["webui_ufw_allow_host"] = [{k: Unsafe(val) for k, val in rule.items()} for rule in target.ufw]
-        host["ufw_allow"] = "{{ (webui_ufw_allow | default([])) + webui_ufw_allow_host }}"
+        host["webui_firewall_allow_host"] = [{k: Unsafe(val) for k, val in rule.items()} for rule in target.ufw]
+        host["firewall_allow"] = "{{ (webui_firewall_allow | default([])) + webui_firewall_allow_host }}"
     if target.override:
         host["baseline_allow_unsupported"] = True
     host.update(common)
@@ -209,7 +209,7 @@ def inventory_text(targets: list[Target], settings: Settings) -> str:
     if foreign:
         children[GROUP] = {"hosts": foreign}
     if static:
-        children["ubuntu_servers"] = {"hosts": static}
+        children["servers"] = {"hosts": static}
     header = ("# The hosts of one VMs page run, written by the web UI. Kept with the run for the record; it holds\n"
               "# no secrets.\n")
     return header + dump_yaml({"all": {"children": children}})

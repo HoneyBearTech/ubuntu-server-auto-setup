@@ -54,8 +54,8 @@ def set_up(ui: UI) -> None:
     check(ui.post("/defaults", {"action": "save", **defaults})[0] == 200, "the defaults are saved")
     hardening = {"ssh_port": "22", "ssh_permit_root_login": "no", "fail2ban_sshd_mode": "normal",
                  "fail2ban_maxretry": "5", "fail2ban_findtime": "10m", "fail2ban_bantime": "1h",
-                 "fail2ban_bantime_maxtime": "1w", "ufw_ssh_sources": "any", "ufw_ssh_limit": "on",
-                 "fail2ban_bantime_increment": "on", "ufw_allow": "9100/tcp from 10.10.10.0/24"}
+                 "fail2ban_bantime_maxtime": "1w", "firewall_ssh_sources": "any", "firewall_ssh_limit": "on",
+                 "fail2ban_bantime_increment": "on", "firewall_allow": "9100/tcp from 10.10.10.0/24"}
     check(ui.post("/hardening", hardening)[0] == 200, "the hardening settings are saved")
     # Whoever runs the VM lets the UI's key in for its user (the page says so).
     docker("exec", ARGS.srv, "sh", "-c", f"echo '{public}' > /home/ubuntu/.ssh/authorized_keys && "
