@@ -142,7 +142,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
   needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
-  boundary B20 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
+  boundary B21 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
 
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
