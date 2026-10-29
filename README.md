@@ -305,6 +305,8 @@ still read until 1.0)
 | `ssh_allow_users` | `[]` | If set, only these users may log in over SSH (it must include `admin_user`; the run refuses otherwise). |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
 | `firewall_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
+| `firewall_ssh_limit_rate` | `30/m` | On firewalld (the RHEL family), the rate of new SSH connections allowed from all sources together; UFW limits each source on its own. |
+| `fail2ban_enabled` | `true` | Install and configure Fail2Ban (from EPEL on the RHEL family). |
 | `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
 | `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
