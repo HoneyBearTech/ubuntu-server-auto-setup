@@ -112,7 +112,7 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   own folder (not a link, mode `0700`) and that it can write to the ISO folder, before it downloads
   anything. It doesn't install packages; it checks that `xorriso` and `gpgv` are there.
 
-**Baseline** (on every server in `ubuntu_servers`, whether this project installed it or not)
+**Baseline** (on every server in `servers`, whether this project installed it or not)
 
 - SSH: no root login, no password or keyboard-interactive authentication (public key only), at most 3
   authentication attempts, a 30-second login grace time, unresponsive sessions dropped, X11 and agent forwarding
@@ -122,7 +122,7 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   baseline run or `make keys`; a key removed from GitHub is removed from the servers. An empty or failed
   response from GitHub never empties the file: the run stops instead.
 - UFW denies all incoming connections except SSH (rate-limited: more than 6 connections in 30 seconds from
-  one address are refused) and the rules you list in `ufw_allow`.
+  one address are refused) and the rules you list in `firewall_allow`.
 - Fail2Ban bans addresses that fail SSH authentication 5 times in 10 minutes for an hour, longer for
   repeat offenders (up to a week), except those in `fail2ban_ignoreip`.
 - Security updates (including Ubuntu Pro ESM security updates where enabled) are installed automatically
@@ -208,7 +208,7 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   write holds, or install anything that isn't an update of an installed package or its new dependency.
 - It never turns off package signature checks: apt checks every package against the server's own keyrings
   (`tests/updates.sh` fails if the role names an option that would turn that off).
-- A server outside `ubuntu_servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
+- A server outside `servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
   password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
   there could read it. Host keys are checked strictly on every connection, as for every playbook.
 - What servers report (package names, versions, services) is checked against the role's patterns, stripped
@@ -437,7 +437,7 @@ in the trust store, and how to do the same in the web UI's data volume.
   default), so an SSH key alone doesn't give root afterwards. Until that first baseline run finishes, anyone
   with one of the authorized keys has root. Setting `admin_sudo_nopasswd: true` keeps passwordless `sudo`.
 - **Your inventory.** The project does what the inventory says. A wrong `pve_vmid`, `ssh_port`,
-  `ufw_allow`, `ufw_ssh_sources` or `fail2ban_ignoreip` can create the wrong VM, open a port you didn't
+  `firewall_allow`, `firewall_ssh_sources` or `fail2ban_ignoreip` can create the wrong VM, open a port you didn't
   mean to, or lock you out.
 - **The servers' applications and wider hardening.** The baseline covers access (SSH, firewall, brute
   force) and updates. It isn't a CIS or STIG benchmark, and it doesn't configure anything your applications

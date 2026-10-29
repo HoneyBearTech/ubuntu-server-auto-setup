@@ -25,3 +25,5 @@ pve_api_dropped_pattern: >-
 # Files in which Ubuntu's installer keeps its configuration on the installed system (root-only).
 provision_installer_config_copies:
   - /var/log/installer/autoinstall-user-data
+# The inventory's servers: the group servers, and ubuntu_servers, its name before 0.7.0 (read until 1.0).
+pve_plan_server_group: "{{ groups['servers'] | default([]) + groups['ubuntu_servers'] | default([]) }}"

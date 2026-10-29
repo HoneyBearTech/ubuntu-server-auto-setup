@@ -32,6 +32,12 @@ NOT_FORM_FORMATS = frozenset({
     # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
     "provision_nic_keys",
     "provision_installer_config_copies",
+    # A server's OS: checked by the roles (roles/os_catalog/tasks/select.yml); an image outside the catalog is
+    # set in the inventory, not in the UI.
+    "os_catalog_id_pattern", "os_catalog_install_methods", "os_catalog_families", "vm_os_image_url_pattern",
+    "vm_os_image_sha256_pattern",
+    # The inventory's server groups (servers, and ubuntu_servers before 0.7.0), for build-installer's plan.
+    "pve_plan_server_group",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
@@ -236,7 +242,8 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_sudo_nopasswd", "Passwordless sudo for the admin user", "bool", "common",
           help="Off by default: the first run removes the installer's passwordless sudo, and later runs use "
                "the admin password. On is convenient, but anyone with an authorized key has root."),
-        S("ufw_ssh_limit", "Rate-limit SSH in the firewall", "bool", "firewall"),
+        S("ufw_ssh_limit", "Rate-limit SSH in the firewall", "bool", "firewall",
+          help="6 new connections in 30 seconds per source, instead of a plain allow."),
         S("ufw_ssh_sources", "SSH allowed from", "list", "firewall", ui_pattern=UFW_FROM,
           help='"any", or addresses and networks (CIDR), one per line.'),
         S("ufw_allow", "Extra firewall rules (all servers)", "list", "firewall", ui_pattern="ufw_rule",

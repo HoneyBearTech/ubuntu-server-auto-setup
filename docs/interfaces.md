@@ -28,10 +28,11 @@ API for other programs. What should be reachable from where is described in the
 | --- | --- | --- |
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
-| `ubuntu_servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `ubuntu_servers` | the group's name before 0.7.0: still read, with `servers`, until 1.0 (each run says so) | as in `servers` |
 | `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
-| `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `ubuntu_servers` and `other_servers` |
-| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
+| `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `servers`, `ubuntu_servers` and `other_servers` |
+| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `servers:ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
 ### Inventory variables
 
@@ -53,12 +54,23 @@ example shows a typical value.
 | `admin_extra_ssh_keys` | `[]` | More public keys, one per list item. |
 | `ssh_port` | `22` | The SSH port the baseline configures, opens in UFW and watches with Fail2Ban. |
 
-**Ubuntu release and ISOs** (`os_catalog`, `installer_iso`)
+**Operating system** (`os_catalog`; per server, or for all servers)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ubuntu_release` | `"26.04"` | The Ubuntu release, and the release directory on the mirror. |
-| `ubuntu_point_release` | `""` | The point release whose ISO is downloaded. Empty means the one the OS catalog pins for `ubuntu_release` (26.04.1 today), checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed `SHA256SUMS` at run time. |
+| `vm_os` | `ubuntu-26.04` | The server's operating system: an id from the [OS catalog](#the-os-catalog): `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-26.04`, `debian-12`, `debian-13`, `centos-stream-9`, `centos-stream-10`, `rocky-9`, `rocky-10`, `alma-9`, `alma-10`. A release past its `eol` still installs, with a warning. Until 1.0, a server whose inventory sets `ubuntu_release` gets `ubuntu-<that release>`. |
+| `vm_install_method` | `autoinstall` | How it's installed: `autoinstall`, Ubuntu's installer ISO (Ubuntu only; the disk layouts and disk encryption need it). `cloud_image` (every family) is refused until cloud-image installs land (see the [roadmap](roadmap.md)). |
+| `vm_os_image_url`, `vm_os_image_sha256`, `vm_os_family` | `""` | An image the catalog doesn't have (`cloud_image` only): an `https://` URL of a `.qcow2`, `.img` or `.raw` image (no query string), its SHA-256 in lowercase hexadecimal, and its family (`ubuntu`, `debian` or `rhel`; not needed when `vm_os` is in the catalog). The image is checked against that checksum only, so take both from a source you trust. |
+
+Every server's settings are checked before anything is created or downloaded: `vm_os` must be in the catalog
+(or come with an image), the install method must suit it, and `ubuntu_release` may only agree with it.
+
+**Ubuntu installer ISOs** (`os_catalog`, `installer_iso`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ubuntu_release` | from `vm_os` | The Ubuntu release of the installer ISO, and the release directory on the mirror: `vm_os`'s for an Ubuntu `vm_os`. Before 0.7.0 it chose the release; it's still read until 1.0 (then `vm_os` follows it), but setting `vm_os` is the way now. |
+| `ubuntu_point_release` | `""` | The point release whose ISO is downloaded. Empty means the one the OS catalog pins for `ubuntu_release` (26.04.1 today), checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed `SHA256SUMS` at run time. Deprecated: it's read until 1.0. |
 | `ubuntu_iso_base_url` | `https://releases.ubuntu.com/{{ ubuntu_release }}` | Where the ISO comes from; any mirror works for the point release the catalog pins, since the catalog's checksum decides. For another point release, `SHA256SUMS` and its signature `SHA256SUMS.gpg` come from here too, so the mirror must publish all three. |
 | `pve_iso_storage` | `local` | The Proxmox storage for the installer and seed ISOs. It must allow ISO images (Datacenter → Storage → Content: ISO image) on each node that uses it. The installer ISO is built once in a storage the cluster shares (such as NFS), and on every node that uses a node-local one. |
 | `pve_iso_dir` | `""` | The storage's folder on the node. Empty means it is asked from Proxmox (`pvesm path`, or for a user other than root the answer `prepare-node.yml` recorded), such as `/var/lib/vz/template/iso` for `local` or `/mnt/pve/<id>/template/iso` for NFS; set it only to override that. |
@@ -66,7 +78,7 @@ example shows a typical value.
 | `pve_ssh_user` | `root` | The user the playbooks log in to the Proxmox nodes as (a lowercase Linux user name); the `proxmox_nodes`' `ansible_user` must match, which the roles check. Any other user than `root` needs `prepare-node.yml` first, on every node the servers use; the roles then read the ISO storage's folder from `/etc/ubuntu-server-auto-setup/iso-dirs.json` (`pvesm` runs for root only), check they can write to it, and check that `xorriso` and `gpgv` are installed instead of installing them. |
 | `installer_grub_timeout` | `3` | Seconds the installer's GRUB menu waits. |
 | `installer_iso_rebuild` | `false` | Rebuild the remastered ISO even if it exists. |
-| `installer_iso_storages` | `[]` | Set by `build-installer.yml` on each node it chooses: the ISO storages that node builds the ISO in. Empty means `pve_iso_storage`; don't set it yourself. |
+| `installer_isos` | `[]` | Set by `build-installer.yml` on each node it chooses: the installer ISOs that node builds (one per Ubuntu release its servers use with `autoinstall`) and in which ISO storages. Empty means the node's own release in `pve_iso_storage`; don't set it yourself. |
 | `installer_signing_keyring` | `ubuntu-cdimage-keyring.gpg` | The binary OpenPGP keyring `SHA256SUMS.gpg` is checked against, on the control node: a file in `roles/installer_iso/files/` or an absolute path. The default holds only Ubuntu's CD image signing key. |
 | `installer_signing_fingerprint` | `843938DF228D22F7B3742BC0D94AA3F0EFE21092` | The full fingerprint of the key that must have signed `SHA256SUMS` (Ubuntu CD Image Automatic Signing Key (2012), as published at [ubuntu.com](https://ubuntu.com/tutorials/how-to-verify-ubuntu)). Change it, with the keyring, only for a mirror that signs its own `SHA256SUMS`. |
 
@@ -132,7 +144,7 @@ example shows a typical value.
 | `manage_hostname` | `true` | Set the hostname and `/etc/hosts` entry. Turn off where the platform owns the hostname. |
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
 | `timezone` | `Etc/UTC` | The timezone. |
-| `apt_upgrade` | `dist` | `dist`, `safe`, `full` or `"no"`. |
+| `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. Its name before 0.7.0, `apt_upgrade`, is still read until 1.0. |
 | `reboot_if_required` | `false` | Reboot when upgrades ask for it. |
 | `common_packages` | `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim` | Packages installed on every server. |
 | `unattended_upgrades_origins` | release, security and ESM security pockets | What unattended-upgrades installs. |
@@ -143,11 +155,16 @@ example shows a typical value.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ufw_default_incoming`, `ufw_default_outgoing` | `deny`, `allow` | Default policies. |
-| `ufw_logging` | `low` | UFW log level. |
-| `ufw_ssh_limit` | `true` | Rate-limit SSH (`limit`) instead of a plain allow. |
-| `ufw_ssh_sources` | `[any]` | Where SSH is allowed from. |
-| `ufw_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
+| `firewall_default_incoming` | `deny` | The default policy for incoming connections. |
+| `ufw_default_outgoing` | `allow` | UFW's default policy for outgoing connections. |
+| `firewall_logging` | `low` | How much the firewall logs (UFW's log level). |
+| `firewall_ssh_limit` | `true` | Rate-limit SSH (`limit`) instead of a plain allow. |
+| `firewall_ssh_sources` | `[any]` | Where SSH is allowed from. |
+| `firewall_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
+
+The `firewall_*` names are new in 0.7.0. Their names before, `ufw_default_incoming`, `ufw_logging`,
+`ufw_ssh_limit`, `ufw_ssh_sources` and `ufw_allow`, are still read until 1.0: a `firewall_*` setting takes the
+old name's value unless it's set itself, and each run says which old names the inventory still uses.
 
 **Baseline: SSH** (`ssh_hardening`)
 
@@ -267,8 +284,8 @@ A `dhcp` card in `vm_extra_nics` takes neither the default route nor DNS servers
 are `optional`, so booting doesn't wait for them. There must be exactly one default route: a check stops
 provisioning otherwise. IPv6 isn't configured yet (`dhcp6` is off on every card).
 
-The firewall's rules aren't bound to an interface: SSH and every `ufw_allow` rule are open on every card,
-VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and use `from` in `ufw_allow`.
+The firewall's rules aren't bound to an interface: SSH and every `firewall_allow` rule are open on every card,
+VLANs included. To allow SSH from one network only, set `firewall_ssh_sources`, and use `from` in `firewall_allow`.
 
 ### Vault variables
 
@@ -287,13 +304,13 @@ VLANs included. To allow SSH from one network only, set `ufw_ssh_sources`, and u
 | Command | Playbook | Hosts | Effect |
 | --- | --- | --- | --- |
 | `make prepare-node` | `playbooks/prepare-node.yml` | `proxmox_nodes` | Optional, once, as root: create `pve_ssh_user` (no password, no sudo, its `authorized_keys`), install `xorriso`, `gpgv` and `acl`, hand it the work directory, add an ACL entry for it on each ISO storage's folder, and record those folders in `/etc/ubuntu-server-auto-setup/iso-dirs.json`. |
-| `make build-installer` | `playbooks/build-installer.yml` | `ubuntu_servers` and `proxmox_nodes` (to plan, through the API), then `pve_iso_build` | Download, verify and remaster the Ubuntu ISO on the nodes the servers use: once per shared ISO storage, on each node for a node-local one (with no server in the run, on each node in it). Changes only the nodes' ISO storage and `xorriso`. |
-| `make provision` | `playbooks/provision-vms.yml` | `ubuntu_servers` | Create and install each VM whose `pve_vmid` doesn't exist. Erases the new VM's disk only. |
-| `make baseline` | `playbooks/baseline.yml` | `ubuntu_servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
-| `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `ubuntu_servers` | Sync the admin account's authorized keys only. |
+| `make build-installer` | `playbooks/build-installer.yml` | `servers` and `proxmox_nodes` (to plan, through the API), then `pve_iso_build` | Download, verify and remaster the Ubuntu ISO on the nodes the servers use: once per shared ISO storage, on each node for a node-local one (with no server in the run, on each node in it). Changes only the nodes' ISO storage and `xorriso`. |
+| `make provision` | `playbooks/provision-vms.yml` | `servers` | Create and install each VM whose `pve_vmid` doesn't exist. Erases the new VM's disk only. |
+| `make baseline` | `playbooks/baseline.yml` | `servers` | Apply the baseline. Changes users, SSH, the firewall, Fail2Ban, packages and update settings, and the optional hardening and notifications you turn on. |
+| `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
-| `make updates-check` | `playbooks/updates.yml --check` | `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
-| `make updates` | `playbooks/updates.yml` | `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
+| `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |

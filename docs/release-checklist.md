@@ -316,7 +316,7 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
 ## updates
 
 If the release touches `playbooks/updates.yml` or `roles/updates`. Use the test VM from above
-(`test-01`, installed by this run, so it is in `ubuntu_servers`) and, for a server this project didn't
+(`test-01`, installed by this run, so it is in `servers`) and, for a server this project didn't
 install, a disposable Ubuntu 24.04 VM made by hand with an `ops` user that has passwordless sudo and your
 key, added to `other_servers` (`legacy-01` at `192.0.2.20` below). Compare `legacy-01`'s host key with its
 console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it to `known_hosts`.

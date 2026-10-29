@@ -19,7 +19,7 @@ all:
     updates_health_timeout: 60
 
   children:
-    ubuntu_servers:
+    servers:
       vars:
         ansible_user: sysadmin
         ansible_become_password: test-password

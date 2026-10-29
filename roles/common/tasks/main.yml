@@ -58,9 +58,9 @@
 
 - name: Upgrade packages
   ansible.builtin.apt:
-    upgrade: "{{ apt_upgrade }}"
+    upgrade: "{{ pkg_upgrade }}"
     autoremove: true
-  when: apt_upgrade != 'no'
+  when: pkg_upgrade != 'no'
 
 - name: Install base packages
   ansible.builtin.apt:

@@ -34,7 +34,7 @@ In `inventory/hosts.yml`:
 - under `all.vars`, set `github_user` to your GitHub user name, `pve_api_host` to your Proxmox node's
   name or address, and `timezone`;
 - under `proxmox_nodes`, rename `pve-1` to your node's Proxmox name and set its `ansible_host`;
-- under `ubuntu_servers`, set `pve_node`, `pve_storage`, `pve_bridge`, `net_prefix`, `net_gateway`,
+- under `servers`, set `pve_node`, `pve_storage`, `pve_bridge`, `net_prefix`, `net_gateway`,
   `net_dns` and `fail2ban_ignoreip` for your network, then keep one host (say `web-01`) with your free
   `ansible_host` IP and `pve_vmid`, and delete the other.
 
@@ -86,9 +86,9 @@ SSH jail.
 
 ## What next
 
-- Add more hosts to `ubuntu_servers` and run `make site ARGS=--ask-vault-pass`: existing VMs are skipped,
+- Add more hosts to `servers` and run `make site ARGS=--ask-vault-pass`: existing VMs are skipped,
   new ones are installed, and the baseline is applied (again) everywhere.
-- Point the baseline at servers you already have (Ubuntu 24.04 or 26.04): add them to `ubuntu_servers`
+- Point the baseline at servers you already have (Ubuntu 24.04 or 26.04): add them to `servers`
   with their `ansible_host` and `ansible_user`, and run `make baseline LIMIT=<host>`. `make provision` and
   `make site` expect every host in that group to have a `pve_vmid`: give a Proxmox VM its existing ID (it
   is then skipped), and keep servers elsewhere out of those runs with `LIMIT`.
