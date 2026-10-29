@@ -10,6 +10,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Upgrading
 
+- **New names, old ones still read until 1.0** ([docs/upgrading.md](docs/upgrading.md#to-070-new-names)): the
+  group `ubuntu_servers` is now `servers`; `ufw_allow`, `ufw_ssh_sources`, `ufw_ssh_limit`,
+  `ufw_default_incoming` and `ufw_logging` are now `firewall_*`; `apt_upgrade` is now `pkg_upgrade`; and
+  `ubuntu_release` is now `vm_os` (`ubuntu-<release>`). Nothing has to change now: each run lists the old names
+  the inventory still uses. A new name set in the inventory wins over the old one.
 - The role `ubuntu_release` is now `os_catalog`. Only playbooks of your own that list `ubuntu_release` as a
   role or include it (`include_role: name: ubuntu_release`) need the new name; the inventory variables keep
   theirs.
@@ -70,6 +75,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   check again. An audit log (`/data/audit.jsonl`, rotated at 5 MB, three kept) records pinned and forgotten
   host keys, check and real runs with their VMs, addresses and fingerprints, refusals, confirmed OS overrides
   and each run's outcome, with the session and client address; History offers it as a download.
+
+- **`vm_os`, a server's operating system**, from the OS catalog (default `ubuntu-26.04`), for all servers or
+  per server, with `vm_install_method` (`autoinstall`, the Ubuntu installer) and `vm_os_image_url`,
+  `vm_os_image_sha256` and `vm_os_family` for an image the catalog doesn't have. Servers can now run different
+  Ubuntu LTS releases (22.04, 24.04, 26.04) on one cluster: `build-installer.yml` builds each release's
+  installer on the nodes whose servers need it. Every server's OS settings are checked before anything is
+  created or downloaded; a release past its end of support installs with a warning. Debian, CentOS Stream,
+  Rocky Linux and AlmaLinux (`vm_install_method: cloud_image`) are refused until cloud-image installs land.
 
 ### Changed
 

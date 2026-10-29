@@ -2,8 +2,8 @@
 # root SSH, Python for Ansible and xorriso. The tests use it to build the installer ISO and the seed ISOs,
 # as root and as a user that playbooks/prepare-node.yml creates.
 
-# A small stand-in for the Ubuntu live-server ISO, with a SHA256SUMS file in Ubuntu's format, signed like
-# Ubuntu signs it (SHA256SUMS.gpg) with a test key made here. The private key stays in this build stage;
+# Small stand-ins for the Ubuntu 26.04.1 and 24.04.5 live-server ISOs, with a SHA256SUMS file in Ubuntu's format,
+# signed like Ubuntu signs it (SHA256SUMS.gpg) with a test key made here. The private key stays in this build stage;
 # the node gets only the public keyring and its fingerprint, which tests/run.sh hands to the role. tampered/
 # is a mirror that swapped in another checksum but kept the signature; unsigned/ has no signature at all.
 FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS release
@@ -18,7 +18,9 @@ RUN mkdir -p /srv/iso-tree/casper /srv/ubuntu/tampered /srv/ubuntu/unsigned /srv
  && echo initrd > /srv/iso-tree/casper/initrd \
  && xorriso -as mkisofs -quiet -volid "Ubuntu-Server 26.04.1 LTS amd64" -joliet -rock \
       -output /srv/ubuntu/ubuntu-26.04.1-live-server-amd64.iso /srv/iso-tree \
- && cd /srv/ubuntu && sha256sum --binary ubuntu-26.04.1-live-server-amd64.iso > SHA256SUMS \
+ && xorriso -as mkisofs -quiet -volid "Ubuntu-Server 24.04.5 LTS amd64" -joliet -rock \
+      -output /srv/ubuntu/ubuntu-24.04.5-live-server-amd64.iso /srv/iso-tree \
+ && cd /srv/ubuntu && sha256sum --binary ubuntu-26.04.1-live-server-amd64.iso ubuntu-24.04.5-live-server-amd64.iso > SHA256SUMS \
  && mkdir -m 700 "$GNUPGHOME" \
  && gpg --batch --quiet --passphrase '' --quick-gen-key 'Integration test signing key <test@invalid>' ed25519 sign never \
  && gpg --batch --quiet --armor --detach-sign --output SHA256SUMS.gpg SHA256SUMS \

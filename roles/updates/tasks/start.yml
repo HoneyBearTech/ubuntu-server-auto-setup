@@ -143,7 +143,7 @@
       or (vault_admin_password | default('') | string | length == 0)
       or (ansible_become_password | string) != (vault_admin_password | string)
     fail_msg: >-
-      {{ inventory_hostname }} isn't a server this project installed (it isn't in ubuntu_servers with a pve_vmid),
+      {{ inventory_hostname }} isn't a server this project installed (it isn't in servers with a pve_vmid),
       but its ansible_become_password is the Vault admin password: root on it could read it. Give its group its
       own sudo password in the Vault, use passwordless sudo there, or set updates_allow_shared_become_password:
       true for it.
