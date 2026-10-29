@@ -1,7 +1,7 @@
 # Stands in for a VM the Ubuntu installer has just set up: Ubuntu with systemd, SSH (socket-activated from
 # 24.04 on), sudo-rs on 26.04 and the admin user with passwordless sudo, as the autoinstall user-data leaves
-# it. D-Bus and python3-apt are on every Ubuntu Server; check mode needs them before the baseline has installed
-# anything.
+# it. D-Bus, python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs
+# them before the baseline has installed anything.
 # The package lists are kept, as on an installed server: the apt module judges them by the directory's age, so
 # emptied lists from a build minutes ago would count as fresh and never be refreshed.
 #
@@ -25,7 +25,7 @@ RUN . /etc/os-release \
  && if [ "$VERSION_ID" = 26.04 ]; then sudo_rs=sudo-rs; else sudo_rs=; fi \
  && apt-get update \
  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server python3 python3-apt sudo $sudo_rs \
-      iproute2 ca-certificates \
+      iproute2 ca-certificates tzdata \
  && useradd -m -s /bin/bash -G sudo sysadmin \
  && echo 'sysadmin:test-password' | chpasswd \
  && echo 'sysadmin ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-ansible-sysadmin \
