@@ -1,16 +1,16 @@
 # Stands in for a VM the Ubuntu installer has just set up: Ubuntu with systemd, SSH (socket-activated from
 # 24.04 on), sudo-rs on 26.04 and the admin user with passwordless sudo, as the autoinstall user-data leaves
-# it. D-Bus and python3-apt are on every Ubuntu Server; check mode needs them before the baseline has installed
-# anything.
+# it. D-Bus, python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs
+# them before the baseline has installed anything.
 # The package lists are kept, as on an installed server: the apt module judges them by the directory's age, so
 # emptied lists from a build minutes ago would count as fresh and never be refreshed.
 #
 # OS picks the release (ubuntu-26.04, ubuntu-24.04, ubuntu-22.04, debian-13, debian-12, centos-stream-10,
 # centos-stream-9, rocky-10, rocky-9, alma-10 or alma-9). Debian and the RHEL family stand in for a VM installed
 # from the vendor's cloud image: classic sudo, sshd from its service (no socket activation), the admin user (in
-# wheel on the RHEL family) with the sudoers file the cloud-init seed writes. The integration tests build the "target" stage; the
-# updates tests build "updates", which adds a signed apt repository with updates to install (test-repo.sh) and a
-# boot ID that changes when the container restarts.
+# wheel on the RHEL family) with the sudoers file the cloud-init seed writes. The integration tests build the
+# "target" stage; the updates tests build "updates", which adds a signed apt repository with updates to install
+# (test-repo.sh) and a boot ID that changes when the container restarts.
 ARG OS=ubuntu-26.04
 FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944 AS ubuntu-26.04
 FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS ubuntu-24.04
@@ -62,7 +62,8 @@ RUN /usr/local/bin/test-repo.sh /srv/usas-test-repo
 # A server with updates waiting: the test packages' old versions installed (usas-test-held held), Ubuntu's own
 # archive replaced by the test repository so nothing comes from the network, and the tools a real server has
 # (unattended-upgrades and needrestart, whose reports the playbook reads). The apt timers never fire, so they
-# can't take the package lock in the middle of a test.
+# can't take the package lock in the middle of a test. Every test connection comes from Docker's one address, so
+# OpenSSH 9.8+'s per-source penalties (on 26.04) would soon refuse it after the tests' host key scans: off here.
 FROM target AS updates
 COPY --from=test-repo /srv/usas-test-repo /srv/usas-test-repo
 COPY boot-id.service /etc/systemd/system/usas-boot-id.service
@@ -82,4 +83,6 @@ RUN apt-get update \
  && printf '[Timer]\nOnCalendar=\nOnCalendar=2099-01-01\nPersistent=false\nRandomizedDelaySec=0\n' \
       | tee /etc/systemd/system/apt-daily.timer.d/never.conf > /etc/systemd/system/apt-daily-upgrade.timer.d/never.conf \
  && systemctl enable usas-boot-id.service \
+ && if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then \
+      echo 'PerSourcePenalties no' > /etc/ssh/sshd_config.d/50-usas-test.conf; fi \
  && apt-get update

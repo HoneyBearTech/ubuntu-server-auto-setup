@@ -340,6 +340,24 @@ jobs:
           docker rm -f usas-ps
           docker volume rm usas-ps-data
 
+  vms:
+    name: VMs page integration
+    # Pull requests only (VM monitor design, open question 16): it builds the image again and runs the
+    # baseline on a systemd container for real.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The image, the mock Proxmox API and an Ubuntu 26.04 systemd container standing in for a VM the
+      # project didn't create: pin its host key, a check run, the real run after a confirmation, a second
+      # check that changes nothing, a guest claiming another VM's address refused, and the audit log.
+      - name: Build the image and run the VMs page's runs
+        run: tests/webui-vms.sh
+
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest

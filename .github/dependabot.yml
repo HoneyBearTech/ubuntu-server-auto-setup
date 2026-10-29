@@ -62,3 +62,7 @@ updates:
       # never LTS and reach end of life within months (25 did in June 2026).
       - dependency-name: "node"
         versions: [">= 25, < 26", ">= 27, < 28", ">= 29, < 30"]
+      # The test target image has one stage per Ubuntu LTS release it tests (22.04, 24.04, 26.04): only their
+      # digests may move, never their release (a new LTS gets a stage of its own).
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

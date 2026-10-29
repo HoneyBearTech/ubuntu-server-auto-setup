@@ -223,6 +223,11 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - A server outside `servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
   password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
   there could read it. Host keys are checked strictly on every connection, as for every playbook.
+- With the cluster inventory, a VM outside your inventory is named `vm-<vmid>` (never after its Proxmox name
+  or tags, so it can't pick up another host's variables) and reached only with its host key pinned under its
+  VM ID (`usas-<cluster>-<vmid>`): a guest that reports another VM's address gets a refused connection, and
+  a key that isn't pinned is reported, never trusted. Stopped, locked, opted-out and other VMs it mustn't
+  update are reported without being contacted.
 - What servers report (package names, versions, services) is checked against the role's patterns, stripped
   of control characters and capped at 5,000 entries per list before it reaches the report, which is
   readable only by the control node's user.
