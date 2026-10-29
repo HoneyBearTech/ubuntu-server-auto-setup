@@ -6,9 +6,10 @@ storages), any storages per node and any set of hosts in the run:
 - the node check reports exactly the placements whose node the cluster doesn't have, and suggests a name only
   when it differs from a real one by case alone;
 - the storage check reports exactly the placements whose storage isn't active on their node;
-- every (node, node-local storage) pair is built by that node's SSH host if it is in the run, and skipped
-  otherwise; every shared storage is built exactly once, by the SSH host of a node that uses it and is in the
-  run, or skipped if there is none; nothing else is built, and every builder is in the run;
+- every installer ISO a placement needs on a (node, node-local storage) pair is built by that node's SSH host if
+  it is in the run, and skipped otherwise; every ISO needed on a shared storage is built there exactly once, by
+  the SSH host of a node that needs it there and is in the run, or skipped if there is none; nothing else is
+  built, every builder is in the run, and a build's storages are exactly its ISOs' storages;
 - a node name the roles accept (provision_hostname_pattern) is safe in an API path as it is.
 """
 
@@ -24,6 +25,8 @@ PLAN = roles.filter_plugin("proxmox_vm", "pve_cluster")
 NODE_PATTERN = roles.role_vars("proxmox_vm")["provision_hostname_pattern"]
 NAMES = ["pve-a", "pve-b", "PVE-A", "pve-c", ""]
 STORAGES = ["local", "nfs", "cephfs", "usb"]
+ISOS = [{"name": n, "release": r, "point_release": "", "base_url": f"https://releases.ubuntu.com/{r}"}
+        for n, r in (("ubuntu-26.04.1-live-server-amd64.iso", "26.04"), ("ubuntu-24.04.5-live-server-amd64.iso", "24.04"))]
 
 
 def one_input(data):
@@ -36,7 +39,8 @@ def one_input(data):
     for i in range(fdp.ConsumeIntInRange(0, 8)):
         node = fdp.PickValueInList(NAMES)
         placements.append({"host": f"srv-{i}", "node": node, "storage": fdp.PickValueInList(STORAGES),
-                           "ssh_host": node if fdp.ConsumeIntInRange(0, 3) else f"ssh-{node}"})
+                           "ssh_host": node if fdp.ConsumeIntInRange(0, 3) else f"ssh-{node}",
+                           "isos": [iso for iso in ISOS if fdp.ConsumeBool()]})
     hosts = sorted({p["ssh_host"] for p in placements})
     in_run = [h for h in hosts if fdp.ConsumeIntInRange(0, 3)] + [f"srv-{i}" for i in range(len(placements))]
 
@@ -53,32 +57,36 @@ def one_input(data):
 
     usable = [p for p in known if node_storages[p["node"]].get(p["storage"], {}).get("active")]
     plan = PLAN.pve_iso_builds(usable, node_storages, in_run)
-    built = {(b["host"], s) for b in plan["builds"] for s in b["storages"]}
+    built = {(b["host"], i["storage"], i["name"]) for b in plan["builds"] for i in b["isos"]}
     assert all(b["host"] in in_run for b in plan["builds"]), plan
-    assert len(built) == sum(len(b["storages"]) for b in plan["builds"]), plan  # no storage twice on a host
+    assert len(built) == sum(len(b["isos"]) for b in plan["builds"]), plan  # no ISO twice in a storage on a host
+    assert all(b["storages"] == sorted({i["storage"] for i in b["isos"]}) for b in plan["builds"]), plan
     pairs = {}
     for p in usable:
-        pairs.setdefault((p["node"], p["storage"]), p["ssh_host"])
+        pair = pairs.setdefault((p["node"], p["storage"]), (p["ssh_host"], set()))
+        pair[1].update(iso["name"] for iso in p["isos"])
     expected = set()
     skipped = []
-    for (node, storage), ssh_host in pairs.items():
+    for (node, storage), (ssh_host, isos) in pairs.items():
         if shared[storage]:
             continue
-        if ssh_host in in_run:
-            expected.add((ssh_host, storage))
-        else:
-            skipped.append((node, storage))
-    for storage in {s for (_, s) in pairs if shared[s]}:
-        users = {h for (n, s), h in pairs.items() if s == storage}
-        builders = {h for (h, s) in built if s == storage}
+        for iso in isos:
+            if ssh_host in in_run:
+                expected.add((ssh_host, storage, iso))
+            else:
+                skipped.append((node, storage, iso))
+    for storage, iso in {(s, i) for (_, s), (_, isos) in pairs.items() if shared[s] for i in isos}:
+        users = {h for (_, s), (h, isos) in pairs.items() if s == storage and iso in isos}
+        builders = {h for (h, s, i) in built if s == storage and i == iso}
         if users & set(in_run):
-            assert len(builders) == 1 and builders <= users, (storage, builders, users)
-            expected |= {(h, storage) for h in builders}
+            assert len(builders) == 1 and builders <= users, (storage, iso, builders, users)
+            expected |= {(h, storage, iso) for h in builders}
         else:
-            assert not builders, (storage, builders)
+            assert not builders, (storage, iso, builders)
             skipped.append(None)
     assert built == expected, (built, expected)
     assert len(plan["skipped"]) == len(skipped), (plan["skipped"], skipped)
+    assert len(plan["report"]) == len(plan["pairs"]), plan
 
     name = roles.from_alphabet(fdp, "abzAZ09-./?#% \n", 20)
     if roles.matches(NODE_PATTERN, name):

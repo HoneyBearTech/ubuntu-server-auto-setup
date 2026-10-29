@@ -1,25 +1,16 @@
 ---
-- name: Verify the remastered installer ISO
+- name: Verify the remastered installer ISOs
   hosts: proxmox_nodes
   gather_facts: false
   vars:
-    # tests/real-iso.sh passes the real catalog's ISO; tests/run.sh's stand-in is 26.04.1.
-    verify_installer_iso: ubuntu-26.04.1-live-server-amd64-autoinstall.iso
+    # The remastered ISOs each node must have: tests/run.sh's servers on pve-test install 26.04, srv-two on
+    # pve-test-2 installs 24.04. tests/real-iso.sh passes the real catalog's ISO for pve-test.
+    verify_installer_isos:
+      pve-test: [ubuntu-26.04.1-live-server-amd64-autoinstall.iso]
+      pve-test-2: [ubuntu-24.04.5-live-server-amd64-autoinstall.iso]
   tasks:
-    - name: Extract grub.cfg from the autoinstall ISO
-      ansible.builtin.command:
-        argv: [xorriso, -osirrox, "on", -indev, "/var/lib/vz/template/iso/{{ verify_installer_iso }}",
-               -extract, /boot/grub/grub.cfg, /tmp/verify-grub.cfg]
-      changed_when: false
-
-    - name: Read it
-      ansible.builtin.slurp:
-        src: /tmp/verify-grub.cfg
-      register: verify_grub
-
-    - name: Check the kernel line and the timeout
-      ansible.builtin.assert:
-        that:
-          - (verify_grub.content | b64decode) is search('linux\\s+/casper/vmlinuz autoinstall\\s+---')
-          - (verify_grub.content | b64decode) is search('(?m)^set timeout=3$')
-          - (verify_grub.content | b64decode) is not search('timeout=30')
+    - name: Check each remastered ISO
+      ansible.builtin.include_tasks: verify-installer-iso.yml
+      loop: "{{ verify_installer_isos[inventory_hostname] | default([]) }}"
+      loop_control:
+        loop_var: verify_installer_iso

@@ -132,7 +132,7 @@ cp inventory/hosts.example.yml inventory/hosts.yml
 
 - `proxmox_nodes`: one host per Proxmox node, named exactly like the node in Proxmox, with `ansible_host`;
   the group's `ansible_user` is `"{{ pve_ssh_user }}"`, and `pve_ssh_user` is `root` (step 6 changes it);
-- `ubuntu_servers`: one host per server. For a new VM: `ansible_host` (its static IP), `pve_vmid`,
+- `servers`: one host per server. For a new VM: `ansible_host` (its static IP), `pve_vmid`,
   `pve_node`, and the network and size variables. Group-wide values such as `net_gateway`, `net_dns`
   and `fail2ban_ignoreip` go under the group's `vars`. A server that gets its address from DHCP has
   `net_mode: dhcp` and no `ansible_host`; more network cards and VLANs are set with `pve_vlan` and
@@ -148,7 +148,7 @@ and override it on the servers that go elsewhere, and list every node they use i
       hosts:
         hephaestus: { ansible_host: 192.0.2.10, ansible_user: root }
         hyve: { ansible_host: 192.0.2.11, ansible_user: root }
-    ubuntu_servers:
+    servers:
       vars:
         pve_node: hephaestus
       hosts:

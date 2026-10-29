@@ -1,9 +1,13 @@
 ---
 # Added to tests/inventory/hosts.yml (a second -i) by one step of tests/run.sh: servers whose nodes the cluster
 # doesn't have, one only by case. The playbooks must refuse them all in one error, before creating anything.
+# They're in ubuntu_servers, the group's name before 0.7.0, which the playbooks still read with servers.
 all:
   children:
     ubuntu_servers:
+      # hosts.yml sets this for the group servers, which these hosts aren't in.
+      vars:
+        net_gateway: 10.10.10.1
       hosts:
         srv-case:
           ansible_host: 127.0.0.1

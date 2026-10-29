@@ -2,8 +2,25 @@
 # Shared by installer_iso, proxmox_vm and proxmox_node_user (they depend on this role). vars/catalog.yml is the
 # OS catalog: the images the playbooks install, each pinned by URL and checksum. tools/update_os_catalog.py
 # writes it after checking the vendors' signatures (make catalog); a run checks only the pinned checksum.
-# The Ubuntu release the installer ISO is for.
-ubuntu_release: "26.04"
+
+# The server's operating system, from the OS catalog: ubuntu-26.04, debian-13, rocky-10 and so on
+# (docs/interfaces.md lists them all). For all servers, or per server.
+vm_os: >-
+  {{ 'ubuntu-' ~ hostvars[inventory_hostname].ubuntu_release
+     if hostvars[inventory_hostname].ubuntu_release is defined else 'ubuntu-26.04' }}
+# How the OS is installed: autoinstall, from the Ubuntu installer ISO (Ubuntu only; disk layouts and disk
+# encryption need it). cloud_image, from the vendor's cloud image, arrives with the next step of multi-OS support.
+vm_install_method: autoinstall
+# An image the catalog doesn't have (cloud_image only): its HTTPS URL, its SHA-256 and its family (ubuntu, debian
+# or rhel; not needed when vm_os is in the catalog). Checked only against that checksum, so take both from a
+# source you trust.
+vm_os_image_url: ""
+vm_os_image_sha256: ""
+vm_os_family: ""
+
+# The Ubuntu release the installer ISO is for: vm_os's, for an Ubuntu vm_os. Before 0.7.0 this chose the
+# release; it's still read until 1.0: a server whose inventory sets it gets vm_os ubuntu-<that release>.
+ubuntu_release: "{{ vm_os | regex_replace('^ubuntu-', '') }}"
 # Empty means the point release the OS catalog pins, checked against the catalog's checksum. Any other point
 # release is checked against Ubuntu's signed SHA256SUMS when it's downloaded.
 ubuntu_point_release: ""

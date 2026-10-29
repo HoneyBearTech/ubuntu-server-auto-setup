@@ -1,0 +1,90 @@
+---
+# Finds a server's OS (vm_os) in the OS catalog, or takes the image vm_os_image_url names, and checks the install
+# method. Sets os_catalog_selected: the catalog entry's id, family, name, version and eol, the install method,
+# and the image to install ({url, checksum, file, build, signed}). Used by provisioning and by build-installer's
+# plan, before anything is created or downloaded.
+- name: Check the OS settings
+  ansible.builtin.assert:
+    that:
+      - vm_os is string and vm_os is match(os_catalog_id_pattern)
+      - vm_install_method in os_catalog_install_methods
+      - vm_os_image_url is string and (vm_os_image_url | length == 0 or vm_os_image_url is match(vm_os_image_url_pattern))
+      - vm_os_image_sha256 is string and (vm_os_image_sha256 | length == 0 or vm_os_image_sha256 is match(vm_os_image_sha256_pattern))
+      - (vm_os_image_url | length > 0) == (vm_os_image_sha256 | length > 0)
+      - vm_os_family | length == 0 or vm_os_family in os_catalog_families
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_os must be an OS catalog id such as ubuntu-26.04 or debian-13, vm_install_method
+      one of {{ os_catalog_install_methods | join(', ') }}, vm_os_image_url empty or an https:// URL of a .qcow2,
+      .img or .raw image (no query string or spaces), vm_os_image_sha256 empty or its SHA-256 in lowercase
+      hexadecimal (both or neither), and vm_os_family empty or one of {{ os_catalog_families | join(', ') }}.
+    quiet: true
+
+- name: Look up the server's OS in the OS catalog
+  vars:
+    os_catalog_entry: "{{ os_catalog | selectattr('id', 'equalto', vm_os) | first | default({}, true) }}"
+    os_catalog_override: "{{ vm_os_image_url | length > 0 }}"
+  ansible.builtin.set_fact:
+    os_catalog_selected:
+      id: "{{ vm_os }}"
+      family: "{{ vm_os_family or os_catalog_entry.family | default('') }}"
+      name: "{{ os_catalog_entry.name | default(vm_os) }}"
+      version: "{{ os_catalog_entry.version | default('') }}"
+      eol: "{{ os_catalog_entry.eol | default('') }}"
+      in_catalog: "{{ os_catalog_entry | length > 0 }}"
+      method: "{{ vm_install_method }}"
+      # The override's file name is fixed by its checksum, so a changed image never reuses an old download.
+      image: >-
+        {{ {'url': vm_os_image_url, 'checksum': 'sha256:' ~ vm_os_image_sha256,
+            'file': vm_os ~ '-' ~ vm_os_image_sha256[:16] ~ '.qcow2', 'build': 'vm_os_image_url', 'signed': false}
+           if os_catalog_override
+           else os_catalog_entry.methods[vm_install_method] | default({}) if os_catalog_entry | length > 0 else {} }}
+
+- name: Fail unless the catalog has the OS, or an image is given for it
+  ansible.builtin.assert:
+    that:
+      - os_catalog_selected.in_catalog or os_catalog_selected.image | length > 0
+      - os_catalog_selected.family in os_catalog_families
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_os '{{ vm_os }}' isn't in the OS catalog{{ " and vm_os_family isn't set, so its
+      family isn't known" if vm_os_image_url | length > 0 else "" }}. The catalog has
+      {{ os_catalog | map(attribute='id') | join(', ') }}. For any other image, set vm_os_image_url,
+      vm_os_image_sha256 and vm_os_family (docs/interfaces.md).
+    quiet: true
+
+- name: Fail unless the OS can be installed with the install method
+  ansible.builtin.assert:
+    that:
+      - vm_install_method != 'autoinstall' or (os_catalog_selected.family == 'ubuntu' and vm_os_image_url | length == 0)
+      - os_catalog_selected.image | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ os_catalog_selected.name }} {{ os_catalog_selected.version }} can't be installed
+      with vm_install_method {{ vm_install_method }}.
+      {{ 'autoinstall is the Ubuntu installer: it takes an Ubuntu vm_os from the catalog, without vm_os_image_url.'
+         if vm_install_method == 'autoinstall' else 'The catalog has no ' ~ vm_install_method ~ ' image for it.' }}
+    quiet: true
+
+# Cloud-image installs land in the next step of multi-OS support (docs/roadmap.md).
+- name: Fail if the OS needs a cloud image
+  ansible.builtin.assert:
+    that: vm_install_method == 'autoinstall'
+    fail_msg: >-
+      {{ inventory_hostname }}: installing from cloud images (vm_install_method cloud_image) isn't available yet;
+      this release installs Ubuntu with vm_install_method autoinstall only.
+    quiet: true
+
+# A release past its end of support still installs, so existing inventories keep working until they change.
+- name: Warn about a release past the end of its support
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }}: {{ os_catalog_selected.name }} {{ os_catalog_selected.version }}
+      ({{ vm_os }}) reached the end of its support on {{ os_catalog_selected.eol }}. Choose a newer vm_os.
+  when: os_catalog_selected.eol | length > 0 and os_catalog_selected.eol < now(utc=true, fmt='%Y-%m-%d')
+
+# The installer ISO's release follows vm_os; the old ubuntu_release can only agree with it.
+- name: Fail if ubuntu_release disagrees with vm_os
+  ansible.builtin.assert:
+    that: vm_install_method != 'autoinstall' or ubuntu_release | string == os_catalog_selected.version
+    fail_msg: >-
+      {{ inventory_hostname }}: ubuntu_release {{ ubuntu_release }} disagrees with vm_os {{ vm_os }}. ubuntu_release
+      is the old way to choose the release: remove it and keep vm_os.
+    quiet: true

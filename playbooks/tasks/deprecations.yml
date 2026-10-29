@@ -1,0 +1,25 @@
+---
+# Names that changed in 0.7.0 and are still read until 1.0 (docs/upgrading.md). Says once per run which of them
+# the inventory still uses; nothing else changes.
+- name: Note old names the inventory still uses
+  vars:
+    usas_old_names:
+      ufw_allow: firewall_allow
+      ufw_ssh_sources: firewall_ssh_sources
+      ufw_ssh_limit: firewall_ssh_limit
+      ufw_default_incoming: firewall_default_incoming
+      ufw_logging: firewall_logging
+      apt_upgrade: pkg_upgrade
+      ubuntu_release: vm_os (ubuntu-<release>)
+      ubuntu_point_release: vm_os (the OS catalog pins the point release)
+    usas_set: "{{ ansible_play_hosts | map('extract', hostvars) | map('list') | flatten | unique }}"
+    usas_old_set: "{{ usas_old_names.keys() | select('in', usas_set) | list }}"
+    usas_old_group: "{{ groups['ubuntu_servers'] | default([]) | length > 0 }}"
+    usas_notes: >-
+      {{ (['The group ubuntu_servers is now called servers; rename it in the inventory'] if usas_old_group else [])
+         + usas_old_set | zip(usas_old_set | map('extract', usas_old_names)) | map('join', ' is now ') | list }}
+  ansible.builtin.debug:
+    msg: "DEPRECATED (still read until 1.0): {{ usas_notes | join('. ') }}. See docs/upgrading.md."
+  when: usas_old_group or usas_old_set | length > 0
+  run_once: true
+  tags: [always]

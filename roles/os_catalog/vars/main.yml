@@ -10,3 +10,11 @@ pve_iso_dir_pattern: '^/[^\x00-\x1f\x7f]*\Z'
 # For a pve_ssh_user other than root, playbooks/prepare-node.yml records here (as root) the folder of each ISO
 # storage the user may write to, as a JSON object: {"local": "/var/lib/vz/template/iso", ...}.
 pve_iso_dirs_file: /etc/ubuntu-server-auto-setup/iso-dirs.json
+# vm_os: an OS catalog id, such as ubuntu-26.04, debian-13 or centos-stream-10 (the catalog's own ids match it).
+os_catalog_id_pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*-[0-9]+(\.[0-9]+)?\Z'
+os_catalog_install_methods: [autoinstall, cloud_image]
+os_catalog_families: [ubuntu, debian, rhel]
+# vm_os_image_url, for an image the catalog doesn't have: HTTPS, a host name, and a path to a disk image with no
+# query, spaces or control characters (the node downloads it with get_url).
+vm_os_image_url_pattern: '^https://[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]{1,5})?(/[A-Za-z0-9._~%+-]+)+\.(qcow2|img|raw)\Z'
+vm_os_image_sha256_pattern: '^[0-9a-f]{64}\Z'

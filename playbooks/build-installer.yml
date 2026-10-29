@@ -2,9 +2,13 @@
 # The servers in the run decide which nodes need the installer ISO (with no server in the run, the nodes in
 # the run do): a storage the cluster shares gets it once, a node-local one on every node that uses it.
 - name: Work out which Proxmox nodes need the installer ISO
-  hosts: ubuntu_servers:proxmox_nodes
+  # servers; ubuntu_servers is its name before 0.7.0, still read until 1.0.
+  hosts: servers:ubuntu_servers:proxmox_nodes
   gather_facts: false
   tasks:
+    - name: Note old names the inventory still uses
+      ansible.builtin.import_tasks: tasks/deprecations.yml
+
     - name: Plan the ISO builds
       ansible.builtin.include_role:
         name: proxmox_vm

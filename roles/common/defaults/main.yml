@@ -19,7 +19,9 @@ server_hostname: "{{ inventory_hostname_short }}"
 server_domain: ""            # adds "<ip> <host>.<domain> <host>" to /etc/hosts when set
 timezone: Etc/UTC
 
-apt_upgrade: dist            # dist, safe, full or "no"
+# How the first and later runs upgrade packages: dist, safe, full or "no" (apt's upgrade modes; "no" skips it).
+pkg_upgrade: "{{ apt_upgrade }}"
+apt_upgrade: dist            # the name before 0.7.0, still read until 1.0: set pkg_upgrade instead
 reboot_if_required: false    # reboot after upgrades when /var/run/reboot-required exists
 common_packages:
   - ca-certificates

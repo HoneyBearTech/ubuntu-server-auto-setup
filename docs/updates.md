@@ -1,7 +1,7 @@
 # Keeping servers updated
 
 `playbooks/updates.yml` lists and installs package updates on servers that already run: the ones this
-project installed (`ubuntu_servers`) and others you add to the inventory (`other_servers`). It never
+project installed (`servers`; `ubuntu_servers` before 0.7.0, still read until 1.0) and others you add to the inventory (`other_servers`). It never
 configures a server. It reads what is pending, installs it, reboots only when you ask it to, checks that
 the server is healthy afterwards, and writes a report.
 
@@ -188,7 +188,7 @@ Add them to the `other_servers` group, with their own login:
   console ([host-keys.md](host-keys.md)). The playbook checks host keys strictly and never trusts a new
   one on its own.
 - **Sudo.** Use passwordless sudo, or a sudo password of the server's own, kept in the Vault. The playbook
-  refuses to send the Vault admin password (`vault_admin_password`) to a server outside `ubuntu_servers`
+  refuses to send the Vault admin password (`vault_admin_password`) to a server outside `servers` (or `ubuntu_servers`)
   with a `pve_vmid`: root on that server could read it. `updates_allow_shared_become_password: true`
   allows it for a host or group that you trust anyway. A sudo rule limited to apt is still root: package
   scripts run as root. A separate user such as `usas-updates` is for knowing who did what, not for

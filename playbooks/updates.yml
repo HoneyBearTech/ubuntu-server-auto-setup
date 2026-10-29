@@ -1,20 +1,23 @@
 ---
-# Lists and installs package updates on servers that already run: the ones this project installed
-# (ubuntu_servers), others added to the inventory (other_servers), and with the cluster inventory
-# (inventory/pve.usas_pve.yml) every other VM on the cluster (usas_pve_vms; usas_pve_skipped is only reported).
-# It never configures a server: it reads, installs, reboots only when updates_reboot asks for it, checks the
-# server's health and writes a report.
+# Lists and installs package updates on servers that already run: the ones this project installed (servers;
+# ubuntu_servers before 0.7.0, still read until 1.0), others added to the inventory (other_servers), and with the
+# cluster inventory (inventory/pve.usas_pve.yml) every other VM on the cluster (usas_pve_vms; usas_pve_skipped is
+# only reported). It never configures a server: it reads, installs, reboots only when updates_reboot asks for it,
+# checks the server's health and writes a report.
 # With --check it only reports what it would do. docs/updates.md describes it; make updates-check / make updates.
 
 # Every server at once (forks), changing nothing: settings, reachability, sudo, the OS, a busy package manager,
 # what would be installed and whether a reboot is waiting. In check mode this is the whole run. Unreachable
 # servers stay in the play so that their results reach the report.
 - name: Check what each server would update
-  hosts: ubuntu_servers:other_servers:usas_pve_vms:usas_pve_skipped
+  hosts: servers:ubuntu_servers:other_servers:usas_pve_vms:usas_pve_skipped
   gather_facts: false
   become: true
   ignore_unreachable: true
   pre_tasks:
+    - name: Note old names the inventory still uses
+      ansible.builtin.import_tasks: tasks/deprecations.yml
+
     - name: Check the settings and the window
       ansible.builtin.include_role:
         name: updates

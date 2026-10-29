@@ -82,7 +82,7 @@ if [ -n "$signed_changes" ]; then
   echo "ERROR: checking against the signed SHA256SUMS changed more than the files it fetches" >&2
   exit 1
 fi
-play verify-installer tests/verify-installer.yml -e "verify_installer_iso=${ISO%.iso}-autoinstall.iso"
+play verify-installer tests/verify-installer.yml -e "{\"verify_installer_isos\": {\"pve-test\": [\"${ISO%.iso}-autoinstall.iso\"]}}"
 
 echo "=== Boot records (original, then remastered); everything but the block addresses must match"
 records() {
