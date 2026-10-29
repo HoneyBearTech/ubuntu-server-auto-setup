@@ -115,13 +115,13 @@ def one_input(data):
     if plan is not None:
         loaded = yaml.load(plan.inventory, Loader=Loader)  # noqa: S506 (a SafeLoader subclass)
         children = loaded["all"]["children"]
-        assert set(children) <= {"usas_vms", "ubuntu_servers"}
+        assert set(children) <= {"usas_vms", "servers"}
         planned = {t.name for t in plan.targets}
         found = {name for group in children.values() for name in group["hosts"]}
         assert found == planned, (found, planned)
         for target in plan.targets:
             if target.static:
-                assert target.name in {"web-00", "db-01"} and target.name in children["ubuntu_servers"]["hosts"]
+                assert target.name in {"web-00", "db-01"} and target.name in children["servers"]["hosts"]
                 continue
             assert target.name == f"vm-{target.vmid}"
             host = children["usas_vms"]["hosts"][target.name]
