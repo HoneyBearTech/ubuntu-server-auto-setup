@@ -144,6 +144,21 @@ play playbooks/baseline.yml --limit srv-01 --tags common
 if grep -q 'needs a reboot' "$last_log"; then echo "ERROR: a reboot was reported with none waiting" >&2; exit 1; fi
 cool_down
 
+step "a release the OS catalog doesn't list is refused unless baseline_allow_unsupported; one past its support is warned about"
+# Only the always-tagged checks run (--tags always): nothing on the server changes.
+other='{"os_catalog": [{"id": "none-1", "name": "None", "version": "1", "eol": "2099-01-01"}]}'
+if ansible-playbook "${INV[@]}" playbooks/baseline.yml --limit srv-01 --tags always -e "$other" >"$TEST_TMP/refused.log" 2>&1; then
+  cat "$TEST_TMP/refused.log"; echo "ERROR: an OS the catalog doesn't list wasn't refused" >&2; exit 1
+fi
+grep -q "which the baseline doesn't support. Supported: None 1. Set baseline_allow_unsupported" "$TEST_TMP/refused.log" \
+  || { cat "$TEST_TMP/refused.log"; echo "ERROR: the refusal doesn't say why" >&2; exit 1; }
+play playbooks/baseline.yml --limit srv-01 --tags always -e "$other" -e baseline_allow_unsupported=true
+grep -q "isn't tested on; running it because baseline_allow_unsupported is true" "$last_log"
+play playbooks/baseline.yml --limit srv-01 --tags always \
+  -e "{\"os_catalog\": [{\"id\": \"$OS\", \"name\": \"Old\", \"version\": \"1\", \"eol\": \"2000-01-01\"}]}"
+grep -q 'past the end of its standard support (2000-01-01)' "$last_log"
+cool_down
+
 step "move SSH to port 2222, check, rerun on the new port"
 play playbooks/baseline.yml --limit srv-01 -e ssh_port=2222
 cool_down

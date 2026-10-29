@@ -188,6 +188,7 @@ old name's value unless it's set itself, and each run says which old names the i
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `fail2ban_enabled` | `true` | Install and configure Fail2Ban. `false` leaves it out of the baseline (not installed, or left as it is); on the RHEL family it comes from EPEL, so this also keeps EPEL off (unless the mail relay needs it). |
+| `baseline_allow_unsupported` | `false` | Run the baseline on a release that isn't in the OS catalog. By default the baseline stops before changing anything on such a server; with `true` it runs, with a warning, on any Debian, Ubuntu or RHEL-family release. Other OS families are always refused. The web UI's VMs page sets it for a VM whose override you confirmed. |
 | `fail2ban_bantime`, `fail2ban_findtime`, `fail2ban_maxretry` | `1h`, `10m`, `5` | Ban length, window and failures. |
 | `fail2ban_bantime_increment`, `fail2ban_bantime_maxtime` | `true`, `1w` | Longer bans for repeat offenders, up to a maximum. |
 | `fail2ban_ignoreip` | `[]` | Never banned (besides localhost). |

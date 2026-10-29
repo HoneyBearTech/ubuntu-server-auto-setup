@@ -68,6 +68,10 @@ A new name set in the inventory wins over the old one. Rename the group together
 `ubuntu_servers` doesn't get what's set for `servers`, and the other way round. Set `vm_os` per server to install different Ubuntu LTS
 releases on one cluster: `make build-installer` builds each release's installer on the nodes that need it.
 
+From 0.7.0 the baseline also stops, before changing anything, on a server whose release isn't in the OS catalog
+(an Ubuntu 20.04 server, for example). Upgrade the server, or set `baseline_allow_unsupported: true` for it to
+keep running the baseline there with a warning.
+
 ## A new Ubuntu point release
 
 The OS catalog (`roles/os_catalog/vars/catalog.yml`) pins the point release each project release installs,

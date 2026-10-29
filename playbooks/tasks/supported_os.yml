@@ -1,0 +1,54 @@
+---
+# Stops on a server whose OS isn't a release in the OS catalog (roles/os_catalog/vars/catalog.yml), by its facts:
+# the baseline is tested on exactly those. baseline_allow_unsupported: true runs it anyway, with a warning, on any
+# release of a family the roles know (Debian, Ubuntu and the RHEL family); another family is always refused.
+# Only extra vars (-e) take precedence over it, as in the integration tests.
+- name: Load the OS catalog
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../roles/os_catalog/vars/catalog.yml"
+  tags: [always]
+
+- name: Check that the server's OS is one the baseline supports
+  vars:
+    # The catalog id the facts name: ubuntu-24.04, debian-13, centos-stream-10, rocky-9, alma-10, ...
+    usas_os_prefixes: {Ubuntu: ubuntu, Debian: debian, CentOS: centos-stream, Rocky: rocky, AlmaLinux: alma}
+    usas_os_version: >-
+      {{ ansible_facts.distribution_version if ansible_facts.distribution == 'Ubuntu'
+         else ansible_facts.distribution_major_version }}
+    usas_os_id: "{{ usas_os_prefixes[ansible_facts.distribution] | default('') ~ '-' ~ usas_os_version }}"
+    # The server reports these: only plain characters go into messages.
+    usas_os_text: >-
+      {{ (ansible_facts.distribution ~ ' ' ~ ansible_facts.distribution_version)
+         | regex_replace('[^A-Za-z0-9 ._+-]', '?') | truncate(80, true, '') }}
+  tags: [always]
+  block:
+    - name: Refuse an OS the baseline doesn't support
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family in ['Debian', 'RedHat']
+          - usas_os_id in os_catalog | map(attribute='id') or baseline_allow_unsupported | default(false) | bool
+        fail_msg: >-
+          {{ inventory_hostname }} runs {{ usas_os_text }}, which the baseline doesn't support. Supported:
+          {{ os_catalog | map(attribute='name') | zip(os_catalog | map(attribute='version')) | map('join', ' ')
+          | join(', ') }}.
+          {{ 'Only Debian, Ubuntu and the RHEL family can be set up at all.' if ansible_facts.os_family not in
+          ['Debian', 'RedHat'] else 'Set baseline_allow_unsupported: true for this server to run it anyway.' }}
+        quiet: true
+
+    - name: Warn that an unsupported release is set up anyway
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} runs {{ usas_os_text }}, which the baseline isn't tested on; running
+          it because baseline_allow_unsupported is true.
+      when: usas_os_id not in os_catalog | map(attribute='id')
+
+    - name: Warn about a release past the end of its standard support
+      vars:
+        usas_os_eol: "{{ (os_catalog | selectattr('id', 'equalto', usas_os_id) | first).eol }}"
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} runs {{ usas_os_text }}, past the end of its standard support
+          ({{ usas_os_eol }}): plan its upgrade.
+      when:
+        - usas_os_id in os_catalog | map(attribute='id')
+        - usas_os_eol < now(utc=true).strftime('%Y-%m-%d')

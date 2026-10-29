@@ -31,6 +31,9 @@
       ansible.builtin.setup:
       tags: [always]
 
+    - name: Check that the baseline supports the server's OS
+      ansible.builtin.import_tasks: tasks/supported_os.yml
+
   roles:
     - role: common
       tags: [common]

@@ -148,6 +148,24 @@
     path: /var/log/installer/autoinstall-user-data
     state: absent
 
+# cloud-init keeps root-only copies of the user-data it booted with (the seed's password hash) under each
+# instance it has seen; /var/lib/cloud/instance is a link to the current one. It doesn't read them again.
+- name: Find cloud-init's copies of its user-data
+  ansible.builtin.find:
+    paths: /var/lib/cloud/instances
+    patterns: user-data.txt*
+    recurse: true
+    depth: 2
+  register: common_cloud_init_user_data
+
+- name: Remove cloud-init's copies of its user-data
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ common_cloud_init_user_data.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Install SSH keys
   ansible.builtin.include_tasks: ssh_keys.yml
   tags: [ssh_keys]

@@ -24,6 +24,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   leave the web UI's field empty) to follow the catalog from release to release.
 - A mirror in `ubuntu_iso_base_url` no longer needs to publish `SHA256SUMS.gpg` for the point release the
   catalog pins: the pinned checksum decides.
+- **The baseline stops on a release it doesn't support**, before changing anything. It supports the OS
+  catalog's releases: Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, CentOS Stream, Rocky Linux and
+  AlmaLinux 9 and 10. To run it on another Debian, Ubuntu or RHEL-family release anyway, set
+  `baseline_allow_unsupported: true` for that server; each run then warns about it. A release past the end of
+  its standard support still runs, with a warning.
 
 ### Added
 
@@ -139,6 +144,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `tests/coverage.py` counts the per-family task files too, and each suite measures its own roles.
 
 ### Security
+
+- The baseline also deletes cloud-init's root-only copies of the user-data it booted with
+  (`/var/lib/cloud/instances/*/user-data.txt*`), which hold the admin password's hash, as it already did
+  for the Ubuntu installer's copy ([security.md](docs/security.md)).
 
 - **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
   needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
