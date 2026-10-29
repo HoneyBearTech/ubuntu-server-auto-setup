@@ -50,15 +50,16 @@ export const runPage: RunPageData = {
     { key: "site", playbook: "playbooks/site.yml", description: "All three, in order", extra: [] },
     { key: "keys", playbook: "playbooks/baseline.yml", description: "Re-sync the admin user's SSH keys only", extra: ["--tags", "ssh_keys"] },
   ],
-  names: ["all", "db-01", "ubuntu_servers", "web-01"],
+  names: ["all", "db-01", "servers", "web-01"],
   steps: overview.steps,
   current_run: null,
   iso_plan: {
     storage: "synology-nfs", shared: true, known: true, builders: ["ares"],
     pairs: [
-      { node: "ares", storage: "synology-nfs", shared: true, built_by: "ares", servers: ["db-01"], address: "" },
-      { node: "hephaestus", storage: "synology-nfs", shared: true, built_by: "ares", servers: ["web-01"],
-        address: "192.168.1.20" },
+      { node: "ares", storage: "synology-nfs", iso: "ubuntu-26.04.1-live-server-amd64.iso", shared: true,
+        built_by: "ares", servers: ["db-01"], address: "" },
+      { node: "hephaestus", storage: "synology-nfs", iso: "ubuntu-26.04.1-live-server-amd64.iso", shared: true,
+        built_by: "ares", servers: ["web-01"], address: "192.168.1.20" },
     ],
   },
 };

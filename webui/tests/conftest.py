@@ -87,7 +87,7 @@ DEFAULTS = {
 }
 HARDENING = {
     "ssh_port": "22", "ssh_allow_users": "", "ssh_permit_root_login": "no", "admin_sudo_nopasswd": "on",
-    "ufw_ssh_limit": "on", "ufw_ssh_sources": "any", "ufw_allow": "", "fail2ban_ignoreip": "10.0.0.0/24",
+    "firewall_ssh_limit": "on", "firewall_ssh_sources": "any", "firewall_allow": "", "fail2ban_ignoreip": "10.0.0.0/24",
     "fail2ban_maxretry": "5", "fail2ban_findtime": "10m", "fail2ban_bantime": "1h",
     "fail2ban_bantime_increment": "on", "fail2ban_bantime_maxtime": "1w", "fail2ban_sshd_mode": "normal",
     "fail2ban_banaction": "",
@@ -100,5 +100,5 @@ def configure(c, servers=1):
     rows = {"server_count": str(servers), "action": "save"}
     for i in range(servers):
         rows.update({f"servers-{i}-name": f"web-{i:02d}", f"servers-{i}-ansible_host": f"10.0.0.{10 + i}",
-                     f"servers-{i}-pve_vmid": str(4000 + i), f"servers-{i}-ufw_ports": "443/tcp"})
+                     f"servers-{i}-pve_vmid": str(4000 + i), f"servers-{i}-firewall_ports": "443/tcp"})
     assert post(c, "/servers", rows).status_code == 200

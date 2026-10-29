@@ -4,7 +4,10 @@ import { formData, post } from "../api";
 import { Icon } from "../components/Icons";
 import { ErrorSummary, Loading, Notice, PageHead } from "../components/Parts";
 import { useData } from "../data";
-import type { Errors, Notice as NoticeT, ServersData } from "../types";
+import type { Errors, FieldMeta, Notice as NoticeT, ServersData } from "../types";
+
+// A choice as the form shows it ("Ubuntu 24.04 (noble) · until 2029-05-31"), or the value itself.
+const label = (c: FieldMeta, choice: string) => c.choice_labels?.[choice] ?? choice;
 
 interface Row {
   key: number;
@@ -105,6 +108,17 @@ function ServersForm({ data, reload, status, setStatus }: {
                               ))}
                             </select>
                           </div>
+                        ) : c.name === "vm_os" ? (
+                          // The catalog's supported releases; empty is the default OS (Defaults page).
+                          <div className="select">
+                            <select {...common} defaultValue={value}>
+                              <option value="">Default{data.default_os ? ` (${label(c, data.default_os)})` : ""}</option>
+                              {(value && !(c.choices ?? []).includes(value) ? [...(c.choices ?? []), value]
+                                : c.choices ?? []).map((choice) => (
+                                <option key={choice} value={choice}>{label(c, choice)}</option>
+                              ))}
+                            </select>
+                          </div>
                         ) : c.kind === "choice" ? (
                           <div className="select">
                             <select {...common} defaultValue={value || c.default || ""}>
@@ -145,7 +159,8 @@ function ServersForm({ data, reload, status, setStatus }: {
             address. MAC address (optional): the first card's, for a DHCP reservation. Node: the Proxmox node the VM
             is created on; the default is the node on the Proxmox page{nodes.length ? ""
               : " (test the connection there to pick from the cluster's nodes)"}. Extra network
-            cards: {help("vm_extra_nics")} Extra firewall rules: {help("ufw_ports")}
+            cards: {help("vm_extra_nics")} Extra firewall rules: {help("firewall_ports")} OS: the operating
+            system, from the releases this version supports; the default is the one on the Defaults page.
           </p>
           <div aria-live="polite">{status ? <Notice notice={status} /> : null}</div>
         </div>
