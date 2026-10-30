@@ -339,11 +339,16 @@ python3 tests/mock_pve.py --cert "$TEST_TMP/api.crt" --key "$TEST_TMP/api.key" -
 mock_pid=$!
 printf 'plugin: usas_pve\nexclude: ["4087"]\n' >"$TEST_TMP/cluster.usas_pve.yml"
 CLUSTER=(-i tests/inventory/updates-cluster.yml -i "$TEST_TMP/cluster.usas_pve.yml")
+# The alias pins of VMs 4093 and 4094: both upd2's key (right for 4093, wrong for 4094).
+pin_cluster() {
+  for vmid in 4093 4094; do
+    ssh-keygen -q -R "usas-mock-cluster-$vmid" -f "$TEST_TMP/known_hosts" >/dev/null 2>&1 || true
+    ssh-keyscan -t ed25519 -p 2342 127.0.0.1 2>/dev/null | sed "s/^\[127.0.0.1\]:2342 /usas-mock-cluster-$vmid /" >>"$TEST_TMP/known_hosts"
+  done
+}
 fresh "$UPD1" 2341 sysadmin
 fresh "$UPD2" 2342 ops
-for vmid in 4093 4094; do
-  ssh-keyscan -t ed25519 -p 2342 127.0.0.1 2>/dev/null | sed "s/^\[127.0.0.1\]:2342 /usas-mock-cluster-$vmid /" >>"$TEST_TMP/known_hosts"
-done
+pin_cluster
 ansible-inventory "${INV[@]}" "${CLUSTER[@]}" --graph >"$TEST_TMP/cluster-graph.txt"
 grep -q "vm-4087" "$TEST_TMP/cluster-graph.txt" && { echo "ERROR: the excluded VM 4087 is in the inventory" >&2; exit 1; }
 play --idempotent --check "${CLUSTER[@]}" --limit 'all:!upd-other:!vm-4094'
@@ -363,6 +368,66 @@ expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.0
 printf 'plugin: usas_pve\nexclude: ["4087; rm -rf /"]\n' >"$TEST_TMP/bad.usas_pve.yml"
 play_fails "exclude has values that aren't plain names" -i tests/inventory/updates-cluster.yml \
   -i "$TEST_TMP/bad.usas_pve.yml" --check
+
+step "Snapshots before updating: on each VM's live node, refused or skipped without one, only the playbook's own deleted"
+# Changes a fixture VM of the mock: {"feature_snapshot": false} (disks without snapshots), {"forbid_snapshot":
+# true} (no VM.Snapshot).
+mock_set() {
+  curl -sfk -X POST -H 'Content-Type: application/json' -d "$1" https://127.0.0.1:2348/mock/fixture >/dev/null
+}
+# Checks the mock's state: each argument is a Python expression over snaps (VM ID -> snapshot names, newest first),
+# desc (VM ID -> name -> description) and reqs (the API calls).
+mock_state() {
+  python3 - "$@" <<'PY'
+import json, ssl, sys, urllib.request
+state = json.load(urllib.request.urlopen("https://127.0.0.1:2348/mock/state", context=ssl._create_unverified_context()))["data"]
+snaps = {int(v): [s["name"] for s in l] for v, l in state["snapshots"].items()}
+desc = {int(v): {s["name"]: s.get("description", "") for s in l} for v, l in state["snapshots"].items()}
+reqs = state["requests"]
+for check in sys.argv[1:]:
+    if not eval(check, {"snaps": snaps, "desc": desc, "reqs": reqs}):  # noqa: S307 (the test's own expressions)
+        sys.exit(f"ERROR: not true: {check}\n{json.dumps(state['snapshots'], indent=1)}")
+print(f"mock state: {len(sys.argv) - 1} checks passed")
+PY
+}
+SNAP=("${CLUSTER[@]}" -e updates_snapshot=true)
+mock_set '{"vmid": 4093, "set": {"feature_snapshot": false}}'
+play --idempotent "${SNAP[@]}" --limit vm-4093
+report "h['vm-4093']['status'] == 'skipped'" \
+  "h['vm-4093']['reason'] == \"no snapshot: Proxmox says VM 4093's disks don't support snapshots\""
+mock_set '{"vmid": 4093, "set": {"feature_snapshot": true, "forbid_snapshot": true}}'
+play_fails 'the API token.s role needs VM.Snapshot' "${SNAP[@]}" --limit vm-4093
+report "h['vm-4093']['status'] == 'failed' and 'Permission check failed (/vms/4093, VM.Snapshot)' in h['vm-4093']['reason']"
+expect_versions "$UPD2" usas-test-extra=1.0
+mock_set '{"vmid": 4093, "set": {"forbid_snapshot": false}}'
+play "${SNAP[@]}" --limit upd-usas,vm-4093
+report "h['upd-usas']['status'] == 'updated' and h['vm-4093']['status'] == 'updated'" \
+  "h['upd-usas']['snapshot']['status'] == 'taken' and h['upd-usas']['snapshot']['node'] == 'pve-test-2'" \
+  "h['vm-4093']['snapshot']['deleted'] == ['usas_upd_20200101_000000']" \
+  "h['vm-4093']['snapshot']['warning'] == 'storage local-lvm is over 85 % used' and not h['upd-usas']['snapshot']['warning']"
+mock_state "snaps[4093][1:] == ['before-upgrade', 'usas_upd_20200102_000000'] and snaps[4093][0].startswith('usas_upd_2')" \
+  "desc[4093][snaps[4093][0]].startswith('USAS updates run ')" \
+  "len(snaps[4091]) == 1 and any(r['method'] == 'POST' and r['path'] == '/nodes/pve-test-2/qemu/4091/snapshot'
+   and r['form']['vmstate'] == '0' for r in reqs)"
+expect_versions "$UPD2" usas-test-extra=1.1
+# Without updates_snapshot_required a VM whose disks can't have one is updated; an unhealthy VM keeps its snapshot
+# (updates_snapshot_keep: 0 would delete it after a healthy update).
+fresh "$UPD1" 2341 sysadmin
+fresh "$UPD2" 2342 ops
+pin_cluster
+docker exec "$UPD2" systemctl enable --now usas-test-fragile.service >/dev/null 2>&1
+mock_set '{"vmid": 4091, "set": {"feature_snapshot": false}}'
+play_fails 'Unhealthy after the update' "${SNAP[@]}" --limit upd-usas,vm-4093 -e updates_snapshot_required=false \
+  -e updates_snapshot_keep=0 -e updates_reboot=if_required -e updates_serial=2
+report "h['upd-usas']['status'] == 'updated' and h['upd-usas']['snapshot']['status'] == 'none'" \
+  "\"don't support snapshots\" in h['upd-usas']['snapshot']['reason']" \
+  "h['vm-4093']['status'] == 'failed' and h['vm-4093']['snapshot']['status'] == 'taken'"
+mock_state "len([n for n in snaps[4093] if desc[4093][n].startswith('USAS updates run ')]) == 2" \
+  "snaps[4091] == [snaps[4091][0]] and snaps[4091][0].startswith('usas_upd_2')"
+if grep -l '00000000-0000-4000-8000-000000000000' "$TEST_TMP"/play.*; then
+  echo "ERROR: the Proxmox API token is in the output above" >&2
+  exit 1
+fi
 kill "$mock_pid"
 mock_pid=""
 

@@ -52,6 +52,24 @@ updates_lock_wait: 600
 # connection doesn't stop it.
 updates_task_timeout: 3600
 
+# A Proxmox snapshot of each VM's disks before its update (not its memory), on the node it runs on now, through
+# the API settings of the inventory (pve_api_host, pve_api_user, pve_api_token_id, pve_api_token_secret). The
+# token's role needs VM.Snapshot (docs/updates.md, "Snapshots"); rolling back is left to a Proxmox admin.
+updates_snapshot: false
+# true skips a VM that can't have one (no VM ID, locked, disks without snapshots) and fails one whose snapshot
+# Proxmox refused or couldn't take; false updates them without, with the reason in the report.
+updates_snapshot_required: true
+# How many of this playbook's snapshots each VM keeps after a healthy update (0 deletes the new one too), and
+# the age in days after which they are deleted at the next run. Snapshots without the usas_upd_ name and the
+# playbook's description (the operator's own) are never deleted.
+updates_snapshot_keep: 1
+updates_snapshot_max_age: 7
+# Seconds Proxmox may take to take or delete a snapshot.
+updates_snapshot_timeout: 600
+# Warn when a storage that holds the VM's disks is more than this percent used: a snapshot on thin storage grows
+# with every write after it.
+updates_snapshot_storage_warn: 85
+
 # Health checks after an update or a reboot: services that ran before must run after, and these too.
 updates_health_services: []
 # Globs of services whose stopping isn't a problem.

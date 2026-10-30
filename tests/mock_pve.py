@@ -26,7 +26,11 @@ dropped calls are listed in the state's "dropped".
 
 With --fixture-updates it lists the VMs of UPDATE_FIXTURE_VMS instead (or as well), the cluster tests/updates.sh
 discovers with the usas_pve inventory plugin: on both nodes, with tags, a pool and an HA state, and one VM for each
-reason the updates playbook leaves a VM alone.
+reason the updates playbook leaves a VM alone. Their snapshots (GET, POST and DELETE .../snapshot, as tasks) are in
+the state's "snapshots"; VM 4093 starts with the operator's own snapshots and an old one of the playbook's. POST
+/mock/fixture with JSON {"vmid": 4093, "set": {"feature_snapshot": false}} changes a fixture VM while the mock
+runs: feature_snapshot false says its disks can't have snapshots, forbid_snapshot true refuses snapshots as
+Proxmox does when the token's role lacks VM.Snapshot.
 
 Usage: mock_pve.py --cert CERT --key KEY --keys-file FILE [--port 8006] [--keys-port 8081] [--bind 127.0.0.1]
                    [--fixture-vms] [--fixture-updates] [--vm-target VMID=IPV4 ...]
@@ -68,8 +72,14 @@ FORBIDDEN_AGENT_VMIDS = {4066}  # the token may not ask these VMs' agents (no VM
 AGENT_POLLS_BEFORE_READY = 1
 
 LOCK = threading.Lock()
-STATE = {"vms": {}, "requests": [], "drops": [], "dropped": []}
+STATE = {"vms": {}, "requests": [], "drops": [], "dropped": [], "snapshots": {}}
 FIXTURES = {"enabled": False, "updates": False}
+# Keys of a fixture VM that only steer the mock, never listed in /cluster/resources.
+MOCK_ONLY_KEYS = ("config", "agent", "type", "status", "node", "snapshots", "feature_snapshot", "forbid_snapshot")
+# Used and total bytes of the storages, for /nodes/{node}/storage/{id}/status: local-lvm is nearly full.
+STORAGE_USE = {"local-lvm": (90 * 2**30, 100 * 2**30), "synology-nfs": (400 * 2**30, 1000 * 2**30)}
+# Snapshot names Proxmox accepts.
+SNAPSHOT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,39}")
 SLOW_AGENT_SECONDS = 7  # longer than the web UI waits for one agent call
 
 
@@ -134,11 +144,21 @@ FIXTURE_VMS = {
 # playbook must leave alone, one for each reason; 4087 is left out by the test's exclude.
 UPDATE_FIXTURE_VMS = {
     4091: {"name": "upd-usas-pve", "node": "pve-test-2", "tags": "ubuntu;ansible",
-           "config": {"agent": "1", "ostype": "l26", "description": "Installed by ubuntu-server-auto-setup (Ubuntu 26.04.1)"},
+           "config": {"agent": "1", "ostype": "l26", "description": "Installed by ubuntu-server-auto-setup (Ubuntu 26.04.1)",
+                      "scsi0": "synology-nfs:4091/vm-4091-disk-0.qcow2,size=32G", "ide2": "none,media=cdrom"},
            "agent": ("ok", [_iface("ens18", "10.99.0.91")], _ubuntu("26.04", "Resolute Raccoon"), "upd-usas")},
     4092: {"name": "ct-cache", "type": "lxc"},
     4093: {"name": "legacy-web", "tags": "prod;web", "pool": "prod", "hastate": "started",
-           "config": {"agent": "1", "ostype": "l26"},
+           "config": {"agent": "1", "ostype": "l26", "scsi0": "local-lvm:vm-4093-disk-0,size=32G"},
+           # The operator's own (one named like the playbook's, without its description), and an old one of the
+           # playbook's, which its clean-up deletes.
+           "snapshots": [
+               {"name": "before-upgrade", "description": "mine", "snaptime": 1_700_000_000, "vmstate": 0},
+               {"name": "usas_upd_20200102_000000", "description": "copied by hand", "snaptime": 1_577_923_200,
+                "vmstate": 0, "parent": "before-upgrade"},
+               {"name": "usas_upd_20200101_000000", "snaptime": 1_577_836_800, "vmstate": 0,
+                "description": "USAS updates run 20200101T000000Z-abcd; safe to delete after 2020-01-08\n"},
+           ],
            "agent": ("ok", [_iface("ens18", "10.99.0.93")], _ubuntu("24.04", "Noble Numbat"), "legacy-web")},
     4094: {"name": "Legacy_DB", "tags": "prod",
            "config": {"agent": "1", "ostype": "l26"},
@@ -169,7 +189,7 @@ def fixture_resources():
         kind = vm.get("type", "qemu")
         entry = {"vmid": vmid, "id": f"{kind}/{vmid}", "node": vm.get("node", NODE), "type": kind,
                  "status": vm.get("status", "running")}
-        entry.update({k: v for k, v in vm.items() if k not in ("config", "agent", "type", "status", "node")})
+        entry.update({k: v for k, v in vm.items() if k not in MOCK_ONLY_KEYS})
         data.append(entry)
     return data
 
@@ -272,6 +292,11 @@ class PveHandler(BaseHTTPRequestHandler):
         if path == "/mock/state" and method == "GET":
             with LOCK:
                 return self._reply(200, STATE)
+        if path == "/mock/fixture" and method == "POST":
+            change = self._form()
+            with LOCK:
+                fixture_vms()[int(change["vmid"])].update(change["set"])
+            return self._reply(200, None)
         if path == "/mock/drop" and method == "POST":
             drop = self._form()
             with LOCK:
@@ -294,14 +319,18 @@ class PveHandler(BaseHTTPRequestHandler):
             self.silent = True
             if drop == "before":
                 return None
-        fixture = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|agent/[a-z-]+)", path)
+        fixture = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|agent/[a-z-]+|feature|snapshot(?:/[^/]+)?)", path)
         fixtures = fixture_vms()
-        if method == "GET" and fixture and int(fixture.group(2)) in fixtures:
+        if fixture and int(fixture.group(2)) in fixtures:
             vm = fixtures[int(fixture.group(2))]
             if vm.get("node", NODE) != fixture.group(1):  # Proxmox looks for the config on the node the path names
                 return self._reply(500, {"vmid": f"Configuration file 'nodes/{fixture.group(1)}/qemu-server/"
                                                  f"{fixture.group(2)}.conf' does not exist"})
-            return self._fixture(vm, fixture.group(3))
+            if fixture.group(3).startswith("snapshot") or fixture.group(3) == "feature":
+                with LOCK:
+                    return self._snapshots(method, int(fixture.group(2)), vm, fixture.group(3), query, form)
+            if method == "GET":
+                return self._fixture(vm, fixture.group(3))
         with LOCK:
             return self._dispatch(method, path, query, form)
 
@@ -335,6 +364,39 @@ class PveHandler(BaseHTTPRequestHandler):
         if what not in results:
             return self._reply(501, {"path": f"{what} is not implemented by the mock"})
         return self._reply(200, {"result": results[what]})
+
+    def _snapshots(self, method, vmid, vm, what, query, form):
+        """A fixture VM's snapshots: the feature check, the list, and taking and deleting one (as tasks)."""
+        snapshots = STATE["snapshots"].setdefault(str(vmid), [dict(s) for s in vm.get("snapshots", [])])
+        node = vm.get("node", NODE)
+        if what == "feature" and method == "GET":
+            if query.get("feature") != "snapshot":
+                return self._reply(400, {"feature": "value must be snapshot, clone or copy"})
+            return self._reply(200, {"hasFeature": int(vm.get("feature_snapshot", True)), "nodes": list(NODES)})
+        if what == "snapshot" and method == "GET":
+            current = {"name": "current", "description": "You are here!", "running": 1,
+                       **({"parent": snapshots[0]["name"]} if snapshots else {})}
+            return self._reply(200, [*snapshots, current])
+        if method in ("POST", "DELETE") and vm.get("forbid_snapshot"):
+            return self._message(403, f"Permission check failed (/vms/{vmid}, VM.Snapshot)")
+        if what == "snapshot" and method == "POST":
+            name = form.get("snapname", "")
+            if not SNAPSHOT_NAME.fullmatch(name) or name == "current":
+                return self._reply(400, {"snapname": "invalid format - invalid configuration ID"})
+            if any(s["name"] == name for s in snapshots):
+                return self._reply(500, {"snapname": f"snapshot name '{name}' already used"})
+            if not vm.get("feature_snapshot", True):
+                return self._reply(500, {"snapshot": "snapshot feature is not available"})
+            snapshots.insert(0, {"name": name, "description": form.get("description", ""), "vmstate": int(form.get("vmstate", 0)),
+                                 "snaptime": int(time.time())})
+            return self._reply(200, upid("qmsnapshot", vmid, node))
+        if what.startswith("snapshot/") and method == "DELETE":
+            name = urllib.parse.unquote(what.split("/", 1)[1])
+            if not any(s["name"] == name for s in snapshots):
+                return self._reply(500, {"snapname": f"snapshot '{name}' does not exist"})
+            snapshots[:] = [s for s in snapshots if s["name"] != name]
+            return self._reply(200, upid("qmdelsnapshot", vmid, node))
+        return self._reply(501, {"path": f"{method} {what} is not implemented by the mock"})
 
     def _agent_interfaces(self, vmid, vm):
         """What the guest agent of a VM the tests created reports: its cards, net0 with the DHCP lease if any."""
@@ -384,6 +446,13 @@ class PveHandler(BaseHTTPRequestHandler):
                 {"storage": name, "active": 1, "enabled": 1, **STORAGES[name]}
                 for name in NODE_STORAGES[m.group(1)] if not content or content in STORAGES[name]["content"].split(",")
             ])
+        m = re.fullmatch(r"/nodes/([^/]+)/storage/([^/]+)/status", path)
+        if m and method == "GET":
+            if m.group(1) not in NODES or m.group(2) not in NODE_STORAGES[m.group(1)]:
+                return self._reply(500, {"storage": f"storage '{m.group(2)}' does not exist"})
+            used, total = STORAGE_USE.get(m.group(2), (0, 0))
+            return self._reply(200, {"used": used, "total": total, "avail": total - used, "active": 1, "enabled": 1,
+                                     **STORAGES[m.group(2)]})
         if method == "GET" and path == "/access/permissions":
             # The token's privileges on one path, as Proxmox VE 9 answers for a role like docs/installing.md's.
             m = re.fullmatch(r"/vms/(\d+)", query.get("path", ""))
@@ -476,6 +545,9 @@ class PveHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):  # noqa: N802
         self._route("PUT")
+
+    def do_DELETE(self):  # noqa: N802
+        self._route("DELETE")
 
 
 class KeysHandler(BaseHTTPRequestHandler):
