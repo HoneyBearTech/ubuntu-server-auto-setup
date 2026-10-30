@@ -41,10 +41,12 @@ keep_logs() {
 }
 
 mock_pid=""
+web_pid=""
 
 cleanup() {
   status=$?
   if [ -n "$mock_pid" ]; then kill "$mock_pid" 2>/dev/null || true; fi
+  if [ -n "$web_pid" ]; then kill "$web_pid" 2>/dev/null || true; fi
   if [ "$status" -ne 0 ]; then keep_logs; fi
   docker rm -f "$UPD1" "$UPD2" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
@@ -202,6 +204,7 @@ web_pid=$!
 play --limit upd-usas -e updates_reboot=if_required -e '{"updates_health_services": ["ssh.service"],
   "updates_health_urls": [{"url": "http://127.0.0.1:2349/known_hosts", "status": 200}]}'
 kill "$web_pid"
+web_pid=""
 [ "$(boot_id "$UPD1")" != "$boot" ] || { echo "ERROR: upd-usas didn't reboot" >&2; exit 1; }
 expect_versions "$UPD1" usas-test-tool=1.2 usas-test-extra=1.1 usas-test-kernel=1.1 usas-test-held=1.0
 report "h['upd-usas']['status'] == 'updated' and h['upd-usas']['reboot']['done']" \
