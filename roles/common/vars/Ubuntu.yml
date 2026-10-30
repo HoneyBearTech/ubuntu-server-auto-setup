@@ -1,0 +1,7 @@
+---
+# Ubuntu: the release and security pockets, and ESM security (used only with Ubuntu Pro attached).
+common_os_unattended_origins:
+  - "${distro_id}:${distro_codename}"
+  - "${distro_id}:${distro_codename}-security"
+  - "${distro_id}ESMApps:${distro_codename}-apps-security"
+  - "${distro_id}ESM:${distro_codename}-infra-security"

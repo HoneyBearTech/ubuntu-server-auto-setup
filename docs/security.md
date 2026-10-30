@@ -125,8 +125,9 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   one address are refused) and the rules you list in `firewall_allow`.
 - Fail2Ban bans addresses that fail SSH authentication 5 times in 10 minutes for an hour, longer for
   repeat offenders (up to a week), except those in `fail2ban_ignoreip`.
-- Security updates (including Ubuntu Pro ESM security updates where enabled) are installed automatically
-  every day by unattended-upgrades.
+- Security updates are installed automatically every day by unattended-upgrades: on Ubuntu from the security
+  pockets (and Ubuntu Pro ESM security updates where enabled), on Debian from Debian-Security and the point
+  releases.
 - The changes are made in an order that keeps the running SSH session working: the firewall allows the SSH
   port before it is enabled, and a new SSH port is opened and verified before port 22 is closed.
 

@@ -93,8 +93,8 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    and starts it. When the installer has finished and powered the VM off, it detaches both ISOs, deletes
    the seed ISO (it holds the password hash), starts the VM and waits for SSH. VMs that already exist are
    skipped, so reruns are safe.
-3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 24.04 or 26.04
-   server, not only ones this project installed:
+3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04
+   or Debian 12 or 13 server, not only ones this project installed:
    - `apt` full upgrade, hostname and timezone;
    - the admin user, with its `authorized_keys` kept exactly in sync with your GitHub keys;
    - an SSH hardening drop-in: no root login, no passwords, and optionally a different port (which also

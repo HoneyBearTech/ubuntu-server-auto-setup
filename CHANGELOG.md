@@ -102,6 +102,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - **The web UI chooses the OS**: a Default OS on the Defaults page and an OS column on the Servers page, each
   a dropdown of the catalog's supported releases (`Ubuntu 24.04 (noble) · until 2029-05-31`); the Run page
   shows each Ubuntu release's installer ISO and which node builds it.
+- **The baseline runs on Debian 12 and 13** (on servers you already have; installing Debian comes with
+  cloud-image installs): unattended-upgrades gets Debian's own origins (point releases and Debian-Security, no
+  ESM), and a waiting reboot is found by comparing the newest kernel in `/boot` with the one running, since
+  Debian writes no `/var/run/reboot-required`. The baseline and the updates playbook now share that check
+  (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
+  job runs it on each of those releases and on Debian 12 and 13 (`make test-baseline`).
 
 ### Changed
 

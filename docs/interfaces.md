@@ -149,9 +149,9 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
 | `timezone` | `Etc/UTC` | The timezone. |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. Its name before 0.7.0, `apt_upgrade`, is still read until 1.0. |
-| `reboot_if_required` | `false` | Reboot when upgrades ask for it. |
+| `reboot_if_required` | `false` | Reboot when upgrades ask for it: on Ubuntu when `/var/run/reboot-required` exists, on Debian when `/boot` has a newer kernel than the one running (the same check as the updates playbook's, `roles/updates/tasks/reboot_required/`). Otherwise the run reports it. |
 | `common_packages` | `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim` | Packages installed on every server. |
-| `unattended_upgrades_origins` | release, security and ESM security pockets | What unattended-upgrades installs. |
+| `unattended_upgrades_origins` | the distribution's (`roles/common/vars/`) | What unattended-upgrades installs, as `Allowed-Origins` entries. Ubuntu: the release and security pockets and ESM security; Debian: point releases and Debian-Security (no ESM). |
 | `unattended_upgrades_auto_reboot`, `unattended_upgrades_reboot_time` | `false`, `"04:00"` | Automatic reboots after unattended upgrades. |
 | `unattended_upgrades_remove_unused` | `true` | Remove unused dependencies. |
 

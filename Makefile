@@ -7,7 +7,7 @@ LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 CLUSTER_INVENTORY ?= $(wildcard inventory/pve.usas_pve.yml)
 CLUSTER_ARG := $(if $(CLUSTER_INVENTORY),-i $(CLUSTER_INVENTORY),)
 
-.PHONY: help deps app lint syntax test test-updates catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check
+.PHONY: help deps app lint syntax test test-updates test-baseline catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -33,6 +33,9 @@ test: ## Integration tests against containers and a mock Proxmox API (needs Dock
 
 test-updates: ## Integration tests of the updates playbook (needs Docker; OS=ubuntu-24.04 picks the release)
 	tests/updates.sh
+
+test-baseline: ## The baseline on one OS (needs Docker; OS=debian-12 picks the release, debian-13 by default)
+	tests/baseline.sh
 
 catalog: ## Pin the newest image of every supported release in the OS catalog (vendor signatures checked; needs gpgv)
 	python3 tools/update_os_catalog.py

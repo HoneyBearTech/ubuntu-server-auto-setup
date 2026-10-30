@@ -30,11 +30,10 @@ common_packages:
   - unattended-upgrades
   - vim
 
-unattended_upgrades_origins:
-  - "${distro_id}:${distro_codename}"
-  - "${distro_id}:${distro_codename}-security"
-  - "${distro_id}ESMApps:${distro_codename}-apps-security"
-  - "${distro_id}ESM:${distro_codename}-infra-security"
+# What unattended-upgrades installs, as Allowed-Origins ("origin:suite"). The default is the distribution's
+# (roles/common/vars): Ubuntu's release and security pockets plus ESM security; Debian's point releases and
+# Debian-Security.
+unattended_upgrades_origins: "{{ common_os_unattended_origins }}"
 unattended_upgrades_auto_reboot: false
 unattended_upgrades_reboot_time: "04:00"
 unattended_upgrades_remove_unused: true

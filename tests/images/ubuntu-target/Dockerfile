@@ -1,17 +1,21 @@
 # Stands in for a VM the Ubuntu installer has just set up: Ubuntu with systemd, SSH (socket-activated from
 # 24.04 on), sudo-rs on 26.04 and the admin user with passwordless sudo, as the autoinstall user-data leaves
-# it. D-Bus and python3-apt are on every Ubuntu Server; check mode needs them before the baseline has installed
-# anything.
+# it. D-Bus, python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs
+# them before the baseline has installed anything.
 # The package lists are kept, as on an installed server: the apt module judges them by the directory's age, so
 # emptied lists from a build minutes ago would count as fresh and never be refreshed.
 #
-# OS picks the release (ubuntu-26.04, ubuntu-24.04 or ubuntu-22.04). The integration tests build the "target"
-# stage; the updates tests build "updates", which adds a signed apt repository with updates to install
-# (test-repo.sh) and a boot ID that changes when the container restarts.
+# OS picks the release (ubuntu-26.04, ubuntu-24.04, ubuntu-22.04, debian-13 or debian-12). Debian stands in for a
+# VM installed from Debian's cloud image: classic sudo, sshd from ssh.service (no socket activation), the admin
+# user with the sudoers file the cloud-init seed writes. The integration tests build the "target" stage; the
+# updates tests build "updates", which adds a signed apt repository with updates to install (test-repo.sh) and a
+# boot ID that changes when the container restarts.
 ARG OS=ubuntu-26.04
 FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944 AS ubuntu-26.04
 FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS ubuntu-24.04
 FROM ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956 AS ubuntu-22.04
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS debian-13
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS debian-12
 
 # hadolint ignore=DL3006
 FROM ${OS} AS target
@@ -21,7 +25,7 @@ RUN . /etc/os-release \
  && if [ "$VERSION_ID" = 26.04 ]; then sudo_rs=sudo-rs; else sudo_rs=; fi \
  && apt-get update \
  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server python3 python3-apt sudo $sudo_rs \
-      iproute2 ca-certificates \
+      iproute2 ca-certificates tzdata \
  && useradd -m -s /bin/bash -G sudo sysadmin \
  && echo 'sysadmin:test-password' | chpasswd \
  && echo 'sysadmin ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-ansible-sysadmin \
@@ -30,7 +34,7 @@ RUN . /etc/os-release \
  && mkdir -p /var/log/installer \
  && echo 'password: "$6$test$hash"' > /var/log/installer/autoinstall-user-data \
  && chmod 0600 /var/log/installer/autoinstall-user-data \
- && if [ "$VERSION_ID" = 22.04 ]; then systemctl enable ssh; else systemctl enable ssh.socket; fi
+ && if [ "$ID" = debian ] || [ "$VERSION_ID" = 22.04 ]; then systemctl enable ssh; else systemctl enable ssh.socket; fi
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 
