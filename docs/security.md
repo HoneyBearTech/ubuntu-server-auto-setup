@@ -176,13 +176,27 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   would load as a number, boolean or null, which can't hold a template, is written as a plain quoted string, so
   it stays text); commands
   run with argument lists, never a shell; `--limit` takes only the inventory's own host and group names.
-- The VMs page only reads: it lists the cluster's VMs and asks their guest agents, through the Proxmox API,
+- The VMs page lists the cluster's VMs and asks their guest agents, through the Proxmox API,
   for addresses, the OS and the host name with the read-only `VM.GuestAgent.Audit` privilege (on Proxmox
   VE 8, the broader `VM.Monitor` stays optional). What a guest reports is treated as untrusted: only
   usable IPv4 addresses are kept, other strings are stripped of control characters and shortened, every
   address shows its source, nothing is shown as HTML, and no guest-reported value decides anything. Agent
   calls are few, short and bounded (4 at a time, 5 seconds each, 15 seconds per refresh, cached), so a
   slow or hostile guest can't stall the UI.
+- **Runs on VMs picked on the VMs page** reach only VMs whose SSH host keys were pinned after the user
+  compared the scanned fingerprints with the VM's console. Keys are pinned by cluster and VM ID
+  (`usas-<cluster>-<vmid>` in `known_hosts`, used as `HostKeyAlias` with `StrictHostKeyChecking=yes`), not by
+  address, so a guest that reports another VM's address gets a refused connection; each VM gets its own SSH
+  control connection, so one opened for another VM at the same address is never reused. Credentials follow
+  the Servers page's VM IDs, never a VM's tags or description: a VM that isn't a server there runs as
+  `vm-<vmid>` in its own group (`usas_vms`), inherits none of the servers' group variables, and gets none of
+  the Vault's secrets (no admin or sudo password, no relay password, no webhook URL): sudo stays passwordless
+  for the user it logs in as. Every value of the run's inventory is checked against the roles' formats and
+  written `!unsafe`; the plan is rebuilt from the server's own listing of the cluster, never from what the
+  browser says about a VM. A run starts in check mode; the real run of the same plan (the same inventory,
+  parts and pinned keys, no setting saved since) is possible only within 30 minutes of a passing check, once,
+  after a confirmation. At most 25 VMs per run, one run at a time (also across processes). The audit log
+  (`/data/audit.jsonl`) records pins, runs, refusals and outcomes with the session and client address.
 - **The status API for dashboards** (`GET /api/status`, for Heimdall and the like) is off until a signed-in
   session that enters the password again makes its token. The token (32 random bytes after `usas_st_`) is
   shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password through scrypt. It is accepted
@@ -385,7 +399,8 @@ control node trusts, but only after something has been trusted the first time. [
 shows how to read the node's host key fingerprints and the API's certificate on the node's console, compare
 them with what the control node sees, and pin them: `known_hosts` entries checked with
 `StrictHostKeyChecking=yes` (for every node of a cluster), `pve_validate_certs: true` with the cluster's CA
-in the trust store, and how to do the same in the web UI's data volume.
+in the trust store, and how to do the same in the web UI's data volume. VMs picked on the VMs page are
+pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vms-you-didnt-create-the-vms-page)).
 
 ## What it does not protect against
 
@@ -425,6 +440,14 @@ in the trust store, and how to do the same in the web UI's data volume.
   and rolling back to one also undoes the security updates. On a VM whose disk unlocks with the TPM, a
   Secure Boot update means typing the passphrase at the console at the next boot; the playbook holds that
   reboot and says so.
+- **A VM you run the baseline on from the VMs page, and its owner.** The baseline changes SSH, the firewall,
+  packages and users on it; the review lists what would matter on a server in use, and the check run shows
+  the details, but you decide. Root on such a VM sees everything a run sends it: the web UI's public key, the
+  login user's sudo (passwordless, so nothing to capture), the firewall rules and the GitHub keys. No secret
+  of the Vault goes to it, but the web UI's SSH key, which also reaches your other servers, is the one that
+  logs in: a hostile VM can't use the key itself, only what its owner already has. Pinning protects against
+  a guest that lies about its address only if you really compare the fingerprints with the VM's console.
+  The audit log names a session (a hash of its ID) and an address, not a person: the UI has one password.
 - **Proxmox administrators and root on the Proxmox nodes.** They can read the seed ISO while a VM is being
   installed (with the disk passphrase, if the VM is encrypted), read and change VM disks, read a VM's vTPM
   state and memory (so disk encryption doesn't keep them out), and run commands inside the VMs through
