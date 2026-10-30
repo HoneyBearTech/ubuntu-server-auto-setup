@@ -144,6 +144,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
 
+### Security
+
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
+
 ### Documentation
 
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
