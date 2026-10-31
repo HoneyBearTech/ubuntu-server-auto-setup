@@ -248,6 +248,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The updates playbook's health checks after a reboot could find SSH gone again for a moment (sshd or a port
+  forward still starting) and report the server as no longer answering. They now wait until a whole login works
+  again, for up to `updates_health_timeout`.
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
