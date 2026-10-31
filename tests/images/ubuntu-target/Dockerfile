@@ -86,7 +86,8 @@ COPY --from=test-repo /srv/usas-test-repo /srv/usas-test-repo
 COPY boot-id.service /etc/systemd/system/usas-boot-id.service
 COPY fragile.service /etc/systemd/system/usas-test-fragile.service
 # A container has no console: a getty that fails at boot would show up in the health check as a unit that
-# failed after the update.
+# failed after the update. apt ignores phasing when it can't read a machine ID (a container that has only just
+# booted may have none yet): a fixed one makes it hold usas-test-phased back on every run.
 # hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends unattended-upgrades needrestart \
@@ -101,6 +102,7 @@ RUN apt-get update \
  && mkdir -p /etc/systemd/system/apt-daily.timer.d /etc/systemd/system/apt-daily-upgrade.timer.d \
  && printf '[Timer]\nOnCalendar=\nOnCalendar=2099-01-01\nPersistent=false\nRandomizedDelaySec=0\n' \
       | tee /etc/systemd/system/apt-daily.timer.d/never.conf > /etc/systemd/system/apt-daily-upgrade.timer.d/never.conf \
+ && echo 'APT::Machine-ID "8d2a0f3c5b6e4a1f9c7d2e5b3a6f1c4d";' > /etc/apt/apt.conf.d/50usas-test-machine-id \
  && systemctl enable usas-boot-id.service \
  && systemctl mask getty@.service serial-getty@.service console-getty.service \
  && if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then \
