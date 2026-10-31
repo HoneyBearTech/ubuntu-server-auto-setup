@@ -1,0 +1,16 @@
+---
+# One cloud image (installer_image: {name, url, checksum}, from the OS catalog or vm_os_image_url): downloaded into the
+# Import folder of each storage that needs it (installer_image_storages). Included by main.yml.
+- name: Check the cloud image's file name
+  ansible.builtin.assert:
+    that: installer_image.name is match(installer_iso_name_pattern) and installer_image.name is match('.*\.qcow2\Z')
+    fail_msg: >-
+      The cloud image's file name {{ installer_image.name }} may contain only letters, digits, dots, underscores, plus
+      signs and hyphens, and must end in .qcow2 (Proxmox's Import content takes only those).
+    quiet: true
+
+- name: Put the cloud image in each storage's Import folder
+  ansible.builtin.include_tasks: image_storage.yml
+  loop: "{{ installer_image_storages | unique }}"
+  loop_control:
+    loop_var: installer_image_storage

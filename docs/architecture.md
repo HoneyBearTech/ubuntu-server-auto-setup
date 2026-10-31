@@ -33,8 +33,8 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | Playbooks | `build-installer.yml`, `provision-vms.yml`, `baseline.yml`, and `site.yml` that imports all three; `updates.yml`, for servers that already run; `prepare-node.yml`, once. | `playbooks/` |
 | `os_catalog` | The OS catalog (`vars/catalog.yml`: every supported release's images, pinned by URL and checksum) and shared defaults: the Ubuntu release, ISO names and URLs, and the ISO storage location. | `roles/os_catalog/` |
 | `tools/update_os_catalog.py` | Builds and checks the OS catalog from the vendors' indexes, verifying their signatures with `gpgv` against pinned fingerprints. Run by the maintainer (`make catalog`) and weekly in CI; never during a playbook run. | `tools/` |
-| `installer_iso` | Downloads and verifies the Ubuntu ISO on a Proxmox node and remasters it for hands-off installs. | `roles/installer_iso/` |
-| `proxmox_vm` | Creates one VM per host through the Proxmox API, with a per-host seed ISO, and waits for the install. | `roles/proxmox_vm/` |
+| `installer_iso` | Downloads and verifies the Ubuntu ISO on a Proxmox node and remasters it for hands-off installs, and downloads and verifies the cloud images. | `roles/installer_iso/` |
+| `proxmox_vm` | Creates one VM per host through the Proxmox API, from the installer ISO or a cloud image, with a per-host seed ISO, and waits for the install. | `roles/proxmox_vm/` |
 | `common` | Packages and upgrades (apt or dnf), hostname, timezone, the admin user, sudo, GitHub keys, automatic updates (unattended-upgrades or dnf-automatic, and their optional mail report), an optional msmtp mail relay, the guest agent, EPEL on the RHEL family when Fail2Ban or the relay needs it. | `roles/common/` |
 | `firewall` | UFW on Ubuntu and Debian, firewalld on the RHEL family: default policies, SSH (rate-limited), extra allow rules. | `roles/firewall/` |
 | `ssh_hardening` | The sshd drop-in, the optional port change (labelled for SELinux on the RHEL family) and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
@@ -47,14 +47,15 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 
 ## How a server is built
 
-### 1. The installer ISO (`build-installer.yml`, on the nodes the servers use, over SSH as `pve_ssh_user`)
+### 1. The installer ISO and cloud images (`build-installer.yml`, on the nodes the servers use, over SSH as `pve_ssh_user`)
 
 One inventory places VMs on the nodes of one Proxmox VE cluster: each server names its node (`pve_node`, the
 group's value by default), and one API endpoint answers for every node. The first play plans, without
 connecting to any host:
 
-- every server in the run needs the ISO in its ISO storage on its node (with no server in the run, every
-  node in the run in its own `pve_iso_storage`);
+- every server in the run needs its release's ISO in its ISO storage on its node (with no server in the run,
+  every node in the run in its own `pve_iso_storage`), or, installing from a cloud image, that image in the
+  same storage's Import content (`<storage>/import`), which the storage must allow;
 - the API's node list must contain every server's node, and each node's ISO storages
   (`/nodes/<node>/storage?content=iso`) the storage that server uses; one error names every wrong host;
 - a storage Proxmox marks `shared` (NFS, CIFS, CephFS) is one folder for the whole cluster, so the ISO is built
@@ -67,8 +68,8 @@ and stops with one message naming each node that didn't answer, before any node 
 
 The playbooks log in to the node as root by default. With the optional node user (`prepare-node.yml`,
 which runs once as root), they log in as a user with no sudo that can write only to its work directory and
-the ISO folders (through ACL entries), and read the ISO storage's folder from the file `prepare-node.yml`
-recorded, because `pvesm` runs for root only.
+the ISO and Import folders (through ACL entries), and read the ISO storage's folder from the file
+`prepare-node.yml` recorded, because `pvesm` runs for root only.
 
 1. Install `xorriso` and `gpgv` on the node (as root), or check that they are installed (as the node user).
 2. Take the ISO's checksum from the OS catalog (`roles/os_catalog/vars/catalog.yml`), which pins the point
@@ -87,30 +88,46 @@ recorded, because `pvesm` runs for root only.
    the argument is really there, and write a new ISO with `xorriso`, replaying the original boot records
    (BIOS and UEFI). Without the `autoinstall` argument, Ubuntu's installer stops and asks before it wipes a
    disk, even when it has an autoinstall configuration.
+6. For each cloud image, and each storage it goes in: download it into the storage's Import folder,
+   verifying the checksum the OS catalog pins (`sha256:` or, for Debian, `sha512:`; `get_url` with
+   `checksum`, a copy that's already there kept only if it has it). The node downloads it, not Proxmox:
+   Proxmox's own `download-url` would need a broader API token (`Datastore.AllocateTemplate`).
 
 ### 2. The VM (`provision-vms.yml`, on `servers`, from the control node)
 
 For each host, after checking that the required variables are set, and for all hosts at once that each
-node is in the cluster and each ISO storage allows ISO images on its node:
+node is in the cluster and each ISO storage allows ISO images (and Import content, for a cloud image) on its
+node:
 
 1. List the cluster's VMs through the API; if `pve_vmid` exists anywhere, report it and **skip the host**.
    Every node that gets a new VM must answer over SSH with a trusted host key; one error names each that
-   doesn't, before any VM is created.
+   doesn't, before any VM is created. A release built for x86-64-v3 (Rocky Linux 10, CentOS Stream 10) also
+   needs a CPU type that offers it and a node CPU with AVX2, BMI2, FMA and MOVBE (read from
+   `/proc/cpuinfo`).
 2. Fetch the public keys from `https://github.com/<github_user>.keys`, add `admin_extra_ssh_keys`, keep
    only lines that look like public keys, and stop if none are left.
 3. Hash the admin password with SHA-512 crypt on the control node.
-4. On the VM's own node, write the autoinstall `user-data` and `meta-data` into a `0700` directory under
+4. On the VM's own node, write the seed's files into a `0700` directory under
    `/var/tmp/ubuntu-server-auto-setup/` and pack them into `seed-<host>.iso` (volume label `CIDATA`, the
-   cloud-init NoCloud convention), mode `0600`. The `user-data` sets the hostname, the static network
-   configuration, the disk layout, the admin user with the password hash, the authorized keys, password SSH
-   off, the packages (`qemu-guest-agent`), security updates during install, passwordless sudo for the admin
-   user, and `shutdown: poweroff`.
+   cloud-init NoCloud convention), mode `0600`.
+   - **Ubuntu's installer** (`vm_install_method: autoinstall`): `user-data` and `meta-data`. The `user-data`
+     sets the hostname, the network configuration, the disk layout, the admin user with the password hash,
+     the authorized keys, password SSH off, the packages (`qemu-guest-agent`), security updates during
+     install, passwordless sudo for the admin user, and `shutdown: poweroff`.
+   - **A cloud image** (`cloud_image`): `user-data`, `meta-data` and `network-config`. The `user-data`
+     (cloud-init's own format) sets the hostname, the admin user with the password hash and the authorized
+     keys, password SSH off, passwordless sudo in `/etc/sudoers.d/90-ansible-<user>`, `qemu-guest-agent` with
+     DHCP, disables cloud-init for later boots (`/etc/cloud/cloud-init.disabled`) and powers the VM off. The
+     `network-config` has the same cards and settings as the installer's, each matched by its MAC address.
 5. Create the VM through the API (`community.proxmox.proxmox_kvm`): OVMF (UEFI) with an EFI disk, q35,
    VirtIO SCSI single with one disk, a VirtIO NIC on `pve_bridge` (optionally tagged), the guest agent
-   enabled, the installer ISO and the seed ISO as CD-ROMs, and the boot order disk then installer.
-6. Start the VM. The installer finds the seed ISO, installs without asking, and powers the VM off. The
-   playbook polls the VM's status until it is stopped (up to `vm_install_timeout`).
-7. Remove both CD-ROMs, set the boot order to the disk only, delete the seed ISO and its directory on the
+   enabled. With the installer: an empty disk, the installer ISO and the seed ISO as CD-ROMs, and the boot
+   order disk then installer. With a cloud image: the disk imported from the image in the ISO storage's Import
+   content (`import-from`), grown to `vm_disk_gb`, the seed ISO as the only CD-ROM, and the boot order disk.
+6. Start the VM. The installer (or cloud-init, on the image's first boot) finds the seed ISO, sets the system
+   up without asking, and powers the VM off. The playbook polls the VM's status until it is stopped (up to
+   `vm_install_timeout`).
+7. Remove the CD-ROMs, set the boot order to the disk only, delete the seed ISO and its directory on the
    node, and start the VM.
 8. Wait for SSH on port 22, replace the control node's `known_hosts` entry for the IP with the new host
    key (scanned once, trust on first use), and wait until Ansible can log in as the admin user (cloud-init

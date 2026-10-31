@@ -2,7 +2,10 @@
 what a hostile guest could put there."""
 
 import pytest
+import yaml
 from usas_web import vms as v
+
+from .conftest import REPO
 
 
 def resource(**kw):
@@ -145,25 +148,49 @@ def vm(**kw):
 
 
 UBUNTU = v.OsInfo("ubuntu", "26.04", "Ubuntu 26.04 LTS")
+CATALOG = yaml.safe_load((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]
+RELEASES = v.catalog_releases(CATALOG)
+
+
+def test_the_catalogs_releases():
+    ids = {(r.os_id, r.version) for r in RELEASES}
+    # Every catalog entry is known here, so a new family in the catalog shows up as a failing test.
+    assert len(RELEASES) == len(CATALOG)
+    assert {("ubuntu", "24.04"), ("debian", "13"), ("centos", "10"), ("rocky", "9"), ("almalinux", "9")} <= ids
+    assert v.catalog_releases([{"id": "freebsd-14", "name": "FreeBSD"}, {"id": "nothing"}, "x", None]) == ()
+    assert v.catalog_releases(None) == ()
 
 
 @pytest.mark.parametrize("machine,config,os,support,words", [
     (vm(type="lxc"), None, None, v.UNSUPPORTED, "container"),
     (vm(template=1), v.VmConfig(), UBUNTU, v.UNSUPPORTED, "template"),
-    (vm(), v.VmConfig(ostype="win11"), None, v.UNSUPPORTED, "Windows"),
+    (vm(), v.VmConfig(ostype="win11"), None, v.UNSUPPORTED, "Windows: the playbooks set up Ubuntu, Debian"),
     (vm(), v.VmConfig(), v.OsInfo("mswindows", "11", "Windows 11"), v.UNSUPPORTED, "Windows"),
     (vm(), v.VmConfig(ostype="other"), None, v.UNSUPPORTED, "OS type is other"),
     (vm(), v.VmConfig(ostype="l26"), None, v.UNKNOWN, "confirm"),
     (vm(status="stopped"), v.VmConfig(ostype="l26"), None, v.UNKNOWN, "Not running"),
     (vm(), None, None, v.UNKNOWN, "confirm"),
-    (vm(), v.VmConfig(), v.OsInfo("debian", "13", "Debian GNU/Linux 13"), v.UNSUPPORTED, "Debian"),
+    (vm(), v.VmConfig(), v.OsInfo("debian", "13", "Debian GNU/Linux 13"), v.SUPPORTED, "Debian"),
+    (vm(), v.VmConfig(), v.OsInfo("debian", "11", "Debian GNU/Linux 11"), v.NEEDS_OVERRIDE, "only Debian 12 and 13"),
+    (vm(), v.VmConfig(), v.OsInfo("rocky", "9.4", "Rocky Linux 9.4"), v.SUPPORTED, "Rocky"),
+    (vm(), v.VmConfig(), v.OsInfo("almalinux", "10.0", "AlmaLinux 10"), v.SUPPORTED, "AlmaLinux"),
+    (vm(), v.VmConfig(), v.OsInfo("centos", "9", "CentOS Stream 9"), v.SUPPORTED, "CentOS"),
+    (vm(), v.VmConfig(), v.OsInfo("rocky", "8.10", "Rocky Linux 8.10"), v.NEEDS_OVERRIDE, "in the OS catalog"),
+    (vm(), v.VmConfig(), v.OsInfo("fedora", "41", "Fedora Linux 41"), v.UNSUPPORTED, "the playbooks set up"),
     (vm(), v.VmConfig(), UBUNTU, v.SUPPORTED, "Ubuntu 26.04"),
     (vm(), v.VmConfig(), v.OsInfo("ubuntu", "24.04", ""), v.SUPPORTED, "ubuntu"),
-    (vm(), v.VmConfig(), v.OsInfo("ubuntu", "22.04", "Ubuntu 22.04.5 LTS"), v.NEEDS_OVERRIDE, "only 26.04 and 24.04"),
+    (vm(), v.VmConfig(), v.OsInfo("ubuntu", "22.04", "Ubuntu 22.04.5 LTS"), v.SUPPORTED, "22.04"),
+    (vm(), v.VmConfig(), v.OsInfo("ubuntu", "25.04", "Ubuntu 25.04"), v.NEEDS_OVERRIDE, "only Ubuntu 22.04, 24.04"),
+    # Ubuntu's VERSION_ID is the whole release: 24.10 isn't 24.04.
+    (vm(), v.VmConfig(), v.OsInfo("ubuntu", "24.10", ""), v.NEEDS_OVERRIDE, "OS catalog"),
 ])
 def test_classify(machine, config, os, support, words):
-    found, reason = v.classify(machine, config, os)
-    assert found == support and words in reason
+    found, reason = v.classify(machine, config, os, RELEASES)
+    assert found == support and words in reason, reason
+
+
+def test_with_no_releases_nothing_is_supported():
+    assert v.classify(vm(), v.VmConfig(), UBUNTU, ())[0] == v.UNSUPPORTED
 
 
 def test_the_page_uses_the_playbooks_parser():

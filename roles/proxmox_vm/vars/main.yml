@@ -22,6 +22,11 @@ provision_disk_passphrase_pattern: '^[\x20-\x7a|~]{12,512}\Z'
 pve_api_dropped_pattern: >-
   Connection aborted|RemoteDisconnected|Remote end closed|Connection reset|ConnectionResetError|BrokenPipe|EOF
   occurred|UNEXPECTED_EOF|Max retries exceeded
+# For a release built for x86-64-v3 (os_catalog_x86_64_v3_ids): the VM CPU types that don't offer it, and the flags
+# the node's CPU must have (read from /proc/cpuinfo) for host or any other type to.
+provision_x86_64_v2_cpu_types: [kvm64, qemu64, x86-64-v2, x86-64-v2-AES]
+provision_x86_64_v3_flags: [avx2, bmi2, fma, movbe]
+provision_cpuinfo_file: /proc/cpuinfo
 # Files in which Ubuntu's installer keeps its configuration on the installed system (root-only).
 provision_installer_config_copies:
   - /var/log/installer/autoinstall-user-data

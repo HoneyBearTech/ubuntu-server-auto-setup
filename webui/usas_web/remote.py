@@ -220,8 +220,9 @@ class VmLister:
     BUDGET = 15
     WORKERS = 4
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, clock: Callable[[], float] = time.monotonic, releases: tuple[v.Release, ...] = ()):
         self.clock = clock
+        self.releases = releases  # what the playbooks support: the OS catalog's releases
         self._lock = threading.Lock()
         self._cache: dict[tuple, tuple[float, Any]] = {}
         self._inflight: dict[tuple, Future] = {}
@@ -358,7 +359,7 @@ class VmLister:
             addresses = sorted(addresses, key=lambda a: ipaddress.IPv4Address(a) not in network)
         server = servers.get(vm.vmid, {})
         ip, source = v.pick_ip(addresses, server.get("ansible_host", ""), config.ipconfig0 if config else "")
-        support, reason = v.classify(vm, config, agent.os)
+        support, reason = v.classify(vm, config, agent.os, self.releases)
         return {
             "vmid": vm.vmid, "name": vm.name, "node": vm.node, "type": vm.type, "status": vm.status,
             "template": vm.template, "lock": vm.lock, "tags": vm.tags, "cpu": round(vm.cpu, 4),

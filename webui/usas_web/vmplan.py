@@ -87,7 +87,7 @@ class Target:
     fingerprints: list[str]
     manage_hostname: bool = False
     ufw: list[dict[str, str]] = field(default_factory=list)
-    override: bool = False  # an untested Ubuntu release or an OS the guest didn't report, confirmed
+    override: bool = False  # a release outside the OS catalog, or an OS the guest didn't report, confirmed
 
 
 @dataclass
@@ -246,7 +246,8 @@ def warnings(targets: list[Target], tags: list[str], settings: Settings) -> list
         if t.manage_hostname:
             found.append(f"{t.name} is renamed to {t.pve_name}.")
         if t.override:
-            found.append(f"{t.name}: the playbooks aren't tested on its OS (you confirmed it is Ubuntu).")
+            found.append(f"{t.name}: its OS isn't a release of the OS catalog, or the guest didn't report it (you "
+                         "chose to run it anyway).")
     return found
 
 
@@ -291,7 +292,8 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         # needs no confirmation. An untested release always does.
         needs = (v.NEEDS_OVERRIDE,) if server is not None else (v.NEEDS_OVERRIDE, v.UNKNOWN)
         if row.get("support") in needs and not override:
-            errors[prefix + "override"] = f"Confirm that VM {vmid} runs Ubuntu: {row.get('reason', '')}"
+            errors[prefix + "override"] = (f"VM {vmid}: {row.get('reason', '')} Tick “Run the baseline on it "
+                                           "anyway” to go on.")
         pve_name = v.text(row.get("name"), 64)  # the listing cleaned it already
         alias = aliases[vmid]
         if server is not None:

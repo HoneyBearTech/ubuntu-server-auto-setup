@@ -25,7 +25,9 @@ defaults and the advice in the README's "Running it securely" section and in [we
 - The admin password leaves the control node only as a salted SHA-512 crypt hash. On the Proxmox node the
   hash exists only in the per-host seed files (directory `0700`, files `0600`, owned by the user the
   playbooks log in as: root, or the node user) for the duration of provisioning; the seed ISO and its
-  directory are deleted once the installer has finished.
+  directory are deleted once the installer (or a cloud image's first boot) has finished. On a server installed
+  from a cloud image, cloud-init's root-only copies of the hash under `/var/lib/cloud` are deleted by the
+  baseline (it can't read them again: the seed disabled cloud-init for later boots).
 - The API token is sent only to the Proxmox API, over HTTPS with certificate verification on by default
   (`pve_validate_certs: true`).
 - The disk encryption passphrase (`vault_disk_passphrase`, only with `vm_disk_encryption`) is written only
@@ -65,6 +67,10 @@ defaults and the advice in the README's "Running it securely" section and in [we
   (`installer_signing_fingerprint`), before the ISO's checksum is taken from it. A missing or bad signature,
   a signature by any other key, or a checksum mismatch stops the run. To inspect the shipped keys:
   `gpg --show-keys roles/installer_iso/files/ubuntu-cdimage-keyring.gpg tools/os-catalog-keys/*.asc`.
+- A cloud image (`vm_install_method: cloud_image`) is downloaded by the node over HTTPS into its storage's
+  Import folder and must have the checksum the catalog pins (or `vm_os_image_sha256`, for an image the catalog
+  doesn't have); a copy already there is kept only if it has it, and a mismatch stops the run before any VM
+  is created from it. Proxmox only copies it into the new VM's disk; the API token can't download anything.
 - SSH public keys come from `https://github.com/<github_user>.keys` over HTTPS. Only lines that look like
   public keys are used, and they reach the installer configuration as data written with `to_nice_yaml`, so they can't add other
   configuration or commands.
@@ -73,13 +79,15 @@ defaults and the advice in the README's "Running it securely" section and in [we
 
 - An existing VM is never modified, reinstalled or wiped: provisioning skips every `pve_vmid` that already
   exists anywhere in the cluster. Only the disk of the VM being created is erased.
-- The installer reads its configuration from a local CD-ROM image; nothing is served on the network, and
-  the new server doesn't fetch its configuration from anywhere.
+- The installer (or cloud-init, on a cloud image's first boot) reads its configuration from a local CD-ROM
+  image; nothing is served on the network, and the new server doesn't fetch its configuration from anywhere.
+  A cloud image's seed disables cloud-init for every later boot, so a boot without the seed can't make it
+  start over (new host keys, the image's default user).
 - The installed server has password authentication over SSH off and only your keys authorized from its
   first boot.
 - New VMs boot with UEFI Secure Boot on (`vm_secure_boot: true`, the default): their EFI disk has
-  Microsoft's keys pre-enrolled, so the firmware runs only Ubuntu's signed shim, GRUB and kernel, and the
-  kernel (in lockdown) loads only signed modules. The remastered installer ISO keeps Ubuntu's signed EFI boot
+  Microsoft's keys pre-enrolled, so the firmware runs only the distribution's signed shim, GRUB and kernel
+  (Ubuntu's, or the cloud image's vendor's), and the kernel (in lockdown) loads only signed modules. The remastered installer ISO keeps Ubuntu's signed EFI boot
   image unchanged (only `grub.cfg`, a configuration file GRUB doesn't verify, is replaced), and CI installs
   from it under Secure Boot.
 - The Proxmox API token needs only the privileges listed in [installing.md](installing.md#2-create-the-proxmox-api-token)

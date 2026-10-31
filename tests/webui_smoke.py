@@ -140,10 +140,11 @@ def check_vms(ui: UI) -> None:
           "a token that may not ask an agent is explained", data.get("notes"))
     check(rows.get(110, {}).get("agent") in ("timeout", "pending"), "a slow agent doesn't hold the list up",
           rows.get(110))
-    check([rows.get(i, {}).get("support") for i in (105, 106, 108, 112, 200)] ==
-          ["unsupported", "unsupported", "unsupported", "override", "unsupported"],
-          "Debian, Windows, templates and containers aren't supported; other Ubuntu releases need an override",
-          {i: rows.get(i) for i in (105, 106, 108, 112, 200)})
+    ids = (105, 106, 108, 112, 113, 114, 200)
+    check([rows.get(i, {}).get("support") for i in ids] ==
+          ["supported", "unsupported", "unsupported", "supported", "override", "unsupported", "unsupported"],
+          "the OS catalog's releases (Debian 13, Ubuntu 22.04) are supported; Windows, Fedora, templates and "
+          "containers aren't; an Ubuntu release outside the catalog needs an override", {i: rows.get(i) for i in ids})
     hostile = rows.get(109, {})
     shown = json.dumps(hostile)
     check(hostile.get("ip") == "10.10.10.29" and hostile.get("hostname") == "" and not hostile.get("name_ok") and

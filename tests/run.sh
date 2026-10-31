@@ -191,7 +191,7 @@ printf 'installer_signing_keyring: %s\ninstaller_signing_fingerprint: %s\n' "$TE
   "$(docker exec "$PVE" cat /srv/test-signing/fingerprint)" >"$TEST_TMP/signing.yml"
 docker exec "$PVE" sh -c 'cd /srv/ubuntu && sha256sum ubuntu-*-live-server-amd64.iso' >"$TEST_TMP/stand-in.sums"
 python3 - "$TEST_TMP" <<'PY'
-import sys, yaml
+import hashlib, os, sys, yaml
 catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))
 entries = {e["id"]: e for e in catalog["os_catalog"]}
 for line in open(f"{sys.argv[1]}/stand-in.sums"):
@@ -200,10 +200,25 @@ for line in open(f"{sys.argv[1]}/stand-in.sums"):
     release = ".".join(point.split(".")[:2])
     entries[f"ubuntu-{release}"]["methods"]["autoinstall"].update(
         url=f"https://releases.ubuntu.com/{release}/{name}", checksum=f"sha256:{digest}", file=name, build=point)
+# Stand-ins for the cloud images, served by the nodes like the ISOs, each checked with its vendor's algorithm.
+os.makedirs(f"{sys.argv[1]}/cloud", exist_ok=True)
+for entry in entries.values():
+    image = entry["methods"]["cloud_image"]
+    content = f"stand-in for {image['file']}\n".encode()
+    open(f"{sys.argv[1]}/cloud/{image['file']}", "wb").write(content)
+    algorithm = image["checksum"].split(":")[0]
+    image.update(url=f"http://127.0.0.1:8080/cloud/{image['file']}",
+                 checksum=f"{algorithm}:{hashlib.new(algorithm, content).hexdigest()}")
 yaml.safe_dump(catalog, open(f"{sys.argv[1]}/catalog.yml", "w"))
 entries["ubuntu-26.04"]["methods"]["autoinstall"].update(file="ubuntu-26.04.9-live-server-amd64.iso", build="26.04.9")
 yaml.safe_dump(catalog, open(f"{sys.argv[1]}/catalog-unpinned.yml", "w"))
+entries["debian-13"]["methods"]["cloud_image"]["checksum"] = "sha512:" + "0" * 128
+yaml.safe_dump(catalog, open(f"{sys.argv[1]}/catalog-bad-image.yml", "w"))
 PY
+for node in "$PVE" "$PVE2"; do
+  docker exec "$node" mkdir -p /srv/ubuntu/cloud
+  docker cp "$TEST_TMP/cloud/." "$node":/srv/ubuntu/cloud/
+done
 
 step "build-installer: local ISO storage, so each server's ISO is remastered on its node (26.04 and 24.04)"
 play_says 'local on pve-test-2: built by pve-test-2 (ubuntu-24.04.5-live-server-amd64.iso)' playbooks/build-installer.yml
@@ -306,7 +321,7 @@ play_fails "vm_os 'my-os-1' isn't in the OS catalog and vm_os_family isn't set" 
   -e vm_os_image_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 play_fails "Debian 13 can't be installed with vm_install_method autoinstall" playbooks/provision-vms.yml \
   --limit srv-luks -e vm_os=debian-13
-play_fails "installing from cloud images (vm_install_method cloud_image) isn't available yet" \
+play_fails "vm_disk_encryption needs vm_install_method autoinstall" \
   playbooks/provision-vms.yml --limit srv-luks -e vm_os=debian-13 -e vm_install_method=cloud_image
 play_fails "ubuntu_release 24.04 disagrees with vm_os ubuntu-26.04" playbooks/provision-vms.yml --limit srv-luks \
   -e ubuntu_release=24.04 -e vm_os=ubuntu-26.04
@@ -329,9 +344,9 @@ play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
 play tests/verify-provision.yml
 
 step "provision-vms: disk encryption needs Secure Boot, the lvm layout and a usable passphrase"
-play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+play_fails 'unencrypted), vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
   -e vm_secure_boot=false
-play_fails 'vm_disk_encryption needs vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
+play_fails 'unencrypted), vm_secure_boot true' playbooks/provision-vms.yml --limit srv-luks \
   -e autoinstall_storage_layout=direct
 play_fails 'pve_tpmstate_storage must be a Proxmox storage ID' playbooks/provision-vms.yml --limit srv-luks \
   -e 'pve_tpmstate_storage=local-lvm:1,version=v1.2'
@@ -416,6 +431,40 @@ there: local, synology-nfs)" playbooks/build-installer.yml -e pve_iso_storage=us
 play_fails "Storage 'usb-iso' doesn't exist on pve-test, isn't active, or doesn't allow ISO images" \
   playbooks/build-installer.yml --limit srv-01,pve-test -e pve_iso_storage=usb-iso
 play_fails "pve_iso_storage 'local;id' a storage ID" playbooks/build-installer.yml -e 'pve_iso_storage=local;id'
+
+step "build-installer: a cloud image goes into its storage's Import folder, once for a shared one, checked"
+DEBIAN_IMAGE=$(python3 -c 'import sys, yaml; print({e["id"]: e for e in yaml.safe_load(open(sys.argv[1]))["os_catalog"]}
+  ["debian-13"]["methods"]["cloud_image"]["file"])' "$TEST_TMP/catalog.yml")
+play_says "synology-nfs on pve-test (shared): downloaded by pve-test ($DEBIAN_IMAGE)" playbooks/build-installer.yml \
+  --limit srv-cloud,pve-test,pve-test-2
+play --idempotent playbooks/build-installer.yml --limit srv-cloud,pve-test,pve-test-2
+docker exec "$PVE2" cmp -s "/mnt/pve/synology-nfs/import/$DEBIAN_IMAGE" "/srv/ubuntu/cloud/$DEBIAN_IMAGE" \
+  || { echo "ERROR: the cloud image isn't in the shared storage's Import folder" >&2; exit 1; }
+play_fails "Couldn't download http://127.0.0.1:8080/cloud/$DEBIAN_IMAGE with the checksum sha512:000" \
+  playbooks/build-installer.yml --limit srv-cloud,pve-test -e "@$TEST_TMP/catalog-bad-image.yml"
+docker exec "$PVE" cmp -s "/mnt/pve/synology-nfs/import/$DEBIAN_IMAGE" "/srv/ubuntu/cloud/$DEBIAN_IMAGE" \
+  || { echo "ERROR: a download with the wrong checksum replaced the good copy" >&2; exit 1; }
+play_fails "srv-cloud: storage 'local' doesn't allow ISO images and Import content (for the cloud image) on node \
+pve-test" playbooks/build-installer.yml --limit srv-cloud,pve-test -e pve_iso_storage=local
+
+step "provision-vms: Rocky Linux 10 needs an x86-64-v3 CPU, in the VM and on the node"
+play_fails "vm_cpu_type x86-64-v2-AES doesn't offer it" playbooks/provision-vms.yml --limit srv-cloud \
+  -e vm_os=rocky-10 -e vm_cpu_type=x86-64-v2-AES
+play_fails "pve-test's (Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz) lacks avx2, bmi2, fma, movbe" \
+  playbooks/provision-vms.yml --limit srv-cloud -e vm_os=rocky-10 -e provision_cpuinfo_file=/srv/cpuinfo/cpuinfo-ivybridge
+# A newer CPU passes the check; the run stops next because build-installer hasn't fetched Rocky's image.
+play_fails "Rocky-10-GenericCloud-Base-" playbooks/provision-vms.yml --limit srv-cloud -e vm_os=rocky-10 \
+  -e provision_cpuinfo_file=/srv/cpuinfo/cpuinfo-haswell
+grep -q 'is not on pve-test. Run playbooks/build-installer.yml first' "$last_log"
+# AlmaLinux 10 (built for x86-64-v2 too) isn't checked.
+play_fails "AlmaLinux-10-GenericCloud-" playbooks/provision-vms.yml --limit srv-cloud -e vm_os=alma-10 \
+  -e provision_cpuinfo_file=/srv/cpuinfo/cpuinfo-ivybridge
+no_vms 4070
+
+step "provision-vms: a VM from a cloud image: its disk imported and grown, a cloud-init seed, powered off once set up"
+play playbooks/provision-vms.yml --limit srv-cloud
+play --idempotent playbooks/provision-vms.yml --limit srv-cloud
+play tests/verify-cloud-image.yml
 
 step "provision-vms: a server on DHCP, its address read from the guest agent, then a rerun that reads it again"
 play playbooks/provision-vms.yml --limit srv-dhcp

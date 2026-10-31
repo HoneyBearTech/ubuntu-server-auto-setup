@@ -166,6 +166,26 @@
   loop_control:
     label: "{{ item.path }}"
 
+# The configuration it built from them (cloud-config.txt) and its saved state (obj.pkl, which holds the user-data
+# too) are read again whenever cloud-init runs, so they go only where it no longer runs, as on a server installed
+# from a cloud image (its seed disables cloud-init after the first boot).
+- name: Find cloud-init's other copies of the user-data, where cloud-init is disabled
+  ansible.builtin.find:
+    paths: /var/lib/cloud/instances
+    patterns: [cloud-config.txt, obj.pkl]
+    recurse: true
+    depth: 2
+  register: common_cloud_init_state
+  when: common_cloud_init_status.stdout | default('') is search('(?m)^status:\s*disabled\s*$')
+
+- name: Remove cloud-init's other copies of the user-data
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ common_cloud_init_state.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Install SSH keys
   ansible.builtin.include_tasks: ssh_keys.yml
   tags: [ssh_keys]
