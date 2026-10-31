@@ -36,6 +36,11 @@
       auto_updates: ""
       health: {status: skipped, problems: []}
       snapshot: {status: "off", name: "", node: "", reason: "", warning: "", deleted: []}
+      wave:
+        number: 0
+        of: 0
+        groups: "{{ updates_group | usas_update_groups(usas_pve_tags | default([])) }}"
+        ha: "{{ usas_pve_hastate | default('') | length > 0 }}"
       pve:
         vmid: "{{ usas_pve_vmid | default(pve_vmid | default('')) }}"
         node: "{{ usas_pve_node | default(pve_node | default('')) }}"
@@ -91,6 +96,13 @@
       - updates_snapshot_required | string | lower in ['true', 'false']
       - updates_snapshot_keep | string is match(updates_snapshot_keep_pattern)
       - updates_snapshot_max_age | string is match(updates_snapshot_age_pattern)
+      - updates_serial | string is match(updates_serial_pattern)
+      - updates_group_max_parallel | string is match(updates_parallel_pattern)
+      - updates_node_max_parallel | string is match(updates_parallel_pattern)
+      - updates_group is string or (updates_group is sequence and updates_group is not mapping)
+      - >-
+        ([updates_group] if updates_group is string else updates_group) | map('string') | map('lower') | select
+        | reject('match', updates_group_pattern) | list | length == 0
     fail_msg: >-
       updates_scope must be one of {{ updates_scope_values | join(', ') }}, updates_apt_upgrade one of
       {{ updates_apt_upgrade_values | join(', ') }}, updates_reboot one of {{ updates_reboot_values | join(', ') }}
@@ -99,7 +111,9 @@
       updates_health_ignore_services lists of systemd unit names, updates_health_urls a list of {url, status} with
       http(s) URLs, the waits, timeouts, updates_max_fail_percentage and updates_snapshot_storage_warn whole
       numbers, updates_snapshot and updates_snapshot_required true or false, updates_snapshot_keep 0 to 10 and
-      updates_snapshot_max_age 1 to 365 (days).
+      updates_snapshot_max_age 1 to 365 (days), updates_serial a number of servers or a percentage,
+      updates_group_max_parallel and updates_node_max_parallel 0 to 99, and updates_group a name or a list of names
+      (letters, digits, _ . -).
     quiet: true
 
 - name: Check the Proxmox API settings for snapshots

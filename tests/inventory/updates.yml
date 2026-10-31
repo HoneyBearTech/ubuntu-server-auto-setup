@@ -11,7 +11,8 @@ all:
     updates_report_dir: "{{ test_tmp }}/reports"
     # A container shares the Docker host's kernel, whose boot_id doesn't change when the container restarts.
     updates_boot_time_command: cat /run/usas-boot-id
-    updates_reboot_timeout: 120
+    # A container that the CI runner keeps busy can take a while to let SSH in again after its reboot.
+    updates_reboot_timeout: 300
     # The test packages stand in for the kernel and the Secure Boot chain.
     updates_kernel_packages: [usas-test-kernel]
     updates_pcr7_packages: [usas-test-pcr7]

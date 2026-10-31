@@ -1,0 +1,35 @@
+---
+# Once every server has been checked: the waves the ready ones are updated in (usas_update_plan). In inventory
+# order, each server goes into the first wave with room for it (updates_serial servers, updates_group_max_parallel
+# of each of its update groups, updates_node_max_parallel that may reboot on its Proxmox node). The waves are set
+# on every server (run_once); in an apply the servers join usas_updates_waves in wave order, and the apply play
+# takes its serial from the waves' sizes. Nothing here connects to a server.
+- name: Note what the waves need to know about the server
+  ansible.builtin.set_fact:
+    updates_wave_host:
+      name: "{{ inventory_hostname }}"
+      groups: "{{ usas_updates_result.wave.groups }}"
+      node: "{{ usas_updates_result.pve.node }}"
+      reboot: "{{ updates_reboot == 'if_required' }}"
+
+- name: Plan the waves
+  ansible.builtin.set_fact:
+    usas_update_waves: >-
+      {{ ansible_play_hosts | map('extract', hostvars, 'updates_wave_host') | list
+      | usas_update_plan(updates_serial, updates_group_max_parallel, updates_node_max_parallel) }}
+  run_once: true
+
+- name: Note the server's wave
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'wave': usas_updates_result.wave | combine({'number': usas_update_waves
+      | usas_wave_number(inventory_hostname), 'of': usas_update_waves | length})}) }}
+
+- name: Line the servers up in wave order
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    groups: usas_updates_waves
+  loop: "{{ usas_update_waves | flatten }}"
+  run_once: true
+  changed_when: false
+  when: not ansible_check_mode
