@@ -40,14 +40,26 @@ PLAYBOOKS = {
     "baseline": ("playbooks/baseline.yml", "Apply the baseline to the servers", ()),
     "site": ("playbooks/site.yml", "All three, in order", ()),
     "keys": ("playbooks/baseline.yml", "Re-sync the admin user's SSH keys only", ("--tags", "ssh_keys")),
+    "updates-check": ("playbooks/updates.yml", "List each server's pending updates, changing nothing", ("--check",)),
+    "updates": ("playbooks/updates.yml", "Install the pending updates on the servers", ()),
 }
 # The tags a run of a playbook may pass with --tags (the roles' tags in playbooks/baseline.yml).
 PLAYBOOK_TAGS = {
     "baseline": ("ssh_keys", "common", "firewall", "ssh", "fail2ban", "hardening"),
 }
 # The variables a run of a playbook may pass with -e, each with the format its value must match. A value is
-# written as !unsafe, so Ansible never templates it. Nothing allows free-form -e.
-EXTRA_VARS: dict[str, dict[str, re.Pattern[str]]] = {}
+# written as !unsafe, so Ansible never templates it. Nothing allows free-form -e. The VMs page's updates runs
+# choose these (vmplan.UPDATE_OPTIONS); the other settings of the updates playbook come from the inventory.
+UPDATE_VARS = {
+    "updates_scope": re.compile(r"^(all|security)\Z"),
+    "updates_reboot": re.compile(r"^(never|if_required)\Z"),
+    "updates_snapshot": re.compile(r"^(true|false)\Z"),
+    "updates_ignore_window": re.compile(r"^(true|false)\Z"),
+}
+EXTRA_VARS: dict[str, dict[str, re.Pattern[str]]] = {"updates": UPDATE_VARS, "updates-check": UPDATE_VARS}
+# The updates playbook writes its report to updates_report_dir, which defaults to a folder of the project (read-only
+# in the image): the web UI's runs write it to its data folder instead (Runner.fixed_vars).
+UPDATE_ACTIONS = ("updates", "updates-check")
 KEEP_RUNS = 200
 # What an inventory name must look like to be used in --limit (no leading "-", no spaces or separators).
 LIMIT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\Z")
@@ -79,6 +91,8 @@ class Run:
     extra_vars: bool = False  # it had extra variables, runs/<id>.vars.yml
     settings: str = ""  # a hash of the saved inventory (every setting) when it started
     applied_from: str = ""  # a real run's check run
+    # The allowlisted variables it was started with (EXTRA_VARS), such as a VMs page updates run's choices.
+    options: dict[str, str] = field(default_factory=dict)
 
     @property
     def done(self) -> bool:
@@ -121,11 +135,11 @@ def parse_tags(action: str, tags: list[str] | tuple[str, ...]) -> list[str]:
     return [t for t in allowed if t in wanted]
 
 
-def extra_vars_yaml(action: str, values: dict[str, Any]) -> str:
+def extra_vars_yaml(action: str, values: dict[str, Any], fixed: dict[str, str] | None = None) -> str:
     """The extra-variables file for a run: only the playbook's allowed variables, each value checked against its
-    format and written as !unsafe."""
+    format and written as !unsafe, then fixed, the runner's own (never from a form)."""
     allowed = EXTRA_VARS.get(action, {})
-    data = {}
+    data: dict[str, Any] = {}
     for key, value in values.items():
         pattern = allowed.get(key)
         if pattern is None:
@@ -134,6 +148,7 @@ def extra_vars_yaml(action: str, values: dict[str, Any]) -> str:
         if not pattern.match(text):
             raise RunError(f"{key} isn't in the accepted format.")
         data[key] = Unsafe(text)
+    data.update({key: Unsafe(value) for key, value in (fixed or {}).items()})
     return dump_yaml(data)
 
 
@@ -242,6 +257,12 @@ class Runner:
 
         return scrub(data)
 
+    def fixed_vars(self, action: str) -> dict[str, str]:
+        """The variables the runner itself passes to a playbook."""
+        if action in UPDATE_ACTIONS:
+            return {"updates_report_dir": str(self.settings.data_dir / "updates" / "reports")}
+        return {}
+
     def current(self) -> Run | None:
         with self._lock:
             return self._current[0] if self._current else None
@@ -328,7 +349,9 @@ class Runner:
         if not action:
             raise RunError("unknown action")
         tags = parse_tags(action, list(tags))
-        variables = extra_vars_yaml(action, extra_vars) if extra_vars else None
+        options = {str(k): str(v) for k, v in (extra_vars or {}).items()}
+        fixed = self.fixed_vars(action)
+        variables = extra_vars_yaml(action, options, fixed) if options or fixed else None
         if inventory is not None:
             names = names | inventory_names(inventory)
         limit = parse_limit(limit_text, names)
@@ -343,7 +366,7 @@ class Runner:
                 run = Run(id=run_id, action=action, check=check, diff=diff, limit=limit, status="running",
                           started=time.time(), kind=kind, tags=tags, targets=list(targets or []), plan=plan,
                           inventory=inventory is not None, extra_vars=variables is not None,
-                          settings=self.settings_digest(), applied_from=applied_from)
+                          settings=self.settings_digest(), applied_from=applied_from, options=options)
                 log = self.log_path(run_id)
                 write_private(log, "")
                 if inventory is not None:

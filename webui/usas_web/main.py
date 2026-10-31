@@ -38,7 +38,7 @@ from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
-from .runner import PLAYBOOKS, Run, RunError, Runner
+from .runner import PLAYBOOKS, UPDATE_ACTIONS, Run, RunError, Runner
 from .schema import Field, Invalid, Schema, display_value, parse_value
 from .sshkeys import (
     KeyProblem,
@@ -50,7 +50,7 @@ from .sshkeys import (
     saved_ca,
     vm_alias,
 )
-from .store import Config, Store
+from .store import Config, Store, write_private
 
 HERE = Path(__file__).parent
 # The page URLs and their titles (the browser tab shows the title before the app has loaded).
@@ -84,6 +84,8 @@ FRONTEND_ENTRY = "src/main.tsx"
 VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
 PLAN_TTL = 600  # a reviewed plan can be run for 10 minutes
 CHECK_TTL = 1800  # a real run needs a passing check run of the same plan from the last 30 minutes
+# The kinds of run the VMs page starts (Run.kind), and the playbook each runs.
+VM_RUNS = {"vms": "baseline", "updates": "updates"}
 # Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
 log = logging.getLogger("usas_web")
 
@@ -181,12 +183,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     passkeys = Passkeys(settings)
     audit = AuditLog(settings.data_dir / "audit.jsonl")
 
+    updates_state = settings.data_dir / "updates" / "state.json"
+
+    def remember_updates(run: Run, results: dict[str, Any]) -> None:
+        """Keeps each server's newest updates result (updates/state.json, 0600), for the Updates page."""
+        try:
+            state = json.loads(updates_state.read_text())
+        except (OSError, ValueError):
+            state = {}
+        hosts = state.get("hosts") if isinstance(state, dict) and isinstance(state.get("hosts"), dict) else {}
+        for name, result in results.items():
+            if isinstance(result, dict):
+                hosts[str(name)] = {"run": run.id, "check": run.check, "finished": run.finished, "result": result}
+        write_private(updates_state, json.dumps({"hosts": hosts}) + "\n")
+
     def run_ended(run: Run) -> None:
-        if run.kind == "vms":
-            hosts = (runner.hosts(run.id) or {}).get("hosts") or {}
+        if run.action in UPDATE_ACTIONS:
+            found = ((runner.hosts(run.id) or {}).get("updates") or {}).get("hosts")
+            if isinstance(found, dict) and found:
+                remember_updates(run, found)
+        if run.kind in VM_RUNS:
+            data = runner.hosts(run.id) or {}
+            hosts = data.get("hosts") or {}
+            results = {name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
+                       for name, r in hosts.items() if isinstance(r, dict)}
+            # An updates run also records what the playbook says each server ended as (updated, nothing, ...).
+            for name, r in ((data.get("updates") or {}).get("hosts") or {}).items():
+                if isinstance(r, dict):
+                    results.setdefault(name, {})["updates"] = r.get("status")
             audit.record("run.finished", run=run.id, check=run.check, status=run.status, returncode=run.returncode,
-                         hosts={name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
-                                for name, r in hosts.items() if isinstance(r, dict)})
+                         hosts=results)
 
     runner = Runner(settings, on_finish=run_ended)
     keys = Keys(settings)
@@ -1237,6 +1263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                      fetched=int(time.time()),
                      run={"presets": [{"key": k, "label": label, "tags": list(tags) if tags is not None else None}
                                       for k, (label, tags) in vmplan.PRESETS.items()],
+                          "updates": {name: list(values) for name, (_, values) in vmplan.UPDATE_OPTIONS.items()},
                           "default_preset": vmplan.DEFAULT_PRESET, "tags": list(vmplan.TAGS),
                           "max_hosts": vmplan.MAX_HOSTS, "user": str(setting(config, "admin_user")),
                           "ssh_port": int(setting(config, "ssh_port")), "busy": runner.current() is not None,
@@ -1285,6 +1312,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (KeyProblem, Invalid) as exc:
             return reply(422, vmid=vmid, error=exc.message)
 
+    def snapshot_problems(api: PveApi, vmids: list[int]) -> dict[int, str]:
+        """Why each VM can't have the snapshot an updates run would take before its update ("" if it can): the
+        token's privileges on it (VM.Snapshot) and Proxmox's own check of its disks. Blocks: run it in a thread."""
+        nodes_of = {vm.vmid: vm.node for vm in lister.resources(api)}
+        found = {}
+        for vmid in vmids:
+            node = nodes_of.get(vmid)
+            if node is None:
+                found[vmid] = "It isn't on the cluster any more."
+                continue
+            try:
+                privileges = api.get(f"/access/permissions?path=/vms/{vmid}") or {}
+                allowed = privileges.get(f"/vms/{vmid}") if isinstance(privileges, dict) else None
+                if not isinstance(allowed, dict) or not allowed.get("VM.Snapshot"):
+                    found[vmid] = "The API token's role lacks VM.Snapshot (docs/updates.md, \"Snapshots\")."
+                    continue
+                feature = api.get(f"/nodes/{quote(node, safe='')}/qemu/{vmid}/feature?feature=snapshot") or {}
+                if not (isinstance(feature, dict) and str(feature.get("hasFeature")) in ("1", "True", "true")):
+                    found[vmid] = "Proxmox says its disks don't support snapshots."
+                    continue
+            except RemoteProblem as exc:
+                found[vmid] = f"Proxmox couldn't say: {exc.message}"
+                continue
+            found[vmid] = ""
+        return found
+
+    @app.post("/api/vms/snapshots")
+    async def vm_snapshots(request: Request):
+        """Whether the selected VMs can have a snapshot before their updates, and why not."""
+        require_login(request)
+        form = await checked_form(request)
+        selected_text = [str(x) for x in form.getlist("vmid")]
+        if not all(vms.VMID_PATTERN.match(x) for x in selected_text) or len(selected_text) > vmplan.MAX_HOSTS:
+            raise Forbidden()
+        api = pve_api(store.load())
+        if api is None:
+            return reply(409, error="Set up the Proxmox API first: the host and the token.", setup="/proxmox")
+        try:
+            found = await asyncio.to_thread(snapshot_problems, api, list(dict.fromkeys(int(x) for x in selected_text)))
+        except RemoteProblem as exc:
+            return reply(502, error=exc.message)
+        return reply(vms=[{"vmid": vmid, "possible": not why, "reason": why} for vmid, why in found.items()])
+
     def stored_plan(session, plan_id: str) -> vmplan.Plan | None:
         now = time.time()
         for key in [k for k, (made, _) in session.vm_plans.items() if now - made > PLAN_TTL]:
@@ -1308,8 +1378,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         selected = list(dict.fromkeys(int(x) for x in selected_text))
         values = {k: str(val) for k, val in form.items() if isinstance(val, str) and k.startswith("vm-")}
         preset = str(form.get("preset", ""))
+        updates = preset == vmplan.UPDATES
         try:
-            tags = vmplan.preset_tags(preset, [str(t) for t in form.getlist("tags")])
+            if updates:
+                tags, options = [], vmplan.update_options(
+                    {k: str(val) for k, val in form.items() if isinstance(val, str) and k.startswith("updates-")})
+            else:
+                tags, options = vmplan.preset_tags(preset, [str(t) for t in form.getlist("tags")]), {}
         except vmplan.PlanProblem as exc:
             return reply(422, errors=exc.errors)
         if len(selected) > vmplan.MAX_HOSTS:
@@ -1338,9 +1413,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             plan = vmplan.build(rows, selected, values, servers=config.servers, pins=pins,
                                 aliases={vmid: alias_of(vmid) for vmid in selected}, formats=formats,
-                                settings=plan_settings(config), tags=tags, preset=preset)
+                                settings=plan_settings(config), tags=tags, preset=preset,
+                                playbook=vmplan.UPDATES if updates else "baseline", options=options)
         except vmplan.PlanProblem as exc:
             return reply(422, errors=exc.errors)
+        if options.get("updates_snapshot") == "true":
+            try:
+                problems = await asyncio.to_thread(snapshot_problems, api, selected)
+            except RemoteProblem as exc:
+                return reply(502, error=exc.message)
+            refused = "; ".join(f"VM {vmid}: {why}" for vmid, why in problems.items() if why)
+            if refused:
+                return reply(422, errors={"updates-snapshot": f"No snapshot is possible for {refused}"})
         plan_id = secrets.token_urlsafe(16)
         stored_plan(session, "")  # drops expired plans
         session.vm_plans[plan_id] = (time.time(), plan)
@@ -1356,10 +1440,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(422, error="That plan has expired (plans last 10 minutes). Review it again.")
         if form.get("mode") != "check":
             return reply(422, error="A plan runs in check mode first; its run's page then offers the real run.")
+        kind = "updates" if plan.playbook == vmplan.UPDATES else "vms"
         try:
-            started = runner.start("baseline", True, True, plan.limit, store.host_names(), secret_values(),
-                                   kind="vms", inventory=plan.inventory, tags=plan.tags, targets=plan.summary(),
-                                   plan=plan.digest)
+            started = runner.start(VM_RUNS[kind], True, kind == "vms", plan.limit, store.host_names(),
+                                   secret_values(), kind=kind, inventory=plan.inventory, tags=plan.tags,
+                                   targets=plan.summary(), plan=plan.digest, extra_vars=plan.options or None)
         except RunError as exc:
             return reply(422, error=exc.message)
         for target in plan.targets:
@@ -1367,13 +1452,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audit.record("vm.override", **who(request), run=started.id, vmid=target.vmid, name=target.name,
                              reason="its OS isn't a release of the OS catalog, or the guest didn't report it; "
                                     "run anyway")
-        audit.record("run.check", **who(request), run=started.id, plan=plan.digest, tags=plan.tags,
-                     targets=plan.summary())
+        if plan.options.get("updates_ignore_window") == "true":
+            audit.record("updates.window_ignored", **who(request), run=started.id,
+                         vms=[t.vmid for t in plan.targets])
+        audit.record("run.check", **who(request), run=started.id, plan=plan.digest, playbook=VM_RUNS[kind],
+                     tags=plan.tags, options=plan.options, targets=plan.summary())
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     def apply_problem(check: Run | None) -> str:
         """Why a check run's plan can't be run for real now, or "" if it can."""
-        if check is None or check.kind != "vms" or not check.check or check.applied_from:
+        if check is None or check.kind not in VM_RUNS or not check.check or check.applied_from:
             return "Only a check run started from the VMs page can be run for real."
         if check.status != "succeeded":
             return "The check run didn't succeed: fix what failed and run the check again."
@@ -1390,13 +1478,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pins = {t.get("alias", alias_of(int(t["vmid"]))): [k.fingerprint for k in
                                                            keys.trusted(t.get("alias") or alias_of(int(t["vmid"])))]
                 for t in check.targets}
-        if vmplan.digest(check.tags, inventory, pins) != check.plan:
+        if vmplan.digest(check.tags, inventory, pins, VM_RUNS[check.kind], check.options) != check.plan:
             return "A VM's pinned host keys changed since the check run: run the check again."
         return ""
 
     def apply_json(run: Run) -> dict[str, Any] | None:
         """For a VMs page check run: whether its plan can be run for real, and until when."""
-        if run.kind != "vms" or not run.check:
+        if run.kind not in VM_RUNS or not run.check:
             return None
         problem = apply_problem(run)
         return {"possible": not problem, "problem": problem,
@@ -1404,8 +1492,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/vms/apply")
     async def vm_apply(request: Request):
-        """Runs a passing check run's plan for real: the same hosts, inventory, tags and pinned keys, within 30
-        minutes of the check, once, after the user confirmed it."""
+        """Runs a passing check run's plan for real: the same playbook, hosts, inventory, tags, options and pinned
+        keys, within 30 minutes of the check, once, after the user confirmed it."""
         require_login(request)
         form = await checked_form(request)
         check = runner.get(str(form.get("run_id", "")))
@@ -1417,14 +1505,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(422, error=problem)
         inventory = runner.path(check.id, ".inventory.yml").read_text()
         try:
-            started = runner.start("baseline", False, True, check.limit, store.host_names(), secret_values(),
-                                   kind="vms", inventory=inventory, tags=check.tags, targets=check.targets,
-                                   plan=check.plan, applied_from=check.id)
+            started = runner.start(VM_RUNS[check.kind], False, check.kind == "vms", check.limit, store.host_names(),
+                                   secret_values(), kind=check.kind, inventory=inventory, tags=check.tags,
+                                   targets=check.targets, plan=check.plan, applied_from=check.id,
+                                   extra_vars=check.options or None)
         except RunError as exc:
             audit.record("run.refused", **who(request), check=check.id, reason=exc.message)
             return reply(422, error=exc.message)
-        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan, tags=check.tags,
-                     targets=check.targets, confirmed=True)
+        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan,
+                     playbook=VM_RUNS[check.kind], tags=check.tags, options=check.options, targets=check.targets,
+                     confirmed=True)
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     @app.get("/audit.jsonl")

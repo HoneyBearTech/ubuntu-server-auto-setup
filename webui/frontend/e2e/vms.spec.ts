@@ -166,3 +166,33 @@ for (const theme of ["dark", "light"] as const) {
     expect(width, "the page fits the phone's width").toBeLessThanOrEqual(375);
   });
 }
+
+for (const theme of ["dark", "light"] as const) {
+  test(`updates are chosen by keyboard and pass axe-core at 375 pixels in the ${theme} theme`, async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: "usas_theme", value: theme, url: baseURL! }]);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await open(page);
+    const box = page.getByLabel("Select web-2604", { exact: true });
+    await tabTo(page, box);
+    await page.keyboard.press("Space");
+    // The presets are a radio group (one Tab stop): chosen with the keyboard, as a user would.
+    const updates = page.getByRole("radio", { name: "Updates", exact: true });
+    await updates.focus();
+    await page.keyboard.press("Space");
+    await expect(updates).toBeChecked();
+    await expect(page.getByRole("heading", { name: "Update 1 selected VM" })).toBeVisible();
+    // The mock's token has no VM.Snapshot: the box can't be ticked, and says why.
+    const snapshot = page.getByLabel("Take a Proxmox snapshot of each VM before its update");
+    await expect(page.locator("#f-updates-snapshot-help")).toContainText("lacks VM.Snapshot", { timeout: 20_000 });
+    await expect(snapshot).toBeDisabled();
+    await expect(page.getByLabel("Extra firewall rules")).toHaveCount(0);
+    await page.getByRole("radio", { name: "When an update asks for it" }).focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("radio", { name: "When an update asks for it" })).toBeChecked();
+    await page.getByRole("button", { name: "Review the plan" }).click();
+    await expect(page.locator("#vm-errors")).toBeFocused();
+    await checkAxe(page, `/vms updates at 375 pixels, ${theme}`);
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(width, "the page fits the phone's width").toBeLessThanOrEqual(375);
+  });
+}

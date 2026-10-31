@@ -207,12 +207,15 @@ function useNow(running: boolean): number {
 }
 
 // After a VMs page check run that passed: the same plan for real, within 30 minutes, once, after a confirmation.
+// For the updates playbook the confirmation names the VMs that may reboot.
 function ApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
   const { navigate } = useRouter();
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hosts = run.targets ?? [];
+  const updates = run.kind === "updates";
+  const reboots = updates && run.options?.updates_reboot === "if_required";
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
@@ -230,23 +233,39 @@ function ApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
         {apply.possible ? (
           <form noValidate onSubmit={submit} className="stack">
             <ErrorMessage message={error} id="apply-error" />
-            <p>
-              The same plan without check mode: the same {plural(hosts.length, "VM", "VMs")}, settings, parts and
-              pinned host keys. It changes them as the results above say
-              {apply.until ? <>; possible until <time dateTime={isoTime(apply.until)}>{when(apply.until)}</time></> : null}.
-            </p>
+            {updates ? (
+              <p>
+                The same plan without check mode: the same {plural(hosts.length, "VM", "VMs")}, choices and pinned
+                host keys. It installs what the results above list, a wave at a time
+                {apply.until ? <>; possible until <time dateTime={isoTime(apply.until)}>{when(apply.until)}</time></> : null}.
+              </p>
+            ) : (
+              <p>
+                The same plan without check mode: the same {plural(hosts.length, "VM", "VMs")}, settings, parts and
+                pinned host keys. It changes them as the results above say
+                {apply.until ? <>; possible until <time dateTime={isoTime(apply.until)}>{when(apply.until)}</time></> : null}.
+              </p>
+            )}
             <ul className="plain-list">
               {hosts.map((t) => <li key={t.vmid}><code>{t.name}</code> (VM {t.vmid}{t.address ? `, ${t.address}` : ""})</li>)}
             </ul>
+            {updates ? (
+              reboots ? (
+                <Notice notice={{ kind: "warning", message: `These VMs may reboot, inside their reboot window, if an update asks for it: ${
+                  hosts.map((t) => t.name).join(", ")}.` }} />
+              ) : <p>Nothing reboots (reboots: never).</p>
+            ) : null}
             <div className="check">
               <input type="checkbox" id="apply-confirm" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
               <label htmlFor="apply-confirm">
-                I have read what would change, and want to change {hosts.length === 1 ? "this VM" : `these ${hosts.length} VMs`} now
+                {updates
+                  ? `I have read what would be installed, and want to update ${hosts.length === 1 ? "this VM" : `these ${hosts.length} VMs`} now${reboots ? `, rebooting ${hosts.length === 1 ? "it" : "them"} if needed` : ""}`
+                  : `I have read what would change, and want to change ${hosts.length === 1 ? "this VM" : `these ${hosts.length} VMs`} now`}
               </label>
             </div>
             <div className="actions">
               <button type="submit" className="button danger" aria-disabled={busy || undefined}>
-                <Icon name="play" />Run the baseline for real
+                <Icon name="play" />{updates ? "Install the updates for real" : "Run the baseline for real"}
               </button>
             </div>
           </form>
@@ -307,13 +326,15 @@ export function RunDetail({ id }: { id: string }) {
         <div><dt>{running ? "Elapsed" : "Duration"}</dt><dd>{duration(run, now)}</dd></div>
         <div><dt>Options</dt><dd>{runOptions(run)}</dd></div>
         {run.playbook ? <div><dt>Playbook</dt><dd>{run.playbook}</dd></div> : null}
-        {run.kind === "vms" ? <div><dt>Started from</dt><dd>The VMs page</dd></div> : null}
+        {run.kind === "vms" || run.kind === "updates" ? (
+          <div><dt>Started from</dt><dd>The VMs page{run.kind === "updates" ? " (updates)" : ""}</dd></div>
+        ) : null}
         {run.applied_from ? (
           <div><dt>Checked by</dt><dd><Link href={`/runs/${run.applied_from}`}>check run {run.applied_from}</Link></dd></div>
         ) : null}
       </dl>
       {data.apply && !running ? <ApplyPart run={run} apply={data.apply} /> : null}
-      {run.kind === "vms" || data.hosts ? (
+      {run.kind === "vms" || run.kind === "updates" || data.hosts ? (
         <HostResults runId={run.id} initial={data.hosts ?? null} targets={run.targets ?? []} running={running}
                      check={run.check} />
       ) : null}

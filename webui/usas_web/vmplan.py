@@ -1,5 +1,5 @@
-"""Plans for running the baseline against VMs picked on the VMs page: which hosts, with which settings, and the
-inventory that run gets.
+"""Plans for running the baseline, or the updates playbook, against VMs picked on the VMs page: which hosts, with
+which settings, and the inventory that run gets.
 
 Everything here is pure (no network, no files, no FastAPI), so the tests and the fuzzer can call it directly.
 The server builds a plan from the cluster listing it fetched itself and from the posted form, never from what
@@ -12,6 +12,10 @@ settings. Any other VM is named vm-<vmid> (never its Proxmox name, which could m
 the group usas_vms (which inherits none of the servers group's variables), and gets none of the Vault's secrets: no
 admin password, no sudo password, no relay password or webhook URL. Every host connects with its host keys
 pinned by cluster and VM ID (sshkeys.vm_alias).
+
+An updates plan (playbook "updates") runs playbooks/updates.yml with the choices of UPDATE_OPTIONS as allowlisted
+extra variables; its hosts get the cluster's facts the cluster inventory would give them (node, tags, HA state),
+which only order the waves.
 """
 
 import hashlib
@@ -36,6 +40,15 @@ PRESETS = {
     "custom": ("Custom", None),
 }
 DEFAULT_PRESET = "full"
+# The updates playbook's choices on the VMs page: the form field, the variable, and the values (the first is the
+# default). The two boxes are "true" when ticked.
+UPDATES = "updates"
+UPDATES_LABEL = "Updates"
+UPDATE_OPTIONS = {
+    "updates-scope": ("updates_scope", ("all", "security")),
+    "updates-reboot": ("updates_reboot", ("never", "if_required")),
+}
+UPDATE_BOXES = {"updates-snapshot": "updates_snapshot", "updates-window": "updates_ignore_window"}
 # Variables that come from the Vault: a VM outside the inventory gets them empty (the role defaults).
 VAULT_VARS = ("admin_password", "ansible_become_password", "mail_relay_password", "fail2ban_webhook_url")
 PORT = re.compile(r"^[0-9]{1,5}\Z")
@@ -88,6 +101,8 @@ class Target:
     manage_hostname: bool = False
     ufw: list[dict[str, str]] = field(default_factory=list)
     override: bool = False  # a release outside the OS catalog, or an OS the guest didn't report, confirmed
+    pve_tags: list[str] = field(default_factory=list)  # the VM's Proxmox tags (an updates run's groups)
+    hastate: str = ""  # set when Proxmox HA manages the VM
 
 
 @dataclass
@@ -97,7 +112,9 @@ class Plan:
     targets: list[Target]
     warnings: list[str]
     inventory: str
-    digest: str  # the same plan (hosts, settings, tags, pinned keys) gives the same digest
+    digest: str  # the same plan (hosts, settings, tags, pinned keys, options) gives the same digest
+    playbook: str = "baseline"  # or UPDATES
+    options: dict[str, str] = field(default_factory=dict)  # an updates plan's extra variables
 
     @property
     def limit(self) -> str:
@@ -122,6 +139,19 @@ def selectable(row: dict[str, Any]) -> tuple[bool, str]:
     if row.get("lock"):
         return False, f"It is locked ({row['lock']})."
     return True, ""
+
+
+def update_options(form: dict[str, str]) -> dict[str, str]:
+    """An updates plan's extra variables from the form, each one of its allowed values."""
+    options = {}
+    for name, (variable, values) in UPDATE_OPTIONS.items():
+        value = form.get(name) or values[0]
+        if value not in values:
+            raise PlanProblem({name: "Choose one of the options."})
+        options[variable] = value
+    for name, variable in UPDATE_BOXES.items():
+        options[variable] = "true" if form.get(name) == "on" else "false"
+    return options
 
 
 def preset_tags(preset: str, custom: list[str]) -> list[str]:
@@ -175,10 +205,31 @@ def ssh_args(known_hosts: str, alias: str) -> str:
     return f"-o UserKnownHostsFile={known_hosts} -o StrictHostKeyChecking=yes -o HostKeyAlias={alias}"
 
 
-def host_vars(target: Target, settings: Settings) -> dict[str, Any]:
+def cluster_vars(target: Target) -> dict[str, Any]:
+    """What the cluster inventory (plugins/inventory/usas_pve.py) tells the updates playbook about a VM."""
+    return {"usas_pve_vmid": target.vmid, "usas_pve_node": Unsafe(target.node),
+            "usas_pve_name": Unsafe(target.pve_name), "usas_pve_alias": Unsafe(target.alias),
+            "usas_pve_tags": [Unsafe(t) for t in target.pve_tags], "usas_pve_hastate": Unsafe(target.hastate)}
+
+
+def update_host_vars(target: Target, common: dict[str, Any]) -> dict[str, Any]:
+    """An updates run's variables for one host: a server keeps its own login, sudo and settings; a VM outside
+    the inventory logs in as its user, with passwordless sudo and none of the Vault's secrets."""
+    host: dict[str, Any] = {}
+    if not target.static:
+        host["ansible_host"] = Unsafe(target.address)
+        if target.port is not None:
+            host["ansible_port"] = target.port
+        host.update({"ansible_user": Unsafe(target.user), **{name: "" for name in VAULT_VARS}})
+    return {**host, **common, **cluster_vars(target)}
+
+
+def host_vars(target: Target, settings: Settings, playbook: str = "baseline") -> dict[str, Any]:
     """The run inventory's variables for one host."""
     common: dict[str, Any] = {"ansible_ssh_common_args": ssh_args(settings.known_hosts, target.alias),
                               "ansible_control_path": v.control_path(target.vmid)}
+    if playbook == UPDATES:
+        return update_host_vars(target, common)
     if target.static:
         return common  # a server keeps its own address, user, sudo and settings
     host: dict[str, Any] = {"ansible_host": Unsafe(target.address)}
@@ -202,9 +253,9 @@ def host_vars(target: Target, settings: Settings) -> dict[str, Any]:
     return host
 
 
-def inventory_text(targets: list[Target], settings: Settings) -> str:
-    static = {t.name: host_vars(t, settings) for t in targets if t.static}
-    foreign = {t.name: host_vars(t, settings) for t in targets if not t.static}
+def inventory_text(targets: list[Target], settings: Settings, playbook: str = "baseline") -> str:
+    static = {t.name: host_vars(t, settings, playbook) for t in targets if t.static}
+    foreign = {t.name: host_vars(t, settings, playbook) for t in targets if not t.static}
     children: dict[str, Any] = {}
     if foreign:
         children[GROUP] = {"hosts": foreign}
@@ -251,19 +302,50 @@ def warnings(targets: list[Target], tags: list[str], settings: Settings) -> list
     return found
 
 
-def digest(tags: list[str], inventory: str, pins: dict[str, list[str]]) -> str:
-    """Names a plan: the same tags, the same run inventory and the same pinned keys give the same digest."""
-    data = {"playbook": "baseline", "tags": tags, "inventory": inventory,
-            "pins": {alias: sorted(found) for alias, found in pins.items()}}
+def update_warnings(targets: list[Target], options: dict[str, str]) -> list[str]:
+    """What an updates run would do that matters on a server already in use."""
+    found = []
+    if options.get("updates_scope") == "security":
+        found.append("Only security updates are installed (updates_scope: security).")
+    else:
+        found.append("Every pending update is installed, kernels too (apt upgrade --with-new-pkgs: nothing is "
+                     "removed).")
+    if options.get("updates_reboot") == "if_required":
+        names = ", ".join(t.name for t in targets)
+        found.append(f"These VMs reboot if an update asks for it, inside their reboot window: {names}. Their "
+                     "health is checked after.")
+    else:
+        found.append("Nothing reboots: a server that needs a reboot is reported as “reboot pending”.")
+    if options.get("updates_snapshot") == "true":
+        found.append("Each VM gets a Proxmox snapshot of its disks before its update (the token's role needs "
+                     "VM.Snapshot). Rolling back is left to a Proxmox admin.")
+    if options.get("updates_ignore_window") == "true":
+        found.append("Each server's update window (updates_window) is ignored: the audit log records it.")
+    foreign = [t for t in targets if not t.static]
+    if foreign:
+        users = ", ".join(sorted({t.user for t in foreign}))
+        found.append(f"VMs outside the inventory get no sudo password: {users} needs passwordless sudo.")
+    return found
+
+
+def digest(tags: list[str], inventory: str, pins: dict[str, list[str]], playbook: str = "baseline",
+           options: dict[str, str] | None = None) -> str:
+    """Names a plan: the same playbook, tags, run inventory, pinned keys and options give the same digest."""
+    data: dict[str, Any] = {"playbook": playbook, "tags": tags, "inventory": inventory,
+                            "pins": {alias: sorted(found) for alias, found in pins.items()}}
+    if playbook != "baseline":
+        data["options"] = dict(sorted((options or {}).items()))
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
 def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, str], *, servers: list[dict[str, Any]],
           pins: dict[str, list[str]], aliases: dict[int, str], formats: Formats, settings: Settings,
-          tags: list[str], preset: str) -> Plan:
+          tags: list[str], preset: str, playbook: str = "baseline", options: dict[str, str] | None = None) -> Plan:
     """A plan for the selected VM IDs. rows are the cluster listing's rows by VM ID; form has each VM's settings
-    as vm-<vmid>-<setting>; servers are the Servers page's rows; pins are the pinned fingerprints by alias.
-    Raises PlanProblem with every error."""
+    as vm-<vmid>-<setting>; servers are the Servers page's rows; pins are the pinned fingerprints by alias. An
+    updates plan (playbook UPDATES) has no tags and takes options (update_options); a VM's firewall rules and host
+    name are the baseline's only. Raises PlanProblem with every error."""
+    updates = playbook == UPDATES
     errors: dict[str, str] = {}
     if not selected:
         raise PlanProblem({"selection": "Select at least one VM."})
@@ -271,7 +353,7 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         raise PlanProblem({"selection": f"Select at most {MAX_HOSTS} VMs for one run."})
     static_names = {str(s["name"]) for s in servers}
     static_addresses = {str(s.get("ansible_host")): str(s["name"]) for s in servers if s.get("ansible_host")}
-    removes_keys = not tags or bool({"common", "ssh_keys"} & set(tags))
+    removes_keys = not updates and (not tags or bool({"common", "ssh_keys"} & set(tags)))
     if settings.ssh_keys_exclusive and not settings.ui_key_authorized and removes_keys:
         errors["selection"] = ("The web UI's own key would be removed from the VMs (ssh_keys_exclusive), locking it "
                                "out: tick 'Authorize the UI's key' on the Defaults page first.")
@@ -290,18 +372,22 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         name, server = v.host_name(vmid, servers)
         # A server on the Servers page runs like it does from the Run page: whose OS the guest didn't report
         # needs no confirmation. An untested release always does.
-        needs = (v.NEEDS_OVERRIDE,) if server is not None else (v.NEEDS_OVERRIDE, v.UNKNOWN)
+        # The updates playbook skips a release it doesn't support by itself, and says so.
+        needs = () if updates else (v.NEEDS_OVERRIDE,) if server is not None else (v.NEEDS_OVERRIDE, v.UNKNOWN)
+        override = override and not updates
         if row.get("support") in needs and not override:
             errors[prefix + "override"] = (f"VM {vmid}: {row.get('reason', '')} Tick “Run the baseline on it "
                                            "anyway” to go on.")
         pve_name = v.text(row.get("name"), 64)  # the listing cleaned it already
         alias = aliases[vmid]
+        cluster = {"pve_tags": [v.text(t, 64) for t in row.get("tags") or []][:32],
+                   "hastate": v.text(row.get("hastate"), 20)}
         if server is not None:
             address = str(server.get("ansible_host") or "")
             targets.append(Target(
                 vmid=vmid, name=name, pve_name=pve_name, node=v.text(row.get("node"), 64), static=True,
                 address=address, source="inventory" if address else "dhcp", port=None, user=settings.admin_user,
-                alias=alias, fingerprints=pins.get(alias, []), override=override))
+                alias=alias, fingerprints=pins.get(alias, []), override=override, **cluster))
         else:
             if name in static_names:
                 errors[prefix + "address"] = f"A server on the Servers page is called {name} but has another VM ID."
@@ -324,11 +410,11 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
                 errors[prefix + "user"] = exc.message
                 user = ""
             try:
-                rules = parse_rules(form.get(prefix + "ufw", ""))
+                rules = [] if updates else parse_rules(form.get(prefix + "ufw", ""))
             except Invalid as exc:
                 errors[prefix + "ufw"] = exc.message
                 rules = []
-            manage = form.get(prefix + "hostname") == "on"
+            manage = form.get(prefix + "hostname") == "on" and not updates
             if manage and not v.HOSTNAME_PATTERN.match(pve_name):
                 errors[prefix + "hostname"] = f"'{pve_name}' isn't a valid host name, so it can't be set."
             source = ("agent" if address in (row.get("addresses") or [])
@@ -336,7 +422,7 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
             targets.append(Target(
                 vmid=vmid, name=name, pve_name=pve_name, node=v.text(row.get("node"), 64), static=False,
                 address=address, source=str(source), port=port, user=user, alias=alias,
-                fingerprints=pins.get(alias, []), manage_hostname=manage, ufw=rules, override=override))
+                fingerprints=pins.get(alias, []), manage_hostname=manage, ufw=rules, override=override, **cluster))
         if not pins.get(alias):
             errors.setdefault(prefix + "hostkey", f"Trust VM {vmid}'s host key first: scan it and compare the "
                                                   "fingerprints.")
@@ -347,12 +433,19 @@ def build(rows: dict[int, dict[str, Any]], selected: list[int], form: dict[str, 
         seen.setdefault(t.address, t.vmid)
     if errors:
         raise PlanProblem(errors)
-    inventory = inventory_text(targets, settings)
-    return Plan(preset=preset, tags=tags, targets=targets, warnings=warnings(targets, tags, settings),
-                inventory=inventory, digest=digest(tags, inventory, {t.alias: t.fingerprints for t in targets}))
+    options = dict(options or {}) if updates else {}
+    tags = [] if updates else tags
+    inventory = inventory_text(targets, settings, playbook)
+    found = update_warnings(targets, options) if updates else warnings(targets, tags, settings)
+    pinned = {t.alias: t.fingerprints for t in targets}
+    return Plan(preset=UPDATES if updates else preset, tags=tags, targets=targets, warnings=found,
+                inventory=inventory, digest=digest(tags, inventory, pinned, playbook, options),
+                playbook=UPDATES if updates else "baseline", options=options)
 
 
 def plan_json(plan: Plan) -> dict[str, Any]:
-    return {"preset": plan.preset, "preset_label": PRESETS[plan.preset][0], "tags": plan.tags,
+    label = UPDATES_LABEL if plan.playbook == UPDATES else PRESETS[plan.preset][0]
+    return {"preset": plan.preset, "preset_label": label, "tags": plan.tags, "playbook": plan.playbook,
+            "options": plan.options,
             "targets": [{**asdict(t), "ufw": [rule_text(r) for r in t.ufw]} for t in plan.targets],
             "warnings": plan.warnings, "digest": plan.digest}

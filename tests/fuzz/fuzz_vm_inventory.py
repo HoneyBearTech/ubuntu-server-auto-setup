@@ -13,6 +13,9 @@ Properties, for any cluster listing and any posted settings:
   to a usable IPv4 address in the address format, with its host keys pinned by its alias.
 - The plan's --limit passes the runner's own check against the inventory's names and comes back unchanged; its
   tags are in the baseline's allowlist.
+- An updates plan's choices (vmplan.update_options) are refused or are exactly the runner's allowlisted
+  variables, each matching its pattern, so runner.extra_vars_yaml takes them; its hosts get no baseline settings
+  (firewall rules, host name, override) and the VM's Proxmox tags only as !unsafe strings.
 - A VM's alias always matches sshkeys.ALIAS, and reading any known_hosts text finds only aliases.
 """
 
@@ -98,6 +101,7 @@ def one_input(data):
             "support": fdp.PickValueInList(list(SUPPORT)), "reason": text(fdp),
             "addresses": [maybe_ip(fdp) for _ in range(fdp.ConsumeIntInRange(0, 3))], "ip": maybe_ip(fdp),
             "ip_source": fdp.PickValueInList(["agent", "ipconfig0", "inventory", None]),
+            "tags": [text(fdp, 20) for _ in range(fdp.ConsumeIntInRange(0, 3))], "hastate": text(fdp, 10),
         }
     form = {}
     for vmid in vmids:
@@ -105,16 +109,35 @@ def one_input(data):
             if fdp.ConsumeBool():
                 form[f"vm-{vmid}-{name}"] = fdp.PickValueInList(["on", maybe_ip(fdp), "22", "ubuntu", text(fdp)])
     pins = {f"usas-pve-{vmid}": ["SHA256:x"] for vmid in vmids if fdp.ConsumeBool()}
-    preset = fdp.PickValueInList([*vmplan.PRESETS, text(fdp, 8)])
+    preset = fdp.PickValueInList([*vmplan.PRESETS, vmplan.UPDATES, text(fdp, 8)])
     custom = [fdp.PickValueInList([*vmplan.TAGS, text(fdp, 8)]) for _ in range(fdp.ConsumeIntInRange(0, 3))]
+    updates = preset == vmplan.UPDATES
+    options = {}
+    if updates:
+        choices = {}
+        for name, (_, values) in vmplan.UPDATE_OPTIONS.items():
+            if fdp.ConsumeBool():
+                choices[name] = fdp.PickValueInList([*values, text(fdp, 12)])
+        for name in vmplan.UPDATE_BOXES:
+            if fdp.ConsumeBool():
+                choices[name] = fdp.PickValueInList(["on", text(fdp, 4)])
+        try:
+            options = vmplan.update_options(choices)
+        except vmplan.PlanProblem as exc:
+            assert exc.errors and set(exc.errors) <= set(vmplan.UPDATE_OPTIONS)
+            options = vmplan.update_options({})
+        assert set(options) == set(runner.UPDATE_VARS)
+        assert all(runner.UPDATE_VARS[k].match(v) for k, v in options.items())
+        runner.extra_vars_yaml("updates", options)
     try:
-        tags = vmplan.preset_tags(preset, custom)
+        tags = [] if updates else vmplan.preset_tags(preset, custom)
     except vmplan.PlanProblem:
         tags = []
     try:
         plan = vmplan.build(rows, vmids, form, servers=SERVERS, pins=pins,
                             aliases={vmid: sshkeys.vm_alias("pve", vmid) for vmid in vmids}, formats=FORMATS,
-                            settings=SETTINGS, tags=tags, preset=preset if preset in vmplan.PRESETS else "full")
+                            settings=SETTINGS, tags=tags, preset=preset if preset in vmplan.PRESETS else "full",
+                            playbook=vmplan.UPDATES if updates else "baseline", options=options)
     except vmplan.PlanProblem as exc:
         assert exc.errors
         plan = None
@@ -133,7 +156,12 @@ def one_input(data):
             host = children["usas_vms"]["hosts"][target.name]
             for name in vmplan.VAULT_VARS:
                 assert host[name] == "", name
-            assert host["admin_sudo_nopasswd"] is True
+            if updates:
+                assert not {"admin_sudo_nopasswd", "webui_firewall_allow_host", "manage_hostname",
+                            "baseline_allow_unsupported"} & set(host)
+                assert all(isinstance(t, Typed) for t in host["usas_pve_tags"])
+            else:
+                assert host["admin_sudo_nopasswd"] is True
             assert re.match(IPV4, host["ansible_host"]) and host["ansible_host"] not in ("10.0.0.10",)
             assert host["ansible_ssh_common_args"].endswith(f"HostKeyAlias={target.alias}")
             assert sshkeys.ALIAS.match(target.alias) and pins.get(target.alias)
@@ -143,6 +171,7 @@ def one_input(data):
         names = runner.inventory_names(plan.inventory)
         assert runner.parse_limit(plan.limit, names) == plan.limit
         assert runner.parse_tags("baseline", plan.tags) == plan.tags
+        assert plan.options == options and (not updates or plan.tags == [])
 
     # Aliases, and finding them in any known_hosts text.
     cluster = text(fdp, 40)

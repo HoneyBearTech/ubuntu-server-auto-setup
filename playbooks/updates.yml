@@ -2,7 +2,8 @@
 # Lists and installs package updates on servers that already run: the ones this project installed (servers;
 # ubuntu_servers before 0.7.0, still read until 1.0), others added to the inventory (other_servers), and with the
 # cluster inventory (inventory/pve.usas_pve.yml) every other VM on the cluster (usas_pve_vms; usas_pve_skipped is
-# only reported). It never configures a server: it reads, installs, reboots only when updates_reboot asks for it,
+# only reported), and the VMs the web UI's VMs page picked that aren't servers (usas_vms, in that run's own
+# inventory). It never configures a server: it reads, installs, reboots only when updates_reboot asks for it,
 # checks the server's health and writes a report.
 # With --check it only reports what it would do. docs/updates.md describes it; make updates-check / make updates.
 
@@ -10,7 +11,7 @@
 # what would be installed and whether a reboot is waiting. In check mode this is the whole run. Unreachable
 # servers stay in the play so that their results reach the report.
 - name: Check what each server would update
-  hosts: servers:ubuntu_servers:other_servers:usas_pve_vms:usas_pve_skipped
+  hosts: servers:ubuntu_servers:other_servers:usas_pve_vms:usas_pve_skipped:usas_vms
   gather_facts: false
   become: true
   ignore_unreachable: true
