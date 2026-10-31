@@ -65,6 +65,7 @@ export interface Run {
   targets?: RunTarget[];
   plan?: string;
   applied_from?: string; // a real run's check run
+  options?: Record<string, string>; // an updates run's choices (updates_scope, updates_reboot, ...)
 }
 
 // For a VMs page check run: whether its plan can now be run for real (main.py apply_json).
@@ -103,10 +104,35 @@ export interface HostResult {
   failed_tasks: { task: string; message: string }[];
 }
 
+// What the updates playbook says of one server (callback_plugins/usas_summary.py update_result).
+export type UpdateStatus = "updated" | "nothing" | "pending" | "busy" | "skipped" | "unsupported" | "unreachable" | "failed";
+
+export interface UpdateResult {
+  status: UpdateStatus;
+  reason: string;
+  scope: string;
+  os: string;
+  pending: { name: string; current: string; candidate: string; security: boolean | string }[];
+  planned: string[];
+  upgraded: { name: string; from: string; to: string }[];
+  security_count: number;
+  held: string[];
+  excluded: string[];
+  deferred: string[];
+  removals: string[];
+  restart_services: string[];
+  reboot: { required: boolean; done: boolean; held: boolean; why: string };
+  health: { status: string; problems: string[] };
+  snapshot: { status: string; name: string; reason: string; warning: string };
+  wave: { number: number; of: number; groups: string[]; ha: boolean };
+  auto_updates: string;
+}
+
 export interface HostResults {
   finished: boolean;
   updated: number;
   hosts: Record<string, HostResult>;
+  updates?: { hosts: Record<string, UpdateResult>; summary: Record<string, number> };
 }
 
 export interface Step {
@@ -224,6 +250,7 @@ export interface Vm {
   template: boolean;
   lock: string;
   tags: string[];
+  hastate?: string; // set when Proxmox HA manages the VM
   cpu: number; // share of maxcpu in use, 0 to 1
   maxcpu: number;
   mem: number; // bytes
@@ -256,6 +283,8 @@ export interface VmPreset {
 
 export interface VmRunInfo {
   presets: VmPreset[];
+  // The updates playbook's choices, by form field: the values, the default first.
+  updates?: Record<string, string[]>;
   default_preset: string;
   tags: string[];
   max_hosts: number;
@@ -287,6 +316,8 @@ export interface VmPlan {
   preset: string;
   preset_label: string;
   tags: string[];
+  playbook?: "baseline" | "updates";
+  options?: Record<string, string>;
   targets: VmPlanTarget[];
   warnings: string[];
   digest: string;

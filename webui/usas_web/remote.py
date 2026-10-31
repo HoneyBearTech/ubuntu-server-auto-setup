@@ -368,7 +368,7 @@ class VmLister:
         support, reason = v.classify(vm, config, agent.os, self.releases)
         return {
             "vmid": vm.vmid, "name": vm.name, "node": vm.node, "type": vm.type, "status": vm.status,
-            "template": vm.template, "lock": vm.lock, "tags": vm.tags, "cpu": round(vm.cpu, 4),
+            "template": vm.template, "lock": vm.lock, "tags": vm.tags, "hastate": vm.hastate, "cpu": round(vm.cpu, 4),
             "maxcpu": vm.maxcpu, "mem": vm.mem, "maxmem": vm.maxmem, "uptime": vm.uptime,
             "agent": agent.state, "addresses": addresses, "ip": ip, "ip_source": source,
             "os": agent.os.pretty if agent.os else "", "hostname": agent.hostname,

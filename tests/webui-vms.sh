@@ -4,7 +4,10 @@
 # The mock lists that container as VM 4071 (its guest agent reports the container's address) and as VM 4072,
 # a guest that claims the same address. The driver pins host keys, runs the baseline in check mode, refuses a
 # real run until a check passed and it is confirmed, runs it, checks that a second check changes nothing and
-# that a VM whose pinned key doesn't match is refused, and reads the audit log. Needs Docker and Python 3
+# that a VM whose pinned key doesn't match is refused, and reads the audit log. A second container, from the
+# updates test image (its packages' old versions installed and a signed test repository with newer ones), is
+# VM 4073: the driver lists its updates in a check run, installs the security ones and checks that a second
+# check finds nothing to install. Needs Docker and Python 3
 # (standard library only). Container names are this test's own (usas-vms-*), so it can run next to make test.
 # Usage: tests/webui-vms.sh [image]   (default: builds the image from this checkout as usas:vms)
 set -euo pipefail
@@ -16,6 +19,7 @@ NET=usas-vms
 APP=usas-vms-app
 MOCK=usas-vms-pve
 SRV=usas-vms-srv
+UPD=usas-vms-upd
 APP_PORT="${APP_PORT:-18280}"
 MOCK_PORT="${MOCK_PORT:-18206}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/usas-vms.XXXXXX")"
@@ -26,7 +30,7 @@ cleanup() {
     echo "--- app log"; docker logs "$APP" 2>&1 | tail -n 60 || true
     echo "--- mock log"; docker logs "$MOCK" 2>&1 | tail -n 20 || true
   fi
-  docker rm -f "$APP" "$MOCK" "$SRV" >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$MOCK" "$SRV" "$UPD" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$TMP"
   [ "$status" -eq 0 ] && echo "VMs page integration test passed" || echo "VMs page integration test FAILED" >&2
@@ -40,6 +44,7 @@ fi
 # The stand-in VM is the integration tests' "target" stage (the "updates" stage swaps in a test package repository),
 # tagged for this test only so a make test running next to it keeps its own image.
 docker build -q --target target -t usas-vms-srv:latest tests/images/ubuntu-target >/dev/null
+docker build -q --target updates -t usas-vms-upd:latest tests/images/ubuntu-target >/dev/null
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=pve-mock \
   -addext "subjectAltName=DNS:pve-mock,IP:127.0.0.1" -keyout "$TMP/api.key" -out "$TMP/api.crt" >/dev/null 2>&1
@@ -47,23 +52,27 @@ ssh-keygen -q -t ed25519 -N '' -C vms@ubuntu-server-auto-setup -f "$TMP/id_ed255
 cp "$TMP/id_ed25519.pub" "$TMP/test.keys"
 chmod 755 "$TMP" && chmod 644 "$TMP"/*
 
-docker rm -f "$APP" "$MOCK" "$SRV" >/dev/null 2>&1 || true
+docker rm -f "$APP" "$MOCK" "$SRV" "$UPD" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create "$NET" >/dev/null
 
-# A VM someone else set up: Ubuntu 26.04 with the image's own user "ubuntu", passwordless sudo, nothing of ours.
-docker run -d --name "$SRV" --hostname app-4071 --network "$NET" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock usas-vms-srv:latest >/dev/null
-docker exec "$SRV" sh -c 'usermod -aG sudo ubuntu \
-  && echo "ubuntu ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/91-ubuntu && chmod 0440 /etc/sudoers.d/91-ubuntu \
-  && install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.ssh && echo "127.0.1.1 app-4071" >> /etc/hosts'
+# VMs someone else set up: Ubuntu 26.04 with the image's own user "ubuntu", passwordless sudo, nothing of ours.
+for vm in "$SRV:usas-vms-srv:app-4071" "$UPD:usas-vms-upd:app-4073"; do
+  IFS=: read -r name image host <<<"$vm"
+  docker run -d --name "$name" --hostname "$host" --network "$NET" --privileged --cgroupns=host \
+    -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock "$image:latest" >/dev/null
+  docker exec "$name" sh -c "usermod -aG sudo ubuntu \\
+    && echo 'ubuntu ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/91-ubuntu && chmod 0440 /etc/sudoers.d/91-ubuntu \\
+    && install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.ssh && echo '127.0.1.1 $host' >> /etc/hosts"
+done
 ADDRESS="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$SRV")"
-test -n "$ADDRESS"
+UPD_ADDRESS="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$UPD")"
+test -n "$ADDRESS" && test -n "$UPD_ADDRESS"
 
 docker run -d --name "$MOCK" --network "$NET" --network-alias pve-mock -p "127.0.0.1:$MOCK_PORT:8006" \
   -v "$ROOT/tests/mock_pve.py:/mock/mock_pve.py:ro" -v "$TMP:/certs:ro" --entrypoint python "$IMAGE" \
   /mock/mock_pve.py --cert /certs/api.crt --key /certs/api.key --keys-file /certs/test.keys --bind 0.0.0.0 \
-  --vm-target "4071=$ADDRESS" --vm-target "4072=$ADDRESS" >/dev/null
+  --vm-target "4071=$ADDRESS" --vm-target "4072=$ADDRESS" --vm-target "4073=$UPD_ADDRESS" >/dev/null
 docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$APP_PORT:8080" \
   --read-only --tmpfs /tmp --tmpfs /home/usas:uid=10001,gid=10001,mode=0700 --cap-drop ALL \
   --security-opt no-new-privileges:true "$IMAGE" >/dev/null
@@ -78,13 +87,15 @@ test -n "$code"
 shadow_before="$(docker exec "$SRV" grep '^ubuntu:' /etc/shadow)"
 
 python3 tests/webui_vms.py --url "http://localhost:$APP_PORT" --setup-code "$code" --ca "$TMP/api.crt" \
-  --app "$APP" --srv "$SRV" --address "$ADDRESS"
+  --app "$APP" --srv "$SRV" --address "$ADDRESS" --upd "$UPD" --upd-address "$UPD_ADDRESS"
 
-# The VM outside the inventory got none of the Vault's secrets, and its user's password is untouched.
-if docker exec "$SRV" sh -c 'grep -rIl -e "vms admin password" -e 00000000-0000-4000-8000-000000000000 /etc /home /root /var/log 2>/dev/null'; then
-  echo "ERROR: a secret of the web UI reached the VM" >&2
-  exit 1
-fi
+# The VMs outside the inventory got none of the Vault's secrets, and their user's password is untouched.
+for vm in "$SRV" "$UPD"; do
+  if docker exec "$vm" sh -c 'grep -rIl -e "vms admin password" -e 00000000-0000-4000-8000-000000000000 /etc /home /root /var/log 2>/dev/null'; then
+    echo "ERROR: a secret of the web UI reached $vm" >&2
+    exit 1
+  fi
+done
 test "$(docker exec "$SRV" grep '^ubuntu:' /etc/shadow)" = "$shadow_before"
 if docker exec "$APP" sh -c 'grep -rl -e 00000000-0000-4000-8000-000000000000 -e "vms admin password" /data/runs /data/audit.jsonl'; then
   echo "ERROR: a secret is in a run file or the audit log" >&2

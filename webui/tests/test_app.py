@@ -1109,10 +1109,14 @@ def test_run_needs_an_inventory(ui):
 
 def test_run_page_data(ui):
     data = get(ui, "/api/run").json()
-    assert [p["key"] for p in data["playbooks"]] == ["build-installer", "provision", "baseline", "site", "keys"]
-    assert data["playbooks"][-1] == {"key": "keys", "playbook": "playbooks/baseline.yml",
-                                     "description": "Re-sync the admin user's SSH keys only",
-                                     "extra": ["--tags", "ssh_keys"]}
+    assert [p["key"] for p in data["playbooks"]] == ["build-installer", "provision", "baseline", "site", "keys",
+                                                     "updates-check", "updates"]
+    assert data["playbooks"][4] == {"key": "keys", "playbook": "playbooks/baseline.yml",
+                                    "description": "Re-sync the admin user's SSH keys only",
+                                    "extra": ["--tags", "ssh_keys"]}
+    assert data["playbooks"][5] == {"key": "updates-check", "playbook": "playbooks/updates.yml",
+                                    "description": "List each server's pending updates, changing nothing",
+                                    "extra": ["--check"]}
     assert "all" in data["names"] and data["current_run"] is None and len(data["steps"]) == 5
 
 
@@ -1302,8 +1306,8 @@ def test_the_iso_storage_is_picked_from_the_storages_that_allow_isos(ui, monkeyp
 # --- VMs ----------------------------------------------------------------------------------------------------
 
 
-def fake_pve(monkeypatch, version="9.1.1", agent_status=200, resources=None, calls=None):
-    """Answers the VMs page's API calls: two VMs, one with an agent."""
+def fake_pve(monkeypatch, version="9.1.1", agent_status=200, resources=None, calls=None, extra=None):
+    """Answers the VMs page's API calls: two VMs, one with an agent; extra adds answers by path."""
     def get(url, **kw):
         path = url.split("/api2/json", 1)[1]
         if calls is not None:
@@ -1320,6 +1324,7 @@ def fake_pve(monkeypatch, version="9.1.1", agent_status=200, resources=None, cal
                 {"name": "eth0", "ip-addresses": [{"ip-address": "10.0.0.51", "ip-address-type": "ipv4"}]}]},
             "/nodes/pve-1/qemu/101/agent/get-osinfo": {"result": {"id": "ubuntu", "version-id": "26.04"}},
             "/nodes/pve-1/qemu/101/agent/get-host-name": {"result": {"host-name": "app"}},
+            **(extra or {}),
         }.get(path)
         status = agent_status if "/agent/" in path else 200 if data is not None else 500
         response = requests.Response()
@@ -1631,6 +1636,138 @@ def test_apply_refused_while_another_runs_and_for_unknown_runs(ui, monkeypatch):
     assert r.status_code == 422 and "Another run" in r.json()["error"]
     ui.app_state.runner.stop(other["id"])
     finished(ui, other["id"])
+
+
+# --- VMs: the updates playbook ---------------------------------------------------------------------------------
+
+SNAPSHOT_OK = {"/access/permissions?path=/vms/101": {"/vms/101": {"VM.Audit": 1, "VM.Snapshot": 1}},
+               "/nodes/pve-1/qemu/101/feature?feature=snapshot": {"hasFeature": 1}}
+
+
+def pinned(ui, monkeypatch, extra=None):
+    """VM 101 (outside the inventory, tagged for an update group and managed by HA) with its key pinned."""
+    configure(ui)
+    ui.app_state.keys.generate()
+    resources = [{"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu", "status": "running",
+                  "tags": "usas-group-web;prod", "hastate": "started"}]
+    fake_pve(monkeypatch, resources=resources, extra=extra)
+    scan_answers(monkeypatch)
+    post(ui, "/vms/hostkey", {"action": "scan", "vmid": "101", "address": "10.0.0.51"})
+    post(ui, "/vms/hostkey", {"action": "trust", "vmid": "101", "confirm": "on"})
+
+
+UPDATES_FORM = {"vmid": ["101"], "preset": "updates", "vm-101-address": "10.0.0.51", "vm-101-user": "ubuntu",
+                "vm-101-ufw": "8080/tcp", "vm-101-hostname": "on"}
+
+
+def test_vms_updates_check_then_apply(ui, monkeypatch):
+    pinned(ui, monkeypatch)
+    data = get(ui, "/api/vms").json()
+    assert data["run"]["updates"] == {"updates-scope": ["all", "security"], "updates-reboot": ["never", "if_required"]}
+    form = {**UPDATES_FORM, "updates-reboot": "if_required", "updates-window": "on"}
+    r = post(ui, "/vms/plan", form)
+    assert r.status_code == 200, r.text
+    plan = r.json()["plan"]
+    assert (plan["playbook"], plan["preset_label"], plan["tags"]) == ("updates", "Updates", [])
+    assert plan["options"] == {"updates_scope": "all", "updates_reboot": "if_required", "updates_snapshot": "false",
+                               "updates_ignore_window": "true"}
+    assert any("reboot if an update asks for it" in w and "vm-101" in w for w in plan["warnings"])
+    assert any("window" in w and "audit log" in w for w in plan["warnings"])
+    started = post(ui, "/vms/run", {"plan_id": r.json()["plan_id"], "mode": "check"}).json()["run"]
+    check = finished(ui, started["id"])
+    assert (check.kind, check.action, check.check, check.diff) == ("updates", "updates", True, False)
+    assert check.options == plan["options"]
+    runner = ui.app_state.runner
+    log = runner.log_path(check.id).read_text()
+    assert f"-e @{runner.path(check.id, '.vars.yml')} --check --limit=vm-101 playbooks/updates.yml" in log
+    variables = runner.path(check.id, ".vars.yml").read_text()
+    assert "updates_reboot: !unsafe 'if_required'" in variables
+    assert f"updates_report_dir: !unsafe '{ui.app_state.settings.data_dir / 'updates' / 'reports'}'" in variables
+    inventory = runner.path(check.id, ".inventory.yml").read_text()
+    host = load_yaml(inventory)["all"]["children"]["usas_vms"]["hosts"]["vm-101"]
+    # The baseline's per-VM settings don't apply; the cluster's facts order the waves.
+    assert "webui_firewall_allow_host" not in host and "manage_hostname" not in host
+    assert host["usas_pve_tags"] == ["usas-group-web", "prod"] and host["usas_pve_hastate"] == "started"
+    assert host["ansible_become_password"] == "" and host["ansible_user"] == "ubuntu"
+    entries = {e["event"]: e for e in ui.app_state.audit.entries()}
+    assert entries["updates.window_ignored"]["vms"] == [101] and entries["updates.window_ignored"]["run"] == check.id
+    assert entries["run.check"]["playbook"] == "updates" and entries["run.check"]["options"] == plan["options"]
+    detail = get(ui, f"/api/runs/{check.id}").json()
+    assert detail["apply"]["possible"] and detail["run"]["options"] == plan["options"]
+
+    ui.app_state.runner.settings.run_env["FAKE_DELAY"] = "1"
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 200, r.text
+    # What the playbook reported, as the summary callback writes it, reaches the audit log's entry.
+    real_id = r.json()["run"]["id"]
+    runner.path(real_id, ".hosts.json").write_text(json.dumps(
+        {"finished": True, "hosts": {"vm-101": {"ok": 3, "changed": 1, "failed": 0, "unreachable": 0}},
+         "updates": {"hosts": {"vm-101": {"status": "updated"}}}}))
+    real = finished(ui, real_id)
+    assert (real.kind, real.action, real.check, real.applied_from, real.options) == (
+        "updates", "updates", False, check.id, plan["options"])
+    log = runner.log_path(real.id).read_text()
+    assert "--check" not in log and "--limit=vm-101 playbooks/updates.yml" in log
+    entries = {}
+    for e in ui.app_state.audit.entries():  # the newest of each
+        entries.setdefault(e["event"], e)
+    assert entries["run.apply"]["playbook"] == "updates" and entries["run.apply"]["options"] == plan["options"]
+    assert entries["run.finished"]["hosts"]["vm-101"]["updates"] == "updated"
+    # The newest result of each server is kept for the Updates page.
+    state = json.loads((ui.app_state.settings.data_dir / "updates" / "state.json").read_text())
+    assert state["hosts"]["vm-101"] == {"run": real.id, "check": False, "finished": real.finished,
+                                        "result": {"status": "updated"}}
+    assert (ui.app_state.settings.data_dir / "updates" / "state.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_vms_updates_options_are_checked(ui, monkeypatch):
+    pinned(ui, monkeypatch)
+    for name, value in (("updates-scope", "everything"), ("updates-reboot", "always")):
+        r = post(ui, "/vms/plan", {**UPDATES_FORM, name: value})
+        assert r.status_code == 422 and name in r.json()["errors"]
+    # A tampered check run's options make another plan: no real run.
+    reviewed = post(ui, "/vms/plan", UPDATES_FORM).json()
+    started = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"}).json()["run"]
+    check = finished(ui, started["id"])
+    check.options = {**check.options, "updates_reboot": "if_required"}
+    ui.app_state.runner._save(check)
+    r = post(ui, "/vms/apply", {"run_id": check.id, "confirm": "on"})
+    assert r.status_code == 422 and "run the check again" in r.json()["error"]
+
+
+def test_vms_updates_snapshots_need_the_privilege_and_the_disks(ui, monkeypatch):
+    pinned(ui, monkeypatch, extra={"/access/permissions?path=/vms/101": {"/vms/101": {"VM.Audit": 1}}})
+    r = post(ui, "/vms/snapshots", {"vmid": ["101", "999"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["vms"] == [
+        {"vmid": 101, "possible": False,
+         "reason": 'The API token\'s role lacks VM.Snapshot (docs/updates.md, "Snapshots").'},
+        {"vmid": 999, "possible": False, "reason": "It isn't on the cluster any more."}]
+    r = post(ui, "/vms/plan", {**UPDATES_FORM, "updates-snapshot": "on"})
+    assert r.status_code == 422 and "VM.Snapshot" in r.json()["errors"]["updates-snapshot"]
+    assert post(ui, "/vms/snapshots", {"vmid": ["1;id"]}).status_code == 403
+
+    ui.app_state.lister = None
+    fake_pve(monkeypatch, resources=[{"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu",
+                                      "status": "running"}],
+             extra={**SNAPSHOT_OK, "/nodes/pve-1/qemu/101/feature?feature=snapshot": {"hasFeature": 0}})
+    assert post(ui, "/vms/snapshots", {"vmid": ["101"]}).json()["vms"][0]["reason"] == (
+        "Proxmox says its disks don't support snapshots.")
+    fake_pve(monkeypatch, resources=[{"vmid": 101, "name": "app", "node": "pve-1", "type": "qemu",
+                                      "status": "running"}], extra=SNAPSHOT_OK)
+    answer = post(ui, "/vms/snapshots", {"vmid": ["101"]}).json()
+    assert answer["vms"] == [{"vmid": 101, "possible": True, "reason": ""}]
+    r = post(ui, "/vms/plan", {**UPDATES_FORM, "updates-snapshot": "on"})
+    assert r.status_code == 200 and r.json()["plan"]["options"]["updates_snapshot"] == "true"
+
+
+def test_updates_from_the_run_page_write_their_report_to_the_data_folder(ui):
+    configure(ui)
+    run = finished(ui, post(ui, "/run", {"playbook": "updates-check"}).json()["run"]["id"])
+    runner = ui.app_state.runner
+    assert run.extra_vars and run.options == {}
+    assert "--check" in runner.log_path(run.id).read_text()
+    assert "updates_report_dir" in runner.path(run.id, ".vars.yml").read_text()
 
 
 def test_pins_forgotten_and_adopted_are_audited(ui, monkeypatch):

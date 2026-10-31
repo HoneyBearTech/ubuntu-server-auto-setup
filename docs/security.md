@@ -205,6 +205,16 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   parts and pinned keys, no setting saved since) is possible only within 30 minutes of a passing check, once,
   after a confirmation. At most 25 VMs per run, one run at a time (also across processes). The audit log
   (`/data/audit.jsonl`) records pins, runs, refusals and outcomes with the session and client address.
+- **Updates from the VMs page** follow the same rules: the same host-key pins, credentials and check-first
+  gate, and a real run that must match the check's choices too. The browser picks only four of the updates
+  playbook's variables (`updates_scope`, `updates_reboot`, `updates_snapshot`, `updates_ignore_window`), each
+  checked against a fixed list of values and passed `!unsafe` in an extra-variables file; nothing else
+  reaches `-e`. A VM's Proxmox tags and HA state, which anyone who may edit the VM can set, only order the
+  waves. Ignoring the update windows is recorded in the audit log, and the real run's confirmation names the
+  VMs that may reboot. The snapshot box asks the API which privileges the token has on each VM
+  (`/access/permissions`, read-only) and whether its disks can have one, so a token without `VM.Snapshot`
+  isn't discovered half-way through a run. What servers report about their packages is kept only as names
+  that look like a package's, at most 5,000 per list, and shown as text.
 - **The status API for dashboards** (`GET /api/status`, for Heimdall and the like) is off until a signed-in
   session that enters the password again makes its token. The token (32 random bytes after `usas_st_`) is
   shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password through scrypt. It is accepted
