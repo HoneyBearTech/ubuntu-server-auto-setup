@@ -30,6 +30,7 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
+| `k8s_<cluster>_servers`, `k8s_<cluster>_agents` | a Kubernetes cluster's servers and agents, inside `servers` (cluster name `^[a-z][a-z0-9-]{0,30}\Z`, a server in at most one of these groups). Today they tag the VM `usas-k8s-<cluster>-server` or `-agent` when it's created; installing k3s comes later | as in `servers` |
 | `ubuntu_servers` | the group's name before 0.7.0: still read, with `servers`, until 1.0 (each run says so) | as in `servers` |
 | `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
 | `usas_pve_vms` | made by the cluster inventory (`usas_pve`): VMs of the cluster that aren't in the static inventory, as `vm-<vmid>`, to update | SSH with the group's own login (`group_vars/usas_pve_vms.yml`), host key pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
@@ -111,9 +112,11 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Storage for the VM's disk and its 4 MB EFI disk, and the EFI disk's format (`qcow2` on directory storage). |
 | `pve_tpmstate_storage` | `"{{ pve_storage }}"` | With `vm_disk_encryption`, the storage for the 4 MB vTPM state volume. On another storage than the disk, a copy of the disks' storage alone doesn't hold what unlocks them ([security.md](security.md#secure-boot-and-disk-encryption)). |
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Bridge and optional VLAN tag (1-4094) of the first network card, `net0`. |
-| `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. |
+| `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. A server in a `k8s_<cluster>_servers` or `_agents` group also gets `usas-k8s-<cluster>-server` or `-agent`. New VMs only. |
+| `vm_spread_group` | `""` | Servers sharing this name (letters, digits, `.`, `_`, `-`) must have their VMs on different nodes ([disks and placement](#disks-and-placement)). |
 | `vm_cores`, `vm_sockets`, `vm_cpu_type` | `2`, `1`, `host` | CPU. |
 | `vm_memory_mb`, `vm_disk_gb` | `2048`, `32` | Memory and disk size. |
+| `vm_extra_disks` | `[]` | More disks, `scsi1` and up, formatted and mounted by the baseline ([disks and placement](#disks-and-placement)). New VMs only. |
 | `vm_secure_boot` | `true` | Secure Boot: the EFI disk gets Microsoft's keys pre-enrolled (`pre-enrolled-keys=1`), so the VM boots only signed code (Ubuntu's shim, GRUB and kernel; the kernel then refuses unsigned modules). New VMs only; `false` gives an EFI disk without keys. |
 | `vm_disk_encryption` | `false` | Install the root file system on LUKS2 (the `lvm` layout's volume group), with a vTPM (`tpmstate0`, TPM 2.0) that unlocks it at boot while the Secure Boot state (PCR 7) is the one measured at the VM's first boot; the passphrase stays enrolled as the recovery key. Needs `vm_secure_boot: true` and `autoinstall_storage_layout: lvm`. New VMs only. See [security.md](security.md#secure-boot-and-disk-encryption) for what it protects and what it doesn't. |
 | `vm_disk_passphrase` | `""` | The LUKS passphrase and recovery key, normally `"{{ vault_disk_passphrase }}"`: 12 to 512 printable ASCII characters, no braces. Required with `vm_disk_encryption`; hidden from all output. |
@@ -301,6 +304,38 @@ provisioning otherwise. IPv6 isn't configured yet (`dhcp6` is off on every card)
 
 The firewall's rules aren't bound to an interface: SSH and every `firewall_allow` rule are open on every card,
 VLANs included. To allow SSH from one network only, set `firewall_ssh_sources`, and use `from` in `firewall_allow`.
+
+### Disks and placement
+
+Each item of `vm_extra_disks` is a mapping with these keys (up to 30 disks):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `size_gb` | (required) | Size in GB, 1-65536. |
+| `storage` | `pve_storage` | The Proxmox storage for the disk (it must allow disk images on the VM's node). |
+| `label` | (required) | The file system's label, and the disk's serial `usas-<label>`: lowercase letters, digits, `-` and `_`, at most 12, starting with a letter or digit. Each disk's differs. |
+| `mount` | (required) | Where it's mounted: an absolute path of plain names, not a system folder (`/`, `/etc`, `/usr`, `/var`, `/var/lib`, `/home`, ...). Each disk's differs. |
+| `fs` | `ext4` | `ext4` or `xfs`. |
+
+`provision-vms.yml` adds the disks, empty, after the install has powered the VM off, in the same API call that
+removes the installer's CD-ROMs, so the installer never sees them and can't put the system on one. They are
+added to new VMs only: for an existing VM, add the disk in Proxmox with the serial `usas-<label>` (or leave it
+out of `vm_extra_disks`). The baseline (`data_disks` role, tag `data_disks`) finds each disk by its serial
+(`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_usas-<label>`), formats it only while `blkid` finds nothing on it,
+and mounts it by label with `nofail`, so a missing disk doesn't stop the server from booting. A disk that holds
+anything else (another file system or label, or a partition table) is left as it is and the run stops, naming
+what it found. A disk that isn't attached stops the run too.
+
+Servers that share a `vm_spread_group` (for example a Kubernetes cluster's servers, so one node going down
+takes only one of them) must have their VMs on different nodes. `provision-vms.yml` checks this before
+anything is created, for every server in the inventory with that group, including those `--limit` leaves out.
+An existing VM counts on the node it runs on now, which may not be its `pve_node` after a migration. It's a
+check, not a Proxmox HA rule: the token has no privilege to make one. To keep the VMs apart when HA moves them
+too, add an HA node affinity rule (Proxmox VE 9) or HA group (Proxmox VE 8) for them by hand.
+
+Until the web UI has fields for them, a web UI save keeps only what it can show, so set `vm_extra_disks` and
+`vm_spread_group` in `host_vars/<server>.yml` next to the inventory (the UI doesn't write that folder); the
+`k8s_*` groups need an inventory of your own for now.
 
 ### Vault variables
 

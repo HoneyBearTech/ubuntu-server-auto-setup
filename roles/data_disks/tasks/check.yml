@@ -1,0 +1,50 @@
+---
+# Checks vm_extra_disks and fills in each disk's defaults into data_disks_list. Used by proxmox_vm before a VM is
+# created (the values go into the VM's configuration as key=value options) and by this role before formatting.
+- name: Check that vm_extra_disks is a list of mappings, at most {{ data_disks_max }}
+  ansible.builtin.assert:
+    that:
+      - vm_extra_disks is sequence and vm_extra_disks is not string and vm_extra_disks is not mapping
+      - vm_extra_disks | length <= data_disks_max
+      - vm_extra_disks | reject('mapping') | list | length == 0
+    fail_msg: "{{ inventory_hostname }}: vm_extra_disks must be a list of at most {{ data_disks_max }} mappings."
+    quiet: true
+
+- name: Fill in the defaults of the extra disks
+  ansible.builtin.set_fact:
+    data_disks_list: "{{ [data_disks_defaults] | product(vm_extra_disks) | map('combine') | list }}"
+  vars:
+    data_disks_defaults:
+      size_gb: ""
+      storage: "{{ pve_storage | default('') }}"
+      label: ""
+      mount: ""
+      fs: ext4
+
+- name: Check the extra disks
+  ansible.builtin.assert:
+    that:
+      - item.keys() | list | difference(data_disks_keys) | length == 0
+      - item.size_gb | string is match(data_disks_size_pattern) and (item.size_gb | int) <= 65536
+      - item.storage | string | length == 0 or item.storage | string is match(data_disks_storage_pattern)
+      - item.label | string is match(data_disks_label_pattern)
+      - item.mount | string is match(data_disks_mount_pattern) and item.mount not in data_disks_mount_reserved
+      - item.fs in data_disks_fs
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_extra_disks item {{ data_disks_index + 1 }} (scsi{{ data_disks_index + 1 }}) may have
+      only the keys {{ data_disks_keys | join(', ') }}. size_gb is 1-65536; storage a Proxmox storage ID; label
+      lowercase letters, digits, '-' and '_', at most 12 and starting with a letter or digit; mount an absolute path
+      of plain names, other than {{ data_disks_mount_reserved | join(', ') }}; fs {{ data_disks_fs | join(' or ') }}.
+    quiet: true
+  loop: "{{ data_disks_list }}"
+  loop_control:
+    index_var: data_disks_index
+    label: scsi{{ data_disks_index + 1 }}
+
+- name: Check that no two extra disks share a label or a mount point
+  ansible.builtin.assert:
+    that:
+      - data_disks_list | map(attribute='label') | unique | length == data_disks_list | length
+      - data_disks_list | map(attribute='mount') | unique | length == data_disks_list | length
+    fail_msg: "{{ inventory_hostname }}: the label and the mount of each disk in vm_extra_disks must all differ."
+    quiet: true

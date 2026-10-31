@@ -14,6 +14,9 @@ provision_net_modes: [static, dhcp]
 provision_nic_modes: [static, dhcp, none]
 provision_nic_models: [virtio, e1000, e1000e, vmxnet3, rtl8139]
 provision_nic_keys: [mode, bridge, vlan, model, mac, mtu, address, prefix, gateway]
+# vm_spread_group, and the Kubernetes groups that tag a VM usas-k8s-<cluster>-<server|agent>.
+provision_spread_group_pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}\Z'
+provision_k8s_group_pattern: '^k8s_([a-z][a-z0-9-]{0,30})_(servers|agents)\Z'
 # The disk passphrase: printable ASCII (it may have to be typed at the VM's console), without the braces Ansible
 # would read as a template.
 provision_disk_passphrase_pattern: '^[\x20-\x7a|~]{12,512}\Z'

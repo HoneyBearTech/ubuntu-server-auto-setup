@@ -288,6 +288,25 @@ def _import_from(config, node):
     return None
 
 
+def _new_disks(form, node):
+    """Checks the new empty disks a config update adds (scsi1 and up, "<storage>:<size in GB>,..."), as Proxmox
+    does: a storage of the node that allows disk images, and a serial of at most 20 safe characters. Returns an
+    error message, or None."""
+    for key, value in form.items():
+        if not re.fullmatch(r"scsi([1-9]|[12][0-9]|30)", key):
+            continue
+        target, *options = value.split(",")
+        storage, _, size = target.partition(":")
+        if not size.isdigit():
+            continue  # an existing volume
+        if storage not in NODE_STORAGES.get(node, []) or "images" not in STORAGES[storage]["content"].split(","):
+            return f"{key}: storage '{storage}' doesn't allow disk images on {node}"
+        serial = dict(option.partition("=")[::2] for option in options).get("serial", "")
+        if len(serial) > 20 or serial.strip("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"):
+            return f"{key}: serial '{serial}' is longer than 20 characters or has other characters"
+    return None
+
+
 def upid(action, vmid, node=NODE):
     return f"UPID:{node}:0000AAAA:00BBBBBB:6700CCCC:{action}:{vmid}:ansible@pve!test:"
 
@@ -547,6 +566,9 @@ class PveHandler(BaseHTTPRequestHandler):
         if action == "config" and method == "GET":
             return self._reply(200, vm["config"])
         if action == "config" and method == "PUT":
+            error = _new_disks(form, node)
+            if error:
+                return self._reply(400, {"config": error})
             vm["config_updates"].append(form)
             for key in filter(None, form.get("delete", "").split(",")):
                 vm["config"].pop(key.strip(), None)
