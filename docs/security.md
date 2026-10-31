@@ -8,7 +8,7 @@ countered) is in the [assurance case](assurance-case.md). To report a vulnerabil
 ## Intended use
 
 The playbooks are meant to be run by an administrator, from a control node they trust, against Proxmox VE
-nodes and Ubuntu servers they own, on a private network. The control node holds the inventory, the Vault
+nodes and servers they own, on a private network. The control node holds the inventory, the Vault
 and the SSH keys that reach every server and the Proxmox nodes (as root, unless you set up a [node user of
 its own](#the-proxmox-node-user-optional)), so it is as sensitive as those systems. With the container
 image, the control node is the container: its web UI is meant for one administrator on the same machine

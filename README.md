@@ -19,18 +19,22 @@
 [![GHCR mirror](https://img.shields.io/badge/mirror-ghcr.io-2496ED?logo=github&logoColor=white)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pkgs/container/ubuntu-server-auto-setup)
 [![Platforms](https://img.shields.io/badge/runs_on-Windows_%7C_Linux_%7C_macOS-2496ED?logo=docker&logoColor=white)](docs/web-ui.md)
 [![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
-[![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
+[![Ubuntu 22.04 | 24.04 | 26.04 LTS](https://img.shields.io/badge/Ubuntu-22.04_%7C_24.04_%7C_26.04_LTS-E95420?logo=ubuntu&logoColor=white)](#supported-versions)
+[![Debian 12 | 13](https://img.shields.io/badge/Debian-12_%7C_13-A81D33?logo=debian&logoColor=white)](#supported-versions)
+[![CentOS Stream, Rocky Linux, AlmaLinux 9 | 10](https://img.shields.io/badge/CentOS_Stream_%7C_Rocky_%7C_Alma-9_%7C_10-10B981?logo=rockylinux&logoColor=white)](#supported-versions)
 [![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
 [![ansible-core 2.20](https://img.shields.io/badge/ansible--core-2.20.7%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
 
-**Ubuntu Server on Proxmox VE, installed hands-off and hardened: from Ansible, or from a web UI in one
+**Linux servers on Proxmox VE, installed hands-off and hardened: from Ansible, or from a web UI in one
 container.**
 
-ubuntu-server-auto-setup (USAS for short) is a set of Ansible playbooks that install Ubuntu Server 26.04 on
-fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys, and apply a hardened baseline
-(UFW, Fail2Ban, SSH hardening, unattended upgrades). Run them from a checkout with `make`, or from the
-container image, whose web UI lays out every option and runs the playbooks for you, on Windows, Linux or
-macOS.
+USAS (Unattended Server Auto-Setup; the repository keeps its first name, ubuntu-server-auto-setup) is a set of
+Ansible playbooks that install Ubuntu Server LTS on fresh Proxmox VE VMs with no hands on the keyboard, load
+your GitHub SSH keys, and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic
+security updates. The baseline runs on Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and CentOS Stream,
+Rocky Linux and AlmaLinux 9 and 10, including servers this project didn't install. Run the playbooks from a
+checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
+on Windows, Linux or macOS.
 
 > [!WARNING]
 > **Provisioning creates VMs, and the installer wipes the target VM's disk.** `make provision` only
@@ -320,7 +324,7 @@ still read until 1.0)
 
 | What | Supported |
 | --- | --- |
-| Installed on new VMs | Ubuntu Server 26.04 LTS (amd64) |
+| Installed on new VMs | Ubuntu Server 22.04, 24.04 and 26.04 LTS (amd64), by Ubuntu's installer (`vm_os` picks the release) |
 | Hardened by the baseline | Ubuntu Server 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 (the OS catalog's releases), including servers this project didn't install; it refuses others unless `baseline_allow_unsupported: true` |
 | Hypervisor | Proxmox VE 8 and 9 |
 | Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |

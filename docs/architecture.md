@@ -13,10 +13,10 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 ```text
  control node (you)                      Proxmox VE nodes (one cluster)        new / existing servers
  ------------------                      ------------------                    ----------------------
- inventory/hosts.yml        SSH (root)   ISO storage                            Ubuntu 26.04 (or 24.04)
+ inventory/hosts.yml        SSH (root)   ISO storage                            Ubuntu LTS (or Debian, RHEL family)
  Vault (encrypted)  ───────────────────▶ ubuntu-26.04.1-live-server-amd64.iso   admin user + GitHub keys
- ansible-playbook                        ...-autoinstall.iso (remastered)        sshd drop-in, UFW,
-   │                                     seed-<host>.iso (temporary)             Fail2Ban, unattended
+ ansible-playbook                        ...-autoinstall.iso (remastered)        sshd drop-in, UFW or firewalld,
+   │                                     seed-<host>.iso (temporary)             Fail2Ban, automatic
    │  HTTPS + API token                  VM <pve_vmid> (UEFI, q35, VirtIO)       upgrades, qemu-guest-agent
    ├────────────────────────────────────▶ Proxmox API                                 ▲
    │                                                                                  │ SSH (admin user, key)
@@ -35,11 +35,11 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | `tools/update_os_catalog.py` | Builds and checks the OS catalog from the vendors' indexes, verifying their signatures with `gpgv` against pinned fingerprints. Run by the maintainer (`make catalog`) and weekly in CI; never during a playbook run. | `tools/` |
 | `installer_iso` | Downloads and verifies the Ubuntu ISO on a Proxmox node and remasters it for hands-off installs. | `roles/installer_iso/` |
 | `proxmox_vm` | Creates one VM per host through the Proxmox API, with a per-host seed ISO, and waits for the install. | `roles/proxmox_vm/` |
-| `common` | Packages and upgrades, hostname, timezone, the admin user, sudo, GitHub keys, unattended upgrades (and their optional mail report), an optional msmtp mail relay, the guest agent. | `roles/common/` |
-| `firewall` | UFW: default policies, SSH (rate-limited), extra allow rules. | `roles/firewall/` |
-| `ssh_hardening` | The sshd drop-in, the optional port change and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
-| `fail2ban` | The `sshd` jail, and optional ban notifications by mail or webhook. | `roles/fail2ban/` |
-| `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on. | `roles/hardening/` |
+| `common` | Packages and upgrades (apt or dnf), hostname, timezone, the admin user, sudo, GitHub keys, automatic updates (unattended-upgrades or dnf-automatic, and their optional mail report), an optional msmtp mail relay, the guest agent, EPEL on the RHEL family when Fail2Ban or the relay needs it. | `roles/common/` |
+| `firewall` | UFW on Ubuntu and Debian, firewalld on the RHEL family: default policies, SSH (rate-limited), extra allow rules. | `roles/firewall/` |
+| `ssh_hardening` | The sshd drop-in, the optional port change (labelled for SELinux on the RHEL family) and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
+| `fail2ban` | The `sshd` jail (from EPEL on the RHEL family), and optional ban notifications by mail or webhook. | `roles/fail2ban/` |
+| `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on (Ubuntu and Debian). | `roles/hardening/` |
 | `updates` | For `playbooks/updates.yml` only: lists and installs package updates on existing servers, reboots them when asked, checks their health and writes the report; never configures a server. One task file per OS family and step (`tasks/pending/`, `apply/`, `reboot_required/`, `auto_updates/`), with the parsing in a filter plugin. The plan play puts the servers into waves (`tasks/plan.yml`, `usas_update_plan`: group and node limits) and the update play takes its `serial` from them. With `updates_snapshot`, a Proxmox snapshot before each VM's update and the clean-up of its own old ones (`tasks/snapshot*.yml`), waiting for Proxmox's tasks with `proxmox_vm`'s `tasks/wait_task.yml`. | `roles/updates/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
 | Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
@@ -118,25 +118,30 @@ node is in the cluster and each ISO storage allows ISO images on its node:
 
 ### 3. The baseline (`baseline.yml`, on `servers`, as the admin user with sudo)
 
-1. If `ssh_port` isn't 22, probe it; connect on whichever of `ssh_port` and 22 answers, so the same
-   inventory works before and after the port change.
-2. `common`: wait for cloud-init, run the upgrade (`pkg_upgrade`), install base packages, set the hostname,
-   `/etc/hosts` and timezone, create or update the admin user (the password only when the user is
-   created), set passwordless sudo (or remove it), install the GitHub keys (exclusive by default, refusing
-   to write an empty list), configure unattended upgrades, and reboot or report a pending reboot.
-3. `firewall`: allow (rate-limit) SSH on `ssh_port` from `firewall_ssh_sources` and add `firewall_allow` rules
-   **before** enabling UFW, so the running session survives; then set the default policies and enable it.
-4. `ssh_hardening`: refuse to continue if `ssh_allow_users` would lock out the admin user; install
+1. If `ssh_port` isn't 22, probe it; connect on whichever of `ssh_port` and 22 answers, so the same inventory
+   works before and after the port change.
+2. Gather facts and check the server's release against the OS catalog: stop before changing anything on a
+   release the catalog doesn't list, unless `baseline_allow_unsupported` is set; warn about a release past the
+   end of its standard support.
+3. `common`: wait for cloud-init, run the upgrade (`pkg_upgrade`), install base packages, set the hostname,
+   `/etc/hosts` and timezone, create or update the admin user (the password only when the user is created),
+   set passwordless sudo (or remove it), install the GitHub keys (exclusive by default, refusing to write an
+   empty list), configure automatic updates, delete the installer's and cloud-init's copies of the password
+   hash, and reboot or report a pending reboot.
+4. `firewall`: allow (rate-limit) SSH on `ssh_port` from `firewall_ssh_sources` and add `firewall_allow` rules
+   **before** enabling UFW, so the running session survives; then set the default policies and enable it. On
+   the RHEL family the same settings become firewalld rich rules in the `public` zone.
+5. `ssh_hardening`: refuse to continue if `ssh_allow_users` would lock out the admin user; install
    `/etc/ssh/sshd_config.d/00-hardening.conf` (validated with `sshd -t`), and for a custom port enable
-   `ssh.service` and disable `ssh.socket`; restart sshd; if the port changed, add a `known_hosts` entry for
-   the new port from the host key read over the existing connection, reconnect on the new port, and only
-   then remove the port 22 firewall rule.
-5. `fail2ban`: write `/etc/fail2ban/jail.local` with the `sshd` jail on the systemd journal, on `ssh_port`,
+   `ssh.service` and disable `ssh.socket`; on the RHEL family, label a custom port `ssh_port_t` for SELinux
+   first; restart sshd; if the port changed, add a `known_hosts` entry for the new port from the host key read
+   over the existing connection, reconnect on the new port, and only then remove the port 22 firewall rule.
+6. `fail2ban`: write `/etc/fail2ban/jail.local` with the `sshd` jail on the systemd journal, on `ssh_port`,
    with incremental bans and `fail2ban_ignoreip`, and, when asked for, a mail (`action_mw`) and a webhook
    action (`/etc/fail2ban/action.d/usas-webhook.conf`, root-only) for every ban.
-6. `hardening`: only what is turned on: the `sysctl` drop-in, applied and checked live; auditd with its
-   rules loaded by `augenrules` (or left for the next reboot when they are immutable); AppArmor enabled,
-   with complain-mode profiles reported. Parts that are off have their files removed.
+7. `hardening`: only what is turned on: the `sysctl` drop-in, applied and checked live; auditd with its rules
+   loaded by `augenrules` (or left for the next reboot when they are immutable); AppArmor enabled (Ubuntu and
+   Debian), with complain-mode profiles reported. Parts that are off have their files removed.
 
 `site.yml` runs the three playbooks in that order. `make keys` runs only the `ssh_keys` tasks of the
 baseline.
@@ -204,10 +209,10 @@ Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
   are hidden from the output (`pve_hide_secrets`, `no_log`).
 - **No inbound network exposure during install.** The installer reads its configuration from a local
   CD-ROM image, not from a network datasource.
-- **Works on servers it didn't install.** The baseline only assumes Ubuntu 22.04, 24.04 or 26.04, Debian 12
-  or 13, CentOS Stream, Rocky Linux or AlmaLinux 9 or 10, and an account that can `sudo`. It goes by the server's facts (distribution and release), not by
-  `vm_os`: each role loads its settings for the OS family, then the distribution, then the release
-  (`vars/Debian.yml`, `vars/Ubuntu.yml`, ...), each overriding the one before.
+- **Works on servers it didn't install.** The baseline only assumes Ubuntu 22.04, 24.04 or 26.04, Debian 12 or
+  13, CentOS Stream, Rocky Linux or AlmaLinux 9 or 10, and an account that can `sudo`. It goes by the server's
+  facts (distribution and release), not by `vm_os`: each role loads its settings for the OS family, then the
+  distribution, then the release (`vars/Debian.yml`, `vars/Ubuntu.yml`, ...), each overriding the one before.
 
 ## Technology
 
@@ -217,7 +222,7 @@ Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
 | Ubuntu autoinstall (Subiquity) with a NoCloud seed ISO | Ubuntu's own unattended installer; a local seed needs no web server and exposes nothing on the network. |
 | Remastering with `xorriso` | Adds one kernel argument while keeping Ubuntu's signed boot chain and boot records; no custom kernel or initrd. |
 | `community.proxmox` and the Proxmox API with a token | A token with a narrow role instead of root credentials for VM management; the `uri` module covers what the collection doesn't (start, status, detach). |
-| UFW, Fail2Ban, OpenSSH drop-ins, unattended-upgrades | The tools Ubuntu ships and documents, so the result is ordinary, inspectable Ubuntu configuration. |
+| UFW or firewalld, Fail2Ban, OpenSSH drop-ins, unattended-upgrades or dnf-automatic | The tools each distribution ships and documents (Fail2Ban from EPEL on the RHEL family), so the result is ordinary, inspectable configuration of that distribution. |
 | GitHub `.keys` endpoint | One place to manage the keys for every server; removing a key there removes it everywhere at the next sync. |
 | FastAPI with a JSON API, and a React app built by Vite | The server stays small and Python, with every check in one place (`schema.py`, the same patterns as the roles); the app gives a modern interface (live log, inline errors, dark and light themes) as plain static files, so the Content Security Policy stays `'self'` only. The build runs only in a stage of the image; its npm packages are locked with integrity hashes and checked like the Python ones ([dependencies.md](dependencies.md)). |
 | One container image with Docker volumes | Runs the same on Windows (Docker Desktop with WSL 2), Linux and macOS; Ansible doesn't run natively on Windows. |
