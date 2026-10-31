@@ -1,49 +1,8 @@
 ---
-- name: Install UFW
-  ansible.builtin.apt:
-    name: ufw
-    state: present
-  register: firewall_ufw_install
-
-# A check run on a server without UFW can't ask it about rules; the run that installs it applies them all.
-- name: Configure UFW
-  when: not (ansible_check_mode and firewall_ufw_install is changed)
-  block:
-    # SSH rules go in before the firewall is enabled, so the current session survives.
-    - name: Allow SSH
-      community.general.ufw:
-        rule: "{{ 'limit' if firewall_ssh_limit | bool else 'allow' }}"
-        port: "{{ ssh_port | string }}"
-        proto: tcp
-        from_ip: "{{ item }}"
-        comment: ssh
-      loop: "{{ firewall_ssh_sources }}"
-
-    - name: Add extra allow rules
-      community.general.ufw:
-        rule: allow
-        port: "{{ item.port | string }}"
-        proto: "{{ item.proto | default('tcp') }}"
-        from_ip: "{{ item.from | default('any') }}"
-        comment: "{{ item.comment | default(omit) }}"
-      loop: "{{ firewall_allow }}"
-      loop_control:
-        label: "{{ item.port }}/{{ item.proto | default('tcp') }} from {{ item.from | default('any') }}"
-
-    - name: Set the default incoming policy
-      community.general.ufw:
-        default: "{{ firewall_default_incoming }}"
-        direction: incoming
-
-    - name: Set the default outgoing policy
-      community.general.ufw:
-        default: "{{ ufw_default_outgoing }}"
-        direction: outgoing
-
-    - name: Set UFW logging
-      community.general.ufw:
-        logging: "{{ firewall_logging }}"
-
-    - name: Enable UFW
-      community.general.ufw:
-        state: enabled
+# UFW on Ubuntu and Debian, firewalld on the RHEL family, driven by the same firewall_* settings. Dynamic, so its
+# tasks get the tag here: they run whenever this include does (--tags firewall included).
+- name: Configure the firewall
+  ansible.builtin.include_tasks:
+    file: "{{ ansible_facts.os_family }}.yml"
+    apply:
+      tags: [always]

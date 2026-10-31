@@ -234,8 +234,9 @@ class Vendors:
             pattern = rf"^Rocky-{major}-GenericCloud-Base-({major}\.\d+-\d{{8}}\.\d+)\.x86_64\.qcow2\Z"
             resolve = self._rocky
         else:
-            base = f"https://repo.almalinux.org/almalinux/{release.version}/cloud/x86_64/images"
-            pattern = rf"^AlmaLinux-{major}-GenericCloud-({major}\.\d+-\d{{8}}(?:\.\d+)?)\.x86_64\.qcow2\Z"
+            arch = ALMA_ARCH.get(release.version, "x86_64")
+            base = f"https://repo.almalinux.org/almalinux/{release.version}/cloud/{arch}/images"
+            pattern = rf"^AlmaLinux-{major}-GenericCloud-({major}\.\d+-\d{{8}}(?:\.\d+)?)\.{arch}\.qcow2\Z"
             resolve = self._alma
         out = []
         for entry in self.listing(f"{base}/"):
@@ -259,6 +260,11 @@ class Vendors:
         url = f"{base}/CHECKSUM"
         sums = parse_sha256sums(self.verified(url, f"{url}.asc", KEYS[f"alma-{release.version}"]))
         return Image(f"{base}/{file}", f"sha256:{need(sums, file, url)}", file, build, True)
+
+
+# EL10 needs an x86-64-v3 CPU (AVX2); AlmaLinux also builds 10 for x86-64-v2, so it runs on older hosts too.
+# Rocky Linux and CentOS Stream 10 don't, and provisioning refuses them on a node without x86-64-v3.
+ALMA_ARCH = {"10": "x86_64_v2"}
 
 
 def methods_for(release: Release) -> tuple[str, ...]:

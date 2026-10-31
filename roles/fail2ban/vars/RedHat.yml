@@ -1,0 +1,7 @@
+---
+# The RHEL family, from EPEL: fail2ban-firewalld sets the ban action to firewalld's rich rules.
+fail2ban_os_packages: [fail2ban-server, fail2ban-firewalld, python3-systemd]
+# The webhook action runs curl, which curl-minimal (in every RHEL-family image) provides.
+fail2ban_os_webhook_packages: []
+# Ban mail (fail2ban_destemail): the sendmail actions and whois, which they run, are packages of their own.
+fail2ban_os_mail_packages: [fail2ban-sendmail, whois]

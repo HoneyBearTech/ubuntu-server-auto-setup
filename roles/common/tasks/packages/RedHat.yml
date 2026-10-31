@@ -1,0 +1,24 @@
+---
+# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux): upgrade everything with dnf (any pkg_upgrade but "no";
+# dnf has no separate safe and dist modes) and install the base packages. dnf checks every package's signature
+# against the keys its repositories name, as it always does.
+# Before the upgrade, so that it also takes EPEL's and CRB's newer packages and a second run has nothing left.
+- name: Enable EPEL for Fail2Ban or the mail relay
+  ansible.builtin.include_tasks:
+    file: epel.yml
+    apply:
+      tags: [always]
+  when: fail2ban_enabled | default(true) | bool or mail_relay_enabled | bool
+
+- name: Upgrade packages
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest  # noqa: package-latest (the upgrade is the point)
+    update_only: true
+  when: pkg_upgrade != 'no'
+
+- name: Install base packages
+  ansible.builtin.dnf:
+    name: "{{ common_packages + (['qemu-guest-agent'] if ansible_facts.virtualization_type == 'kvm' else []) }}"
+    state: present
+  register: common_base_packages

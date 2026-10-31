@@ -1,13 +1,14 @@
 ![USAS, Ubuntu Server Auto Setup](https://raw.githubusercontent.com/HoneyBearTech/ubuntu-server-auto-setup/main/docs/images/usas-banner.png)
 
-**Ubuntu Server on Proxmox VE, installed hands-off and hardened, from a web UI in one container.**
+**Linux servers on Proxmox VE, installed hands-off and hardened, from a web UI in one container.**
 
-This image holds [ubuntu-server-auto-setup](https://github.com/HoneyBearTech/ubuntu-server-auto-setup)
-(USAS): Ansible playbooks that install Ubuntu Server 26.04 on new Proxmox VE VMs with no hands on the
-keyboard, load your GitHub SSH keys, and apply a hardened baseline (SSH, UFW, Fail2Ban, unattended
-upgrades). Its web UI lays out every option as forms, writes an ordinary Ansible inventory and an encrypted
-Vault, and runs the playbooks with a live log. It runs the same on Windows (Docker Desktop with WSL 2),
-Linux and macOS.
+This image holds [ubuntu-server-auto-setup](https://github.com/HoneyBearTech/ubuntu-server-auto-setup) (USAS,
+Unattended Server Auto-Setup): Ansible playbooks that install Ubuntu Server LTS on new Proxmox VE VMs with no
+hands on the keyboard, load your GitHub SSH keys, and apply a hardened baseline (SSH, UFW or firewalld,
+Fail2Ban, automatic security updates) on Ubuntu 22.04 to 26.04, Debian 12 and 13, and CentOS Stream, Rocky
+Linux and AlmaLinux 9 and 10. Its web UI lays out every option as forms, writes an ordinary Ansible inventory
+and an encrypted Vault, and runs the playbooks with a live log. It runs the same on Windows (Docker Desktop
+with WSL 2), Linux and macOS.
 
 ![The installer ISO, then a Proxmox VM, then an unattended install, then a hardened server](https://raw.githubusercontent.com/HoneyBearTech/ubuntu-server-auto-setup/main/docs/images/usas-flow.png)
 

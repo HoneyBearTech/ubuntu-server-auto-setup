@@ -1,0 +1,39 @@
+---
+# The RHEL family: EPEL (Extra Packages for Enterprise Linux), where Fail2Ban and msmtp come from. epel-release
+# comes from the distribution's own repositories, signed with its key, and brings EPEL's signing key; CRB holds
+# packages EPEL builds on. dnf then checks every EPEL package against that key: the run stops unless EPEL's
+# repository keeps gpgcheck on. Used by this role's mail relay and by roles/fail2ban.
+- name: Install dnf's config-manager
+  ansible.builtin.dnf:
+    name: dnf-plugins-core
+    state: present
+  register: common_dnf_plugins
+
+- name: Enable the CRB repository
+  community.general.dnf_config_manager:
+    name: [crb]
+    state: enabled
+  when: not (ansible_check_mode and common_dnf_plugins is changed)
+
+- name: Install epel-release
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  register: common_epel_install
+
+- name: Read EPEL's repository settings
+  ansible.builtin.slurp:
+    src: /etc/yum.repos.d/epel.repo
+  register: common_epel_repo
+  when: not (ansible_check_mode and common_epel_install is changed)
+
+- name: Fail unless EPEL's packages are checked against its signing key
+  ansible.builtin.assert:
+    that: >-
+      (common_epel_repo.content | b64decode)
+      is search('(?ms)^\\[epel\\]$(?:(?!^\\[).)*^gpgcheck\\s*=\\s*1\\s*$')
+    fail_msg: >-
+      /etc/yum.repos.d/epel.repo on {{ inventory_hostname }} has gpgcheck turned off for EPEL, so its packages
+      wouldn't be checked against EPEL's signing key. Set gpgcheck=1 there.
+    quiet: true
+  when: common_epel_repo is not skipped

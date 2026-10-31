@@ -1,6 +1,6 @@
 ---
 # Checks the time sources that tests/hardening-vars.yml sets (time_sync_servers and time_sync_pools) in the time
-# service the server runs: chrony (Ubuntu 26.04) or systemd-timesyncd (the other releases). With
+# service the server runs: chrony (Ubuntu 26.04, the RHEL family) or systemd-timesyncd (the other releases). With
 # -e expect_time_sync=false, checks that the OS's own sources are back. Neither service runs in a container (their
 # units skip containers), so this reads what each would use: the sources chronyd loads from its configuration,
 # and systemd's merged timesyncd.conf. tests/run.sh and tests/baseline.sh run it.
@@ -23,10 +23,11 @@
         path: /usr/sbin/chronyd
       register: verify_chronyd
 
-    # -Q reads the configuration, adds the sources and asks them once, without setting the clock.
+    # -Q reads the configuration, adds the sources and asks them once, without setting the clock. -dd: chronyd logs
+    # the main file's sources at debug level, those of its sources folder at info level.
     - name: List the sources chrony loads
       ansible.builtin.command:
-        argv: [timeout, "30", chronyd, -Q, -t, "1", -d]
+        argv: [timeout, "30", chronyd, -Q, -t, "1", -dd]
       register: verify_chrony
       changed_when: false
       failed_when: verify_chrony.rc not in [0, 1]

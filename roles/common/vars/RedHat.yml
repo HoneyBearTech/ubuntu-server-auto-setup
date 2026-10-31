@@ -1,6 +1,17 @@
 ---
-# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux). Time sync: chrony, whose main file reads no sources
-# folder by default (the role adds the sourcedir line).
+# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux); vars/CentOS.yml overrides it for CentOS Stream. Loaded by
+# the role's first task: the family's file, then the distribution's, then the release's.
+common_os_admin_group: wheel
+# curl-minimal, in every RHEL-family image, already provides curl (the full package would conflict with it).
+common_os_packages: [ca-certificates, dnf-automatic, dnf-plugins-core, vim-enhanced]
+# The RHEL family maps the host name to nothing by default; a line is added only with server_domain.
+common_os_hosts_loopback: 127.0.0.1
+# What dnf-automatic installs: security updates only, as unattended-upgrades does (the vendor publishes errata).
+common_os_dnf_upgrade_type: security
+# msmtp comes from EPEL; the role points /usr/sbin/sendmail at it.
+common_os_msmtp_package: msmtp
+common_os_other_mtas: [postfix, sendmail, exim, opensmtpd, esmtp, ssmtp, nullmailer]
+# Time sync: chrony, whose main file reads no sources folder by default (the role adds the sourcedir line).
 common_os_time_sync_package: chrony
 common_os_chrony_conf: /etc/chrony.conf
 common_os_chrony_sources_dir: /etc/chrony/sources.d

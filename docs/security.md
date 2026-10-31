@@ -8,7 +8,7 @@ countered) is in the [assurance case](assurance-case.md). To report a vulnerabil
 ## Intended use
 
 The playbooks are meant to be run by an administrator, from a control node they trust, against Proxmox VE
-nodes and Ubuntu servers they own, on a private network. The control node holds the inventory, the Vault
+nodes and servers they own, on a private network. The control node holds the inventory, the Vault
 and the SSH keys that reach every server and the Proxmox nodes (as root, unless you set up a [node user of
 its own](#the-proxmox-node-user-optional)), so it is as sensitive as those systems. With the container
 image, the control node is the container: its web UI is meant for one administrator on the same machine
@@ -121,13 +121,24 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - The admin user's `authorized_keys` matches the keys on GitHub (plus `admin_extra_ssh_keys`) after every
   baseline run or `make keys`; a key removed from GitHub is removed from the servers. An empty or failed
   response from GitHub never empties the file: the run stops instead.
-- UFW denies all incoming connections except SSH (rate-limited: more than 6 connections in 30 seconds from
-  one address are refused) and the rules you list in `firewall_allow`.
+- The firewall denies all incoming connections except SSH and the rules you list in `firewall_allow`: UFW on
+  Ubuntu and Debian, with SSH rate-limited (more than 6 connections in 30 seconds from one address are
+  refused); firewalld on the RHEL family, with firewalld's own open `ssh` service removed and SSH allowed by a
+  rich rule whose rate limit (`firewall_ssh_limit_rate`, 30 a minute) counts all sources together, since
+  firewalld can't count per source (Fail2Ban does).
+- On the RHEL family SELinux stays enforcing: for a custom SSH port the baseline labels that port `ssh_port_t`
+  (`semanage port`) before sshd moves, rather than relaxing SELinux. crypto-policies are left as they are.
 - Fail2Ban bans addresses that fail SSH authentication 5 times in 10 minutes for an hour, longer for
-  repeat offenders (up to a week), except those in `fail2ban_ignoreip`.
-- Security updates are installed automatically every day by unattended-upgrades: on Ubuntu from the security
-  pockets (and Ubuntu Pro ESM security updates where enabled), on Debian from Debian-Security and the point
-  releases.
+  repeat offenders (up to a week), except those in `fail2ban_ignoreip`. On the RHEL family it comes from
+  **EPEL** (with `fail2ban-firewalld`, which bans with firewalld's rich rules): the baseline installs
+  `epel-release` from the distribution's own signed repositories, which brings EPEL's signing key, enables
+  CRB, and stops unless EPEL's repository keeps `gpgcheck` on, so every EPEL package is checked against that
+  key. `fail2ban_enabled: false` leaves Fail2Ban, and with it EPEL, out (the mail relay's msmtp also comes
+  from EPEL).
+- Security updates are installed automatically every day: by unattended-upgrades on Ubuntu from the security
+  pockets (and Ubuntu Pro ESM security updates where enabled) and on Debian from Debian-Security and the
+  point releases; by dnf-automatic on the RHEL family, security updates on Rocky Linux and AlmaLinux and every
+  update on CentOS Stream, which publishes no security errata.
 - The changes are made in an order that keeps the running SSH session working: the firewall allows the SSH
   port before it is enabled, and a new SSH port is opened and verified before port 22 is closed.
 
@@ -474,10 +485,11 @@ pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vm
   only by root and the user the playbooks log in as)
   in the node's ISO storage until you delete it ([installing.md](installing.md#troubleshooting)).
 - **The installer's own log.** Ubuntu's installer keeps a root-only copy of its configuration, including
-  the password hash, in `/var/log/installer/autoinstall-user-data`. The baseline's `common` role deletes it;
-  until the baseline has run, it is on the server. On an encrypted VM the copy also holds the disk
-  passphrase, so provisioning deletes it as soon as the VM first boots (it was only ever inside the
-  encrypted volume).
+  the password hash, in `/var/log/installer/autoinstall-user-data`, and cloud-init keeps the user-data it
+  booted with in `/var/lib/cloud/instances/*/user-data.txt*` (also root-only). The baseline's `common` role
+  deletes both; until the baseline has run, they are on the server. On an encrypted VM the installer's copy
+  also holds the disk passphrase, so provisioning deletes it as soon as the VM first boots (it was only ever
+  inside the encrypted volume).
 - **Passwordless sudo during provisioning.** The installer gives the admin user passwordless `sudo` so the
   first baseline run can work unattended; the baseline then removes it (`admin_sudo_nopasswd: false`, the
   default), so an SSH key alone doesn't give root afterwards. Until that first baseline run finishes, anyone

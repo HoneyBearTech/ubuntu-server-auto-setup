@@ -19,18 +19,22 @@
 [![GHCR mirror](https://img.shields.io/badge/mirror-ghcr.io-2496ED?logo=github&logoColor=white)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pkgs/container/ubuntu-server-auto-setup)
 [![Platforms](https://img.shields.io/badge/runs_on-Windows_%7C_Linux_%7C_macOS-2496ED?logo=docker&logoColor=white)](docs/web-ui.md)
 [![License: MIT](https://img.shields.io/github/license/HoneyBearTech/ubuntu-server-auto-setup)](LICENSE)
-[![Ubuntu 26.04 LTS](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/26.04/)
+[![Ubuntu 22.04 | 24.04 | 26.04 LTS](https://img.shields.io/badge/Ubuntu-22.04_%7C_24.04_%7C_26.04_LTS-E95420?logo=ubuntu&logoColor=white)](#supported-versions)
+[![Debian 12 | 13](https://img.shields.io/badge/Debian-12_%7C_13-A81D33?logo=debian&logoColor=white)](#supported-versions)
+[![CentOS Stream, Rocky Linux, AlmaLinux 9 | 10](https://img.shields.io/badge/CentOS_Stream_%7C_Rocky_%7C_Alma-9_%7C_10-10B981?logo=rockylinux&logoColor=white)](#supported-versions)
 [![Proxmox VE](https://img.shields.io/badge/Proxmox_VE-API-E57000?logo=proxmox&logoColor=white)](https://pve.proxmox.com/pve-docs/api-viewer/)
 [![ansible-core 2.20](https://img.shields.io/badge/ansible--core-2.20.7%2B-1A1918?logo=ansible&logoColor=white)](https://docs.ansible.com/)
 
-**Ubuntu Server on Proxmox VE, installed hands-off and hardened: from Ansible, or from a web UI in one
+**Linux servers on Proxmox VE, installed hands-off and hardened: from Ansible, or from a web UI in one
 container.**
 
-ubuntu-server-auto-setup (USAS for short) is a set of Ansible playbooks that install Ubuntu Server 26.04 on
-fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys, and apply a hardened baseline
-(UFW, Fail2Ban, SSH hardening, unattended upgrades). Run them from a checkout with `make`, or from the
-container image, whose web UI lays out every option and runs the playbooks for you, on Windows, Linux or
-macOS.
+USAS (Unattended Server Auto-Setup; the repository keeps its first name, ubuntu-server-auto-setup) is a set of
+Ansible playbooks that install Ubuntu Server LTS on fresh Proxmox VE VMs with no hands on the keyboard, load
+your GitHub SSH keys, and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic
+security updates. The baseline runs on Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and CentOS Stream,
+Rocky Linux and AlmaLinux 9 and 10, including servers this project didn't install. Run the playbooks from a
+checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
+on Windows, Linux or macOS.
 
 > [!WARNING]
 > **Provisioning creates VMs, and the installer wipes the target VM's disk.** `make provision` only
@@ -93,8 +97,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    and starts it. When the installer has finished and powered the VM off, it detaches both ISOs, deletes
    the seed ISO (it holds the password hash), starts the VM and waits for SSH. VMs that already exist are
    skipped, so reruns are safe.
-3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04
-   or Debian 12 or 13 server, not only ones this project installed:
+3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04,
+   Debian 12 or 13, CentOS Stream 9 or 10, Rocky Linux 9 or 10 or AlmaLinux 9 or 10 server, not only ones this
+   project installed (UFW on Ubuntu and Debian, firewalld and SELinux on the RHEL family):
    - `apt` full upgrade, hostname and timezone;
    - the admin user, with its `authorized_keys` kept exactly in sync with your GitHub keys;
    - an SSH hardening drop-in: no root login, no passwords, and optionally a different port (which also
@@ -111,8 +116,8 @@ Three playbooks, run from your own machine (the "control node") or from the cont
 Afterwards, **`playbooks/updates.yml`** keeps the servers updated, the ones this project installed and any
 others you add to the group `other_servers`. Ubuntu 22.04, 24.04 and 26.04 are supported. It never
 configures a server: `make updates-check` reports what each would install (security, held and phased
-packages included) and what its automatic updates already do. `make updates` installs the updates, a batch
-of servers at a time. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
+packages included) and what its automatic updates already do. `make updates` installs the updates, a wave
+of servers at a time, never two of an update group together. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
 holds the reboot on an encrypted VM after a Secure Boot update. It then checks each server's health and
 starts no more servers after a failure. Every run writes a JSON report. See [docs/updates.md](docs/updates.md).
 
@@ -305,6 +310,9 @@ still read until 1.0)
 | `ssh_allow_users` | `[]` | If set, only these users may log in over SSH (it must include `admin_user`; the run refuses otherwise). |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
 | `firewall_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
+| `firewall_ssh_limit_rate` | `30/m` | On firewalld (the RHEL family), the rate of new SSH connections allowed from all sources together; UFW limits each source on its own. |
+| `fail2ban_enabled` | `true` | Install and configure Fail2Ban (from EPEL on the RHEL family). |
+| `baseline_allow_unsupported` | `false` | Run the baseline on a release the OS catalog doesn't list (it stops otherwise), with a warning. |
 | `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
 | `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
@@ -317,8 +325,8 @@ still read until 1.0)
 
 | What | Supported |
 | --- | --- |
-| Installed on new VMs | Ubuntu Server 26.04 LTS (amd64) |
-| Hardened by the baseline | Ubuntu Server 24.04 LTS and 26.04 LTS, including servers this project didn't install |
+| Installed on new VMs | Ubuntu Server 22.04, 24.04 and 26.04 LTS (amd64), by Ubuntu's installer (`vm_os` picks the release) |
+| Hardened by the baseline | Ubuntu Server 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 (the OS catalog's releases), including servers this project didn't install; it refuses others unless `baseline_allow_unsupported: true` |
 | Hypervisor | Proxmox VE 8 and 9 |
 | Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |
 | Container image | Windows (Docker Desktop with WSL 2), Linux and macOS; `linux/amd64` and `linux/arm64`; Python 3.14 and ansible-core 2.20 inside |

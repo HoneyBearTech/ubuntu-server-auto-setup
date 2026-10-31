@@ -150,9 +150,9 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `timezone` | `Etc/UTC` | The timezone. |
 | `time_sync_servers`, `time_sync_pools` | `[]`, `[]` | NTP servers and pools (host names or IP addresses, checked against `common_time_server_pattern`) that replace the OS's own time sources. Both empty leaves the OS's time sync untouched. They go to chrony where it's installed (Ubuntu 26.04, the RHEL family: `/etc/chrony/sources.d/usas.sources`, with the OS's `pool`/`server`/`peer` lines turned off by a `#usas-time-sync#` mark), otherwise to systemd-timesyncd (`/etc/systemd/timesyncd.conf.d/50-usas.conf`, pools as servers), which is installed if missing. The run stops if `ntp`, `ntpsec` or `openntpd` is installed. Emptying both lists removes the role's files and brings the OS's sources back. |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. Its name before 0.7.0, `apt_upgrade`, is still read until 1.0. |
-| `reboot_if_required` | `false` | Reboot when upgrades ask for it: on Ubuntu when `/var/run/reboot-required` exists, on Debian when `/boot` has a newer kernel than the one running (the same check as the updates playbook's, `roles/updates/tasks/reboot_required/`). Otherwise the run reports it. |
-| `common_packages` | `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim` | Packages installed on every server. |
-| `unattended_upgrades_origins` | the distribution's (`roles/common/vars/`) | What unattended-upgrades installs, as `Allowed-Origins` entries. Ubuntu: the release and security pockets and ESM security; Debian: point releases and Debian-Security (no ESM). |
+| `reboot_if_required` | `false` | Reboot when upgrades ask for it: on Ubuntu when `/var/run/reboot-required` exists, on Debian when `/boot` has a newer kernel than the one running, on the RHEL family when `dnf needs-restarting -r` says so (the same check as the updates playbook's, `roles/updates/tasks/reboot_required/`). Otherwise the run reports it. |
+| `common_packages` | the distribution's (`roles/common/vars/`) | Packages installed on every server. Ubuntu and Debian: `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim`; the RHEL family: `ca-certificates`, `dnf-automatic`, `dnf-plugins-core`, `vim-enhanced` (`curl-minimal` already provides `curl`). |
+| `unattended_upgrades_origins` | the distribution's (`roles/common/vars/`) | What unattended-upgrades installs, as `Allowed-Origins` entries. Ubuntu: the release and security pockets and ESM security; Debian: point releases and Debian-Security (no ESM). On the RHEL family, dnf-automatic installs updates instead: security updates on Rocky Linux and AlmaLinux, every update on CentOS Stream (which publishes no security errata); `unattended_upgrades_mail`, `unattended_upgrades_auto_reboot` and `unattended_upgrades_reboot_time` apply to it too. |
 | `unattended_upgrades_auto_reboot`, `unattended_upgrades_reboot_time` | `false`, `"04:00"` | Automatic reboots after unattended upgrades. |
 | `unattended_upgrades_remove_unused` | `true` | Remove unused dependencies. |
 
@@ -160,10 +160,11 @@ Every server's settings are checked before anything is created or downloaded: `v
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `firewall_default_incoming` | `deny` | The default policy for incoming connections. |
+| `firewall_default_incoming` | `deny` | The default policy for incoming connections: `deny` drops them, `reject` refuses them, `allow` accepts them (on firewalld: the zone's target `DROP`, `%%REJECT%%` or `ACCEPT`). |
 | `ufw_default_outgoing` | `allow` | UFW's default policy for outgoing connections. |
 | `firewall_logging` | `low` | How much the firewall logs (UFW's log level). |
-| `firewall_ssh_limit` | `true` | Rate-limit SSH (`limit`) instead of a plain allow. |
+| `firewall_ssh_limit` | `true` | Rate-limit new SSH connections instead of a plain allow: UFW's `limit` (6 in 30 seconds per source), or on firewalld a rich-rule limit of `firewall_ssh_limit_rate` for all sources together (Fail2Ban still limits each source). |
+| `firewall_ssh_limit_rate` | `30/m` | firewalld only: that limit, as rich rules write it. |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from. |
 | `firewall_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
 
@@ -187,10 +188,12 @@ old name's value unless it's set itself, and each run says which old names the i
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `fail2ban_enabled` | `true` | Install and configure Fail2Ban. `false` leaves it out of the baseline (not installed, or left as it is); on the RHEL family it comes from EPEL, so this also keeps EPEL off (unless the mail relay needs it). |
+| `baseline_allow_unsupported` | `false` | Run the baseline on a release that isn't in the OS catalog. By default the baseline stops before changing anything on such a server; with `true` it runs, with a warning, on any Debian, Ubuntu or RHEL-family release. Other OS families are always refused. The web UI's VMs page sets it for a VM whose override you confirmed. |
 | `fail2ban_bantime`, `fail2ban_findtime`, `fail2ban_maxretry` | `1h`, `10m`, `5` | Ban length, window and failures. |
 | `fail2ban_bantime_increment`, `fail2ban_bantime_maxtime` | `true`, `1w` | Longer bans for repeat offenders, up to a maximum. |
 | `fail2ban_ignoreip` | `[]` | Never banned (besides localhost). |
-| `fail2ban_banaction` | `""` | Ban action; empty keeps Ubuntu's default (nftables). |
+| `fail2ban_banaction` | `""` | Ban action; empty keeps the distribution's default: nftables or iptables on Ubuntu and Debian, firewalld's rich rules on the RHEL family (`fail2ban-firewalld`). |
 | `fail2ban_sshd_mode` | `normal` | The `sshd` filter mode: `normal`, `ddos`, `extra` or `aggressive`. |
 
 **Baseline: extra hardening** (`hardening`; each part off by default, see [security.md](security.md#optional-hardening-and-notifications))
@@ -248,7 +251,9 @@ old name's value unless it's set itself, and each run says which old names the i
 | `updates_allow_unsupported` | `false` | Try a release outside `updates_supported_releases`, within a known family. |
 | `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
 | `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
-| `updates_serial` | `25%` | The batch size (with `-e` only). |
+| `updates_serial` | `25%` | The most servers in a wave: a number (1 to 9999) or a percentage of the servers being updated. Read from the first server: set it for all. |
+| `updates_group_max_parallel`, `updates_node_max_parallel` | `1`, `2` | The most servers of one update group in a wave, and the most that may reboot (`updates_reboot: if_required`) on one Proxmox node (0 to 99, 0 for no limit). Read from the first server: set them for all. |
+| `updates_group` | `""` | The server's update groups: a name or a list (`^[a-z0-9][a-z0-9_.-]{0,62}\Z`, compared in lower case), with the Proxmox tags `usas-group-<name>` of a VM on the cluster. Groups only order the waves. |
 | `updates_notify` | `on-change` | When to notify: `on-change`, `always` or `only-on-error`. |
 | `updates_notify_mail` | `unattended_upgrades_mail` | Mail the run's summary here, through `mail_relay_host` (with `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`, `mail_relay_user`, `mail_relay_password`) from the control node, with the relay's certificate checked. |
 | `updates_webhook_url`, `updates_webhook_format` | `""`, `text` | POST the summary to this http(s) URL (normally from the Vault), as `text` or `json`, as for Fail2Ban. |
@@ -320,7 +325,7 @@ VLANs included. To allow SSH from one network only, set `firewall_ssh_sources`, 
 | `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
 | `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
-| `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a wave at a time ([waves](updates.md#waves)). Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
@@ -368,8 +373,9 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
 `restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot` (`status`: `off`, `taken`,
 `removed` (taken, then deleted by `updates_snapshot_keep: 0`) or `none`; `name`, `node`, `reason` when there is
-none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `pve` (`vmid`, `node`,
-`name`, `alias`), `started` and `finished`.
+none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `wave` (`number` from 1,
+or 0 when the server wasn't planned; `of`, the number of waves; `groups`, its update groups; `ha`, whether
+Proxmox HA manages the VM), `pve` (`vmid`, `node`, `name`, `alias`), `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
 
@@ -392,6 +398,8 @@ vendor publishes only SHA-512, as Debian does for cloud images), `file` (the nam
 Proxmox node; cloud images end in `.qcow2`, as Proxmox's Import content requires), `build` (the point release or
 the vendor's build serial) and `signed` (`true` when the vendor signs the checksum file the checksum came from and
 the script checked that signature; `false` for CentOS Stream and Debian's cloud images, which are HTTPS only).
+The 10 releases of the RHEL family need an x86-64-v3 CPU (AVX2, as on Intel Haswell or AMD Excavator and
+later), except AlmaLinux 10: the catalog pins AlmaLinux's x86-64-v2 build of it, which also runs on older CPUs.
 The catalog lists all eleven releases, but this release installs only the Ubuntu installer ISOs from it; the
 other images are used once cloud-image installs land (see the [roadmap](roadmap.md)).
 

@@ -10,7 +10,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Updates tests | the updates playbook against two servers with updates waiting in a signed test repository, on Ubuntu 22.04, 24.04 and 26.04: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=ubuntu-24.04` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
-| Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`), a move to port 2222, and the baseline roles' task coverage | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
+| Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`; the RHEL family: `dnf needs-restarting` after a core package is installed again), a release the OS catalog doesn't list refused (and run with `baseline_allow_unsupported`), a move to port 2222, notifications and the mail relay, and the baseline roles' task coverage (each run counting its own family's task files) | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
@@ -147,7 +147,8 @@ line, and changes nothing; security updates only; everything but an excluded pac
 `if_required`, where the container must restart and pass its health check, then a second run changes
 nothing; on an encrypted VM, the Secure Boot stand-in holds the reboot; windows, opt-outs and unsupported
 releases skip servers; settings that can't be honoured are refused; a busy dpkg lock makes the server
-`busy`, then it is updated; a server without Python is skipped and one that doesn't answer fails the run;
+`busy`, then it is updated; a server without Python is skipped and one that doesn't answer fails the run, as
+`unreachable`, also when it stops answering after its reboot (a unit stops SSH while the health check waits);
 a service the update breaks fails its server's health check and keeps the other server from starting
 (`updates_serial=1`); a `dist` upgrade installs all but the held package; and notifications reach a
 stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
@@ -162,24 +163,32 @@ filter stops the run. Snapshots run against the same mock: a VM whose disks can'
 refusal for lack of `VM.Snapshot` fails it with that name, a healthy update takes one on the node the VM runs on
 now (`vmstate` 0) and deletes only the playbook's own old snapshot, never the operator's two (one named like
 the playbook's), the storage warning appears, `updates_snapshot_required: false` updates a VM without one, an
-unhealthy VM keeps its snapshot, and the API token never appears in the output. Each container gets host keys of its own for this. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
+unhealthy VM keeps its snapshot, and the API token never appears in the output. Waves run against it too:
+two VMs fit in one wave of two until both carry the tag `usas-group-web`, or may both reboot on a node that
+allows one, and an apply then runs the update play in two batches. Each container gets host keys of its own for this. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
 keeps each play's log, the reports and each container's failed units and recent warnings there; CI
 uploads them as an artifact for 7 days. It takes about 6 minutes per release.
 
 ## The baseline tests
 
 `tests/baseline.sh` runs only the baseline, against one container built from `tests/images/ubuntu-target`
-for the release `OS` names (`debian-12`, `debian-13`, or an Ubuntu LTS release; `debian-13` by default). A
-Debian container stands in for a VM installed from Debian's cloud image: classic `sudo`, `sshd` from
-`ssh.service` with no socket activation, and the admin user with the sudoers file the cloud-init seed writes.
+for the release `OS` names (an Ubuntu LTS release, `debian-12` or `debian-13`, or `centos-stream-`, `rocky-` or
+`alma-` with `9` or `10`; `debian-13` by default). A Debian or RHEL-family container stands in for a VM
+installed from the vendor's cloud image: classic `sudo`, `sshd` with no socket activation, and the admin user
+(in `wheel` on the RHEL family) with the sudoers file the cloud-init seed writes. On the RHEL family firewalld
+runs in the container; SELinux doesn't (containers have none), so the SSH port's SELinux label isn't covered
+here: the pre-release checklist runs the baseline on real RHEL-family VMs.
 It uses `tests/inventory/hosts.yml` and `tests/verify-baseline.yml` as `tests/run.sh` does, and the same
 container name and ports, so only one of the two runs at a time. The steps: check mode on the fresh server
 changes nothing; a first run, a second that changes nothing, and the checks; check mode again; the
 unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and then gone (Debian: a kernel in
-`/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`); SSH moved to port 2222 and checked
-there; the notification, mail relay and time source settings of `tests/hardening-vars.yml` on, a rerun
-that changes nothing, systemd-timesyncd's merged settings checked (`tests/verify-time-sync.yml`), then all off
-again with the OS's time sources back; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`.
+`/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`; the RHEL family: nothing right after a
+restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay,
+passwordless sudo and the time source settings of `tests/hardening-vars.yml` on, a rerun that changes nothing,
+the time service's sources checked (`tests/verify-time-sync.yml`: systemd-timesyncd's merged settings, or the
+sources chrony loads on the RHEL family), then all off again with the OS's time sources back; and at least 80%
+task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`, counting the task files of the server's
+own family only (`tests/coverage.py --skip-files`).
 
 ## Secure Boot and disk encryption in a VM
 
@@ -254,7 +263,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the time servers' assert and `chrony.sources.j2` and `timesyncd.conf.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; every accepted time server or pool is one chrony directive with only `iburst` added, and the timesyncd drop-in has only `[Time]` and one `NTP=` line with exactly the given names |
 | `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
-| `fuzz_update_plan.py` | `roles/updates/filter_plugins/usas_updates.py`: the snapshot clean-up, the storages read from a VM's config and the nearly full ones, the explanation of a failed API call; the role's snapshot patterns | the clean-up names only snapshots with both the `usas_upd_` name (a real time) and the description marker, never the operator's or `current`, each once, and exactly the ones older than the age limit or beyond the number to keep (worked out independently); storage names are plain; explanations are clean |
+| `fuzz_update_plan.py` | `roles/updates/filter_plugins/usas_updates.py`: the wave planner and update groups, the storages read from a VM's config and the nearly full ones, the explanation of a failed API call; the role's wave and snapshot patterns | every server with a plain name is planned exactly once and nothing else is; no wave is empty, larger than `updates_serial`, or over the group or node limit; a server is in a later wave only when no earlier one had room for it; groups are plain lower-case names from `updates_group` and `usas-group-` tags only; the clean-up names only snapshots with both the `usas_upd_` name (a real time) and the description marker, never the operator's or `current`, each once, and exactly the ones older than the age limit or beyond the number to keep (worked out independently); storage names are plain; explanations are clean |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 | `fuzz_vm_inventory.py` | `webui/usas_web/vmplan.py` (the VMs page's run plans and their inventory), `inventory_names`, `parse_limit` and `parse_tags` in `webui/usas_web/runner.py`, and `vm_alias`, `ALIAS` and `Keys.pins` in `webui/usas_web/sshkeys.py` | any listing and settings give a plan or a refusal, nothing else; a plan's inventory loads back to exactly the hosts planned (servers by name, other VMs as `vm-<vmid>` in `usas_vms`), with every typed or reported value `!unsafe` and no line break; a VM outside the inventory gets none of the Vault's secrets, passwordless sudo, a usable IPv4 address and its pinned alias; the plan's limit and tags pass the runner's own checks unchanged; aliases always match `ALIAS`, and any `known_hosts` text yields only aliases |
 
