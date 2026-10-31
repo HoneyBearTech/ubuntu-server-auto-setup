@@ -105,7 +105,7 @@ run; your own `~/.ssh` is never touched. The steps:
    that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
    expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
    AppArmor is enabled, the time service would use exactly the configured time sources
-   (`tests/verify-time-sync.yml`: the sources `chronyd -Q` loads on Ubuntu 26.04), apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
+   (`tests/verify-time-sync.yml`: the sources in chrony's configuration and sources folders on Ubuntu 26.04), apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
    reads the relay settings, the relay password reached its file unchanged (quotes, a backslash and `#`
    included), and Fail2Ban has both actions. A ban of a documentation address must reach a webhook
    listener in the container with the right message. A check run must report no changes, values that could
@@ -186,9 +186,10 @@ unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and th
 restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay,
 passwordless sudo and the time source settings of `tests/hardening-vars.yml` on, a rerun that changes nothing,
 the time service's sources checked (`tests/verify-time-sync.yml`: systemd-timesyncd's merged settings, or the
-sources chrony loads on the RHEL family), then all off again with the OS's time sources back; and at least 80%
-task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`, counting the task files of the server's
-own family only (`tests/coverage.py --skip-files`).
+sources in chrony's configuration on the RHEL family), then all off again with the OS's time sources back; on
+Ubuntu and Debian, the time sources on, a rerun and off again once more with chrony installed in place of
+systemd-timesyncd; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`,
+counting the task files of the server's own family only (`tests/coverage.py --skip-files`).
 
 ## Secure Boot and disk encryption in a VM
 

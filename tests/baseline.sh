@@ -196,6 +196,28 @@ docker exec "$SRV" sh -c '! test -e /etc/sudoers.d/90-ansible-sysadmin' \
 cool_down
 play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
 
+if [ "$family" = debian ]; then
+  step "chrony in place of systemd-timesyncd: the time sources on, a rerun that changes nothing, then off again"
+  # With chrony installed (which removes systemd-timesyncd), the role writes the sources to chrony instead.
+  docker exec -e DEBIAN_FRONTEND=noninteractive "$SRV" sh -c 'apt-get update -qq && apt-get install -y -qq chrony' \
+    >/dev/null
+  python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1]))
+yaml.safe_dump({k: v for k, v in d.items() if k.startswith("time_sync_")}, open(sys.argv[2], "w"))' \
+    tests/hardening-vars.yml "$TEST_TMP/time-sync.yml"
+  cool_down
+  play playbooks/baseline.yml --limit srv-01 --tags common "${P2222[@]}" -e "@$TEST_TMP/time-sync.yml"
+  cool_down
+  play --idempotent playbooks/baseline.yml --limit srv-01 --tags common "${P2222[@]}" -e "@$TEST_TMP/time-sync.yml"
+  cool_down
+  play tests/verify-time-sync.yml -e ansible_port=2222
+  cool_down
+  play playbooks/baseline.yml --limit srv-01 --tags common "${P2222[@]}"
+  docker exec "$SRV" sh -c '! test -e /etc/chrony/sources.d/usas.sources && ! grep -rq "#usas-time-sync#" /etc/chrony' \
+    || { echo "ERROR: the time sources set for chrony weren't removed again" >&2; exit 1; }
+  cool_down
+  play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
+fi
+
 step "Task coverage of the baseline roles on $OS"
 # Each run counts its own family's task files: the other family's are left out.
 if [ "$family" = rhel ]; then other='*/Debian.yml'; else other='*/RedHat.yml,roles/common/tasks/epel.yml'; fi
