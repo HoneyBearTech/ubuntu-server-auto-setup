@@ -387,6 +387,10 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
   snapshots". Remove `VM.Snapshot` again (`pveum role modify UbuntuAutoSetup --privs <the list without it>`)
   and a run fails the VM naming `VM.Snapshot`. Roll back once by hand following docs/updates.md
   ("Rolling back"), then delete the snapshots you made.
+- [ ] **Waves.** Tag two VMs `usas-group-web` in the Proxmox UI (with updates pending on both). `make
+  updates-check LIMIT=<both> ARGS="-e updates_serial=2"` puts them in waves 1 and 2 of 2 ("wave 1 of 2" in
+  the report), and `make updates LIMIT=<both> ARGS="-e updates_serial=2 -e updates_reboot=if_required"`
+  reboots the second only after the first is back and healthy. Remove the tags afterwards.
 
 ## Web UI
 
