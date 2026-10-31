@@ -35,6 +35,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Every cloud image is booted and hardened in a real VM, weekly** ([testing.md](docs/testing.md#real-cloud-images-in-a-vm)):
+  `tests/cloud-image-boot.sh` downloads the image the OS catalog pins, checks its checksum, boots it in QEMU with
+  KVM and OVMF with Secure Boot on the proxmox_vm role's own cloud-init seed, then runs the baseline on it twice,
+  checks it, and moves SSH to port 2222, with SELinux enforcing on the RHEL family. The new "Cloud images"
+  workflow runs it for every release, weekly, by hand, and on pull requests that change the catalog, the seed
+  templates or the test.
+
 - **Time sources (NTP)**, off by default ([docs/interfaces.md](docs/interfaces.md),
   [docs/security.md](docs/security.md#optional-hardening-and-notifications)): `time_sync_servers` and
   `time_sync_pools` replace the OS's own time sources in the time service the server runs, chrony (Ubuntu
