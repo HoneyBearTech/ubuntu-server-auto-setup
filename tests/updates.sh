@@ -267,6 +267,22 @@ play_fails "couldn't be reached" --limit upd-other
 docker start "$UPD2" >/dev/null
 wait_ssh 2342
 report "h['upd-other']['status'] == 'unreachable'"
+# A server that stops answering during its update is unreachable too, not failed: here it comes back from its
+# reboot, then a unit that holds up its start stops SSH while the health check waits for it.
+fresh "$UPD1" 2341 sysadmin
+docker exec "$UPD1" sh -c 'cat >/etc/systemd/system/usas-test-gone.service <<EOF
+[Unit]
+Description=Stops SSH 15 seconds into the next boot (updates tests)
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "sleep 15; systemctl stop ssh.socket ssh.service; pkill sshd"
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable usas-test-gone.service' >/dev/null 2>&1
+play_fails "couldn't be reached" --limit upd-usas -e updates_reboot=if_required
+report "h['upd-usas']['status'] == 'unreachable' and 'stopped answering after its reboot' in h['upd-usas']['reason']" \
+  "h['upd-usas']['reboot']['done']"
 
 step "A service the update breaks fails its server's health check and stops the rollout"
 fresh "$UPD1" 2341 sysadmin
@@ -427,6 +443,36 @@ report "h['upd-usas']['status'] == 'updated' and h['upd-usas']['snapshot']['stat
   "h['vm-4093']['status'] == 'failed' and h['vm-4093']['snapshot']['status'] == 'taken'"
 mock_state "len([n for n in snaps[4093] if desc[4093][n].startswith('USAS updates run ')]) == 2" \
   "snaps[4091] == [snaps[4091][0]] and snaps[4091][0].startswith('usas_upd_2')"
+step "Waves: two servers of an update group, or too many that may reboot on one node, aren't updated together"
+# upd-usas (VM 4091, on pve-test-2) and vm-4093 (HA-managed, on pve-test) fit in one wave of two...
+fresh "$UPD1" 2341 sysadmin
+fresh "$UPD2" 2342 ops
+pin_cluster
+WAVES=("${CLUSTER[@]}" --limit upd-usas,vm-4093 -e updates_serial=2)
+play --check "${WAVES[@]}"
+report "h['upd-usas']['wave']['number'] == 1 and h['vm-4093']['wave']['number'] == 1 and h['vm-4093']['wave']['of'] == 1" \
+  "h['vm-4093']['wave']['ha'] and not h['upd-usas']['wave']['ha']"
+# ...but not when both are tagged usas-group-web (one server of a group per wave)...
+mock_set '{"vmid": 4091, "set": {"tags": "ubuntu;ansible;usas-group-web"}}'
+mock_set '{"vmid": 4093, "set": {"tags": "prod;web;usas-group-web"}}'
+play --check "${WAVES[@]}"
+report "h['upd-usas']['wave'] == {'number': 1, 'of': 2, 'groups': ['web'], 'ha': False}" \
+  "h['vm-4093']['wave']['number'] == 2 and h['vm-4093']['wave']['groups'] == ['web']"
+# ...nor, with two of a group allowed, when both may reboot on one node and only one may there.
+mock_set '{"vmid": 4093, "set": {"node": "pve-test-2"}}'
+play --check "${WAVES[@]}" -e updates_group_max_parallel=2 -e updates_reboot=if_required -e updates_node_max_parallel=1
+report "h['upd-usas']['wave']['number'] == 1 and h['vm-4093']['wave']['number'] == 2"
+play --check "${WAVES[@]}" -e updates_group_max_parallel=2
+report "h['upd-usas']['wave']['number'] == 1 and h['vm-4093']['wave']['number'] == 1"
+# An apply updates them a wave at a time: two batches of the update play.
+play "${WAVES[@]}"
+report "h['upd-usas']['status'] == 'updated' and h['vm-4093']['status'] == 'updated'" \
+  "h['upd-usas']['wave']['number'] == 1 and h['vm-4093']['wave']['number'] == 2"
+batches="$(grep -c 'PLAY \[Update the servers\]' "$(ls -t "$TEST_TMP"/play.* | head -1)")"
+[ "$batches" = 2 ] || { echo "ERROR: the update play ran in $batches batches, not 2" >&2; exit 1; }
+expect_versions "$UPD1" usas-test-tool=1.2
+expect_versions "$UPD2" usas-test-tool=1.2
+
 if grep -l '00000000-0000-4000-8000-000000000000' "$TEST_TMP"/play.*; then
   echo "ERROR: the Proxmox API token is in the output above" >&2
   exit 1

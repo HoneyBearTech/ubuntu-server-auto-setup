@@ -53,6 +53,13 @@
       ansible.builtin.package_facts:
       register: updates_packages_before
 
+    - name: Check that the server answered before the update
+      ansible.builtin.include_tasks: answering.yml
+      vars:
+        updates_answers: >-
+          {{ [updates_services_before, updates_state_before, updates_failed_before, updates_packages_before] }}
+        updates_answers_when: before its update
+
     - name: Install the updates
       ansible.builtin.include_tasks: apply/{{ ansible_facts.os_family }}.yml
       when: usas_updates_result.planned | length > 0
@@ -60,6 +67,12 @@
     - name: Note the installed packages after the update
       ansible.builtin.package_facts:
       register: updates_packages_after
+
+    - name: Check that the server answers after the update
+      ansible.builtin.include_tasks: answering.yml
+      vars:
+        updates_answers: "{{ [updates_packages_after] }}"
+        updates_answers_when: after its update
 
     - name: Note what was upgraded
       ansible.builtin.set_fact:
@@ -69,6 +82,14 @@
 
     - name: Check whether the server needs a reboot now
       ansible.builtin.include_tasks: reboot_required/{{ ansible_facts.os_family }}.yml
+
+    - name: Check that the server answered whether it needs a reboot
+      ansible.builtin.include_tasks: answering.yml
+      vars:
+        updates_answers: >-
+          {{ [updates_reboot_file | default({}), updates_reboot_pkgs | default({}), updates_boot_kernels | default({}),
+          updates_needrestart | default({})] }}
+        updates_answers_when: while it checked for a reboot
 
     - name: Decide about the reboot
       ansible.builtin.set_fact:
@@ -133,6 +154,7 @@
           {{ ansible_failed_task.name | default('') ~ ': ' ~ (ansible_failed_result.msg | default('failed')) }}
         status: >-
           {{ 'unreachable' if ansible_failed_result.unreachable | default(false)
+          or ansible_failed_task.name | default('') == 'Stop if the server stopped answering'
           else 'busy' if ansible_failed_task.name | default('') == 'Install the updates with apt'
           and ansible_failed_result.msg | default('') is search('lock')
           else 'failed' }}

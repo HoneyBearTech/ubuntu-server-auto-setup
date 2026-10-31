@@ -19,7 +19,8 @@
   vars:
     restart_mode: {list: l, auto: a}
 
-- name: Stop if the server stopped answering during the upgrade
-  ansible.builtin.fail:
-    msg: The server stopped answering while it installed updates; check it before running again.
-  when: updates_upgrade is unreachable
+- name: Check that the server answered while it installed updates
+  ansible.builtin.include_tasks: ../answering.yml
+  vars:
+    updates_answers: "{{ [updates_upgrade] }}"
+    updates_answers_when: while it installed updates

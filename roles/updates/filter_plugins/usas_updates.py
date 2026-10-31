@@ -505,6 +505,82 @@ def usas_pve_error(result, what, privilege="VM.Audit"):
 STATUSES =("updated", "nothing", "pending", "busy", "skipped", "unsupported", "unreachable", "failed")
 
 
+# Update groups (tasks/plan.yml): the inventory's updates_group and the Proxmox tags usas-group-<name>. A group
+# only orders the servers into waves; it never decides how a server is reached or with what credentials.
+GROUP = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}\Z")
+GROUP_TAG = "usas-group-"
+SERIAL = re.compile(r"^([1-9][0-9]{0,3}|([1-9][0-9]?|100)%)\Z")
+PARALLEL = re.compile(r"^[0-9]{1,2}\Z")
+MAX_GROUPS = 16
+MAX_HOSTS = 5000
+
+
+def usas_update_groups(group, tags=()):
+    """The update groups of a server: updates_group (a name, or a list of names) and its Proxmox tags
+    usas-group-<name>, in lower case, sorted, without names that aren't plain (GROUP), at most MAX_GROUPS."""
+    names = list(group) if isinstance(group, (list, tuple)) else [group]
+    names += [t[len(GROUP_TAG):] for t in (tags if isinstance(tags, (list, tuple)) else [])
+              if isinstance(t, str) and t.lower().startswith(GROUP_TAG)]
+    found = {str(n).strip().lower() for n in names if isinstance(n, (str, int)) and not isinstance(n, bool)}
+    return sorted(n for n in found if GROUP.match(n))[:MAX_GROUPS]
+
+
+def _wave_size(serial, count):
+    """The most servers a wave may hold: a number, or a percentage of count (at least 1), as Ansible's serial."""
+    match = SERIAL.match(str(serial).strip())
+    if match and match.group(2) is None:
+        return int(match.group(1))
+    percent = int(match.group(2)) if match else 25
+    return max(1, count * percent // 100)
+
+
+def _limit(value, default):
+    """A per-wave limit: a whole number from 0 (no limit) to 99; anything else is the default."""
+    text = str(value).strip()
+    return int(text) if PARALLEL.match(text) else default
+
+
+def usas_update_plan(hosts, serial="25%", group_max=1, node_max=2):
+    """The waves the servers are updated in, as lists of names. hosts is a list of {"name", "groups", "node",
+    "reboot"} in the order to update them; each goes into the first wave with room for it: fewer than serial
+    servers, fewer than group_max of each of its groups and, for a server that may reboot, fewer than node_max
+    that may reboot on its Proxmox node ("" for a server that isn't on a cluster: no node limit). 0 means no
+    limit for group_max and node_max. A name is planned once; entries without a plain name are left out."""
+    entries, seen = [], set()
+    for host in (hosts if isinstance(hosts, (list, tuple)) else [])[:MAX_HOSTS]:
+        name = host.get("name") if isinstance(host, dict) else None
+        if not isinstance(name, str) or not name or len(name) > 255 or CONTROL.search(name) or name in seen:
+            continue
+        seen.add(name)
+        node = host.get("node") if isinstance(host.get("node"), str) else ""
+        entries.append((name, usas_update_groups(host.get("groups") or []), node, host.get("reboot") is True))
+    size = _wave_size(serial, len(entries))
+    group_max, node_max = _limit(group_max, 1), _limit(node_max, 2)
+    waves = []  # (names, {group: count}, {node: count of servers that may reboot})
+    for name, groups, node, reboot in entries:
+        for names, in_group, on_node in waves:
+            if len(names) < size and not (group_max and any(in_group.get(g, 0) >= group_max for g in groups)) \
+                    and not (node_max and reboot and node and on_node.get(node, 0) >= node_max):
+                break
+        else:
+            names, in_group, on_node = [], {}, {}
+            waves.append((names, in_group, on_node))
+        names.append(name)
+        for g in groups:
+            in_group[g] = in_group.get(g, 0) + 1
+        if reboot and node:
+            on_node[node] = on_node.get(node, 0) + 1
+    return [names for names, _, _ in waves]
+
+
+def usas_wave_number(waves, name):
+    """The wave (from 1) a server is planned in; 0 when it isn't."""
+    for number, names in enumerate(waves if isinstance(waves, (list, tuple)) else [], 1):
+        if isinstance(names, (list, tuple)) and name in names:
+            return number
+    return 0
+
+
 def usas_finish_results(results, mode="apply"):
     """The final results of a run: a server still "applying" stopped during its update, one still "pending" that
     wasn't checked stopped before its check finished (both failed, with the error in the play's log), and one
@@ -561,6 +637,12 @@ def usas_updates_summary(results):
             parts.append("no snapshot: " + usas_clean_text(snapshot.get("reason"), 120))
         if snapshot.get("warning"):
             parts.append(usas_clean_text(snapshot.get("warning"), 120))
+        wave = r.get("wave") if isinstance(r.get("wave"), dict) else {}
+        if isinstance(wave.get("of"), int) and wave["of"] > 1 and isinstance(wave.get("number"), int) \
+                and wave["number"] > 0:
+            parts.append(f"wave {wave['number']} of {wave['of']}")
+        if wave.get("ha"):
+            parts.append("HA-managed")
         if r.get("reason"):
             parts.append(usas_clean_text(r.get("reason"), 160))
         lines.append(f"{usas_clean_text(r.get('host'), 64)}: " + "; ".join(parts))
@@ -625,6 +707,9 @@ class FilterModule:
             "usas_disk_storages": usas_disk_storages,
             "usas_full_storages": usas_full_storages,
             "usas_pve_error": usas_pve_error,
+            "usas_update_groups": usas_update_groups,
+            "usas_update_plan": usas_update_plan,
+            "usas_wave_number": usas_wave_number,
             "usas_finish_results": usas_finish_results,
             "usas_updates_summary": usas_updates_summary,
             "usas_notify_due": usas_notify_due,
