@@ -172,6 +172,14 @@ cluster.
   ssh sysadmin@192.0.2.14 'sudo ls /var/log/installer/'    # no autoinstall-user-data
   ```
 
+- [ ] After its baseline run, no copy of the password hash is left where cloud-init keeps its data on
+  `test-05`. The command prints nothing. Any file it lists is a copy the baseline doesn't remove yet: open an
+  issue before releasing.
+
+  ```bash
+  ssh sysadmin@192.0.2.14 'sudo grep -rlF "\$6\$" /var/lib/cloud /etc/cloud'
+  ```
+
 - [ ] A Proxmox backup of `test-05` restores to a VM that boots unattended (the backup carries the TPM
   state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
 
@@ -309,6 +317,20 @@ then the ISO build and another test VM (`test-03`, VM ID `9003`, address `192.0.
 
   `auditctl -l` must list the `identity`, `sudoers`, `sshd`, `time-change`, `modules` and `audit-*` rules.
 
+- [ ] **A RHEL-family server**, if the release touches the baseline (containers have no SELinux): on a Rocky
+  Linux or AlmaLinux VM in the inventory (any one is enough; record which), run the baseline, then move SSH to
+  another port, which needs SELinux's port label:
+
+  ```bash
+  make baseline LIMIT=<rhel-vm>
+  make baseline LIMIT=<rhel-vm> ARGS="-e ssh_port=2222"
+  ssh -t -p 2222 <admin>@<address> 'getenforce; sudo semanage port -l | grep ^ssh_port_t; sudo firewall-cmd --list-rich-rules; sudo fail2ban-client status sshd; systemctl is-enabled dnf-automatic.timer'
+  make baseline LIMIT=<rhel-vm> ARGS="-e ssh_port=2222"
+  ```
+
+  `getenforce` must say `Enforcing`, `ssh_port_t` must list 2222, the rich rules must allow 2222 and not 22,
+  and the last run must report `changed=0`.
+
 Run the playbooks once through the web UI of the image under test, and the second runs from the CLI in a
 checkout of the same commit (`make build-installer`, `make provision LIMIT=test-01`,
 `make baseline LIMIT=test-01`), so both paths are covered. `make site LIMIT=test-01` runs all three.
@@ -365,6 +387,10 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
   snapshots". Remove `VM.Snapshot` again (`pveum role modify UbuntuAutoSetup --privs <the list without it>`)
   and a run fails the VM naming `VM.Snapshot`. Roll back once by hand following docs/updates.md
   ("Rolling back"), then delete the snapshots you made.
+- [ ] **Waves.** Tag two VMs `usas-group-web` in the Proxmox UI (with updates pending on both). `make
+  updates-check LIMIT=<both> ARGS="-e updates_serial=2"` puts them in waves 1 and 2 of 2 ("wave 1 of 2" in
+  the report), and `make updates LIMIT=<both> ARGS="-e updates_serial=2 -e updates_reboot=if_required"`
+  reboots the second only after the first is back and healthy. Remove the tags afterwards.
 
 ## Web UI
 

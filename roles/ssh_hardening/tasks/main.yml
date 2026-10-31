@@ -16,6 +16,12 @@
     fail_msg: ssh_allow_users doesn't include {{ admin_user | default(ansible_user) }}; applying it would lock Ansible out.
     quiet: true
 
+# sshd's unit, and whether it can be socket-activated: ssh with ssh.socket on Ubuntu and Debian, sshd on the RHEL
+# family (vars/<os_family>.yml).
+- name: Load the settings for the server's OS family
+  ansible.builtin.include_vars:
+    file: "{{ ansible_facts.os_family }}.yml"
+
 - name: Read the current hardening drop-in
   ansible.builtin.slurp:
     src: /etc/ssh/sshd_config.d/00-hardening.conf
@@ -38,10 +44,29 @@
     validate: /usr/sbin/sshd -t -f %s
   notify: Restart ssh
 
+# SELinux (enforcing on the RHEL family) lets sshd listen only on ports labelled ssh_port_t. The label goes on before
+# sshd moves, and SELinux stays enforcing.
+- name: Install SELinux's port tools
+  ansible.builtin.dnf:
+    name: policycoreutils-python-utils
+    state: present
+  register: ssh_selinux_tools
+  when: ssh_port | int != 22 and ansible_facts.selinux.status | default('disabled') == 'enabled'
+
+- name: Let sshd use the new port under SELinux
+  community.general.seport:
+    ports: "{{ ssh_port | string }}"
+    proto: tcp
+    setype: ssh_port_t
+    state: present
+  when:
+    - ssh_port | int != 22 and ansible_facts.selinux.status | default('disabled') == 'enabled'
+    - not (ansible_check_mode and ssh_selinux_tools is changed)
+
 # Ubuntu starts sshd from ssh.socket, which listens on port 22 regardless of sshd_config.
 # For any other port, run ssh.service directly so sshd's own Port setting applies.
 - name: Switch from socket activation to ssh.service for a custom port
-  when: ssh_port | int != 22
+  when: ssh_port | int != 22 and ssh_os_socket | length > 0
   block:
     - name: Enable ssh.service
       ansible.builtin.systemd_service:
@@ -86,9 +111,10 @@
         timeout: 60
 
     - name: Remove the old port 22 firewall rule
-      community.general.ufw:
-        rule: "{{ item }}"
-        port: "22"
-        proto: tcp
-        delete: true
-      loop: [limit, allow]
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: close_port/{{ ansible_facts.os_family }}
+        apply:
+          tags: [always]
+      vars:
+        firewall_close_port: 22

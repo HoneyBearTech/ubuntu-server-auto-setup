@@ -1,0 +1,83 @@
+---
+# The RHEL family: firewalld, in its default zone. SSH and the extra rules are rich rules (a source network needs
+# one); firewall_ssh_limit becomes a rich-rule limit on new SSH connections, which counts all sources together
+# (Fail2Ban limits each source). firewalld's own "ssh" service, open to everyone, is removed.
+- name: Install firewalld
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  register: firewall_firewalld_install
+
+- name: Start firewalld
+  ansible.builtin.systemd_service:
+    name: firewalld
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and firewall_firewalld_install is changed)
+
+# A check run on a server without firewalld can't ask it about rules; the run that installs it applies them all.
+- name: Configure firewalld
+  when: not (ansible_check_mode and firewall_firewalld_install is changed)
+  block:
+    # SSH rules go in before the open ssh service comes out, so the current session survives.
+    - name: Allow SSH
+      ansible.posix.firewalld:
+        zone: "{{ firewall_os_zone }}"
+        rich_rule: >-
+          rule {{ '' if item == 'any' else 'family="ipv4" source address="' ~ item ~ '" ' }}port port="{{ ssh_port }}"
+          protocol="tcp" accept{{ (' limit value="' ~ firewall_ssh_limit_rate ~ '"') if firewall_ssh_limit | bool else '' }}
+        permanent: true
+        immediate: true
+        state: enabled
+      loop: "{{ firewall_ssh_sources }}"
+
+    - name: Remove firewalld's open SSH service
+      ansible.posix.firewalld:
+        zone: "{{ firewall_os_zone }}"
+        service: ssh
+        permanent: true
+        immediate: true
+        state: disabled
+
+    - name: Add extra allow rules
+      ansible.posix.firewalld:
+        zone: "{{ firewall_os_zone }}"
+        port: "{{ (item.port | string | replace(':', '-') ~ '/' ~ item.proto | default('tcp')) if firewall_rule_from == 'any' else omit }}"
+        rich_rule: >-
+          {{ omit if firewall_rule_from == 'any' else 'rule family="ipv4" source address="' ~ firewall_rule_from ~ '" port port="'
+             ~ (item.port | string | replace(':', '-')) ~ '" protocol="' ~ item.proto | default('tcp') ~ '" accept' }}
+        permanent: true
+        immediate: true
+        state: enabled
+      loop: "{{ firewall_allow }}"
+      loop_control:
+        label: "{{ item.port }}/{{ item.proto | default('tcp') }} from {{ item.from | default('any') }}"
+      vars:
+        firewall_rule_from: "{{ item.from | default('any') }}"
+
+    # What happens to everything else: deny drops it, reject refuses it, allow accepts it (as UFW's policies).
+    - name: Set the default incoming policy
+      ansible.posix.firewalld:
+        zone: "{{ firewall_os_zone }}"
+        target: "{{ {'deny': 'DROP', 'reject': '%%REJECT%%', 'allow': 'ACCEPT'}[firewall_default_incoming] }}"
+        permanent: true
+        state: present
+      notify: Reload firewalld
+
+    - name: Read firewalld's logging of denied packets
+      ansible.builtin.command:
+        argv: [firewall-cmd, --get-log-denied]
+      register: firewall_log_denied
+      changed_when: false
+      check_mode: false
+
+    # UFW's levels, as near as firewalld has them: off logs nothing, high and full every denied packet, the rest
+    # only those addressed to the server.
+    - name: Set firewalld's logging of denied packets
+      ansible.builtin.command:
+        argv: [firewall-cmd, "--set-log-denied={{ firewall_log_level }}"]
+      changed_when: true
+      when: firewall_log_denied.stdout | trim != firewall_log_level
+      vars:
+        firewall_log_level: >-
+          {{ 'off' if firewall_logging in ['off', false] else 'all' if firewall_logging in ['high', 'full'] else 'unicast' }}

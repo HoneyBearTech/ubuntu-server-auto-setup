@@ -1,0 +1,6 @@
+---
+# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux): dnf. Only the reboot check is shared with the baseline
+# so far; listing and installing updates on this family comes with the updates playbook's RHEL support.
+updates_os_reboot_check: needs-restarting
+# Rocky Linux and AlmaLinux publish security errata (dnf updateinfo); vars/CentOS.yml says CentOS Stream doesn't.
+os_security_errata: true

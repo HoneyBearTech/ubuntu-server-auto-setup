@@ -150,7 +150,8 @@ jobs:
       fail-fast: false
       matrix:
         # tests/run.sh covers Ubuntu 26.04; these are the other releases the baseline supports.
-        os: [ubuntu-22.04, ubuntu-24.04, debian-12, debian-13]
+        os: [ubuntu-22.04, ubuntu-24.04, debian-12, debian-13, centos-stream-9, centos-stream-10, rocky-9, rocky-10,
+             alma-9, alma-10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,6 +168,14 @@ jobs:
 
       - name: Install the Ansible collections
         run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
+
+      # The runner's AppArmor profile for unix_chkpwd is attached by path, so it also confines the test
+      # container's copy, which then can't read /etc/shadow; the RHEL family's PAM needs it to let sshd log in.
+      - name: Unload the runner's unix_chkpwd AppArmor profile
+        run: |
+          if sudo grep -q '^unix-chkpwd ' /sys/kernel/security/apparmor/profiles; then
+            printf unix-chkpwd | sudo tee /sys/kernel/security/apparmor/.remove >/dev/null
+          fi
 
       # Builds the stand-in server for the release, runs the baseline against it (check mode, two runs, the
       # result, the reboot check, a move to port 2222) and fails below 80% task coverage of the baseline roles.

@@ -1,4 +1,9 @@
 ---
+# The family's packages (vars/Debian.yml, vars/RedHat.yml).
+- name: Load the settings for the server's OS family
+  ansible.builtin.include_vars:
+    file: "{{ ansible_facts.os_family }}.yml"
+
 - name: Check the Fail2Ban settings
   ansible.builtin.assert:
     that:
@@ -34,12 +39,26 @@
     quiet: true
   no_log: true
 
-# python3-systemd lets Fail2Ban read the journal (Ubuntu servers no longer log SSH to auth.log by default).
+# The RHEL family gets Fail2Ban from EPEL, with fail2ban-firewalld, which makes firewalld's rich rules its ban
+# action.
+- name: Enable EPEL, where Fail2Ban comes from
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: epel
+    apply:
+      tags: [always]
+  when: ansible_facts.os_family == 'RedHat'
+
+# python3-systemd lets Fail2Ban read the journal (servers no longer log SSH to auth.log by default).
 - name: Install Fail2Ban
-  ansible.builtin.apt:
-    name: "{{ ['fail2ban', 'python3-systemd'] + (['curl'] if fail2ban_webhook_url | length > 0 else []) }}"
+  ansible.builtin.package:
+    name: >-
+      {{ fail2ban_os_packages + (fail2ban_os_webhook_packages if fail2ban_webhook_url | length > 0 else [])
+         + (fail2ban_os_mail_packages if fail2ban_destemail | length > 0 else []) }}
     state: present
   register: fail2ban_install
+  # A check run that would enable EPEL can't see its packages yet; the run that enables it installs them.
+  when: not (ansible_check_mode and common_epel_install | default({}) is changed)
 
 - name: Write the webhook action
   ansible.builtin.template:
@@ -73,7 +92,7 @@
     name: fail2ban
     enabled: true
     state: started
-  when: not (ansible_check_mode and fail2ban_install is changed)
+  when: not (ansible_check_mode and (fail2ban_install is changed or fail2ban_install is skipped))
 
 - name: Apply Fail2Ban changes now
   ansible.builtin.meta: flush_handlers
@@ -85,4 +104,4 @@
   retries: 5
   delay: 3
   until: fail2ban_sshd_status.rc == 0
-  when: not (ansible_check_mode and fail2ban_install is changed)
+  when: not (ansible_check_mode and (fail2ban_install is changed or fail2ban_install is skipped))

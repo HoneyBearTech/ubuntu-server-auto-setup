@@ -58,26 +58,12 @@
   failed_when: common_cloud_init_status.rc not in [0, 2]
   when: common_cloud_init.stat.exists
 
-# Also in check mode: refreshing the lists changes no packages, and without it a check run can't see
-# which packages exist or would be upgraded.
-- name: Refresh the package lists
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
-  changed_when: false
-  check_mode: false
-
-- name: Upgrade packages
-  ansible.builtin.apt:
-    upgrade: "{{ pkg_upgrade }}"
-    autoremove: true
-  when: pkg_upgrade != 'no'
-
-- name: Install base packages
-  ansible.builtin.apt:
-    name: "{{ common_packages + (['qemu-guest-agent'] if ansible_facts.virtualization_type == 'kvm' else []) }}"
-    state: present
-  register: common_base_packages
+- name: Upgrade packages and install the base packages
+  # Dynamic, so its tasks get the tag here: they run whenever this include does (--tags common included).
+  ansible.builtin.include_tasks:
+    file: packages/{{ ansible_facts.os_family }}.yml
+    apply:
+      tags: [always]
 
 # In check mode a service that this run would install doesn't exist yet, so it can't be checked.
 - name: Start the QEMU guest agent
@@ -94,13 +80,23 @@
     use: systemd
   when: manage_hostname | bool
 
+# Ubuntu and Debian map the host name to 127.0.1.1. The RHEL family doesn't; there a line is added only with a
+# domain, so that the fully qualified name resolves.
 - name: Map the hostname in /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
     regexp: '^127\.0\.1\.1\s'
     line: "127.0.1.1 {{ (server_hostname ~ '.' ~ server_domain ~ ' ') if server_domain else '' }}{{ server_hostname }}"
     mode: "0644"
-  when: manage_hostname | bool
+  when: manage_hostname | bool and common_os_hosts_loopback == '127.0.1.1'
+
+- name: Map the fully qualified name in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.0\.1\s+\S+\s+{{ server_hostname | regex_escape }}$'
+    line: "127.0.0.1 {{ server_hostname }}.{{ server_domain }} {{ server_hostname }}"
+    mode: "0644"
+  when: manage_hostname | bool and common_os_hosts_loopback == '127.0.0.1' and server_domain | length > 0
 
 - name: Set the timezone
   community.general.timezone:
@@ -110,7 +106,7 @@
   ansible.builtin.user:
     name: "{{ admin_user }}"
     shell: "{{ admin_shell }}"
-    groups: [sudo]
+    groups: ["{{ common_os_admin_group }}"]
     append: true
     create_home: true
     password: "{{ (admin_password | string | password_hash('sha512')) if admin_password | string | length > 0 else omit }}"
@@ -152,6 +148,24 @@
     path: /var/log/installer/autoinstall-user-data
     state: absent
 
+# cloud-init keeps root-only copies of the user-data it booted with (the seed's password hash) under each
+# instance it has seen; /var/lib/cloud/instance is a link to the current one. It doesn't read them again.
+- name: Find cloud-init's copies of its user-data
+  ansible.builtin.find:
+    paths: /var/lib/cloud/instances
+    patterns: user-data.txt*
+    recurse: true
+    depth: 2
+  register: common_cloud_init_user_data
+
+- name: Remove cloud-init's copies of its user-data
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ common_cloud_init_user_data.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Install SSH keys
   ansible.builtin.include_tasks: ssh_keys.yml
   tags: [ssh_keys]
@@ -182,22 +196,12 @@
     - common_sendmail is not skipped
     - not common_sendmail.stat.exists
 
-- name: Configure unattended upgrades
-  ansible.builtin.template:
-    src: 52unattended-upgrades-local.j2
-    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
-    mode: "0644"
-  notify: Restart unattended-upgrades
-
 - name: Turn on automatic updates
-  ansible.builtin.copy:
-    content: |
-      APT::Periodic::Update-Package-Lists "1";
-      APT::Periodic::Download-Upgradeable-Packages "1";
-      APT::Periodic::Unattended-Upgrade "1";
-      APT::Periodic::AutocleanInterval "7";
-    dest: /etc/apt/apt.conf.d/20auto-upgrades
-    mode: "0644"
+  # Dynamic, so its tasks get the tag here: they run whenever this include does (--tags common included).
+  ansible.builtin.include_tasks:
+    file: auto_updates/{{ ansible_facts.os_family }}.yml
+    apply:
+      tags: [always]
 
 # The same check as the updates playbook's, one per family (roles/updates/tasks/reboot_required/): Ubuntu's
 # /var/run/reboot-required, or on Debian a newer kernel in /boot than the one running.

@@ -2,50 +2,8 @@
 # Docker-published ports (firewall_docker_enabled). Docker forwards them through its DOCKER-USER chain before
 # UFW's rules see them, so UFW's after.rules and after6.rules fill that chain, between the role's markers. Only
 # new connections Docker forwards to a published port (conntrack state DNAT) are dropped there unless allowed;
-# replies and the containers' own connections pass. Turned off, the rules come out again.
-- name: Check Docker-published ports can be filtered here
-  ansible.builtin.assert:
-    that: ansible_facts.os_family != 'RedHat'
-    fail_msg: >-
-      firewall_docker_enabled isn't available on {{ ansible_facts.distribution }} yet: Docker's ports there go
-      through firewalld's docker zone, which this role doesn't manage. Leave firewall_docker_enabled off, and
-      publish container ports only on the addresses that should reach them (-p 127.0.0.1:8080:80).
-    quiet: true
-  when: firewall_docker_enabled | bool
-
-- name: Check the Docker port sources
-  ansible.builtin.assert:
-    that:
-      - firewall_docker_sources is not string and firewall_docker_sources is not mapping
-      - firewall_docker_sources | map('string') | select('match', firewall_docker_source_pattern) | list | length
-        == firewall_docker_sources | length
-    fail_msg: >-
-      firewall_docker_sources must be a list of IPv4 or IPv6 addresses or networks (CIDR), like 10.0.0.0/24 or
-      fd00::/8.
-    quiet: true
-  when: firewall_docker_enabled | bool
-
-- name: Check the Docker port rules
-  ansible.builtin.assert:
-    that:
-      - firewall_docker_allow is not string and firewall_docker_allow is not mapping
-      - item is mapping
-      - item.keys() | difference(firewall_docker_allow_keys) | length == 0
-      - item.get('port', '') | string is match(firewall_docker_port_pattern)
-      - item.port | string | split(':') | map('int') | select('ge', 1) | select('le', 65535) | list
-        == item.port | string | split(':') | map('int') | sort
-      - item.get('proto', 'tcp') in firewall_docker_protos
-      - item.get('from', 'any') == 'any' or item.from | string is match(firewall_docker_source_pattern)
-    fail_msg: >-
-      Each firewall_docker_allow entry is { port, proto, from }: a port from 1 to 65535 or a range like 9000:9010
-      (lower first), proto tcp, udp or any (default tcp), and from an IPv4 or IPv6 address or network, or any
-      (the default).
-    quiet: true
-  loop: "{{ firewall_docker_allow if firewall_docker_allow is not string and firewall_docker_allow is not mapping
-    else [firewall_docker_allow] }}"
-  loop_control:
-    label: "{{ item }}"
-  when: firewall_docker_enabled | bool
+# replies and the containers' own connections pass. Turned off, the rules come out again. docker_checks.yml
+# checks the settings first.
 
 # A check run on a server without UFW can't read its files; the run that installs it writes them.
 - name: Filter Docker-published ports with UFW

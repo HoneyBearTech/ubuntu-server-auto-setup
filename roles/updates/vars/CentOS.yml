@@ -1,0 +1,3 @@
+---
+# CentOS Stream publishes no security errata, so "security only" would install nothing.
+os_security_errata: false

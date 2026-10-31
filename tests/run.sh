@@ -669,6 +669,8 @@ docker exec "$SRV" mv /usr/bin/sudo.ws.hidden /usr/bin/sudo.ws
 
 step "Task coverage"
 # The updates role has its own suite and figure (tests/updates.sh).
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates
+# Ubuntu only here: the RHEL family's task files are tests/baseline.sh's.
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates \
+  --skip-files '*/RedHat.yml,roles/common/tasks/epel.yml'
 
 step "All integration tests passed"

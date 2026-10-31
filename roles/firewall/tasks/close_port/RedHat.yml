@@ -1,0 +1,20 @@
+---
+# The rules for an SSH port no longer in use (firewall_close_port), after SSH has moved: firewalld's rich rules
+# for that port, whatever their source or limit.
+- name: List the firewall's rich rules
+  ansible.builtin.command:
+    argv: [firewall-cmd, "--zone={{ firewall_os_zone }}", --permanent, --list-rich-rules]
+  register: firewall_rich_rules
+  changed_when: false
+  check_mode: false
+
+- name: Remove the old SSH port's firewall rules
+  ansible.posix.firewalld:
+    zone: "{{ firewall_os_zone }}"
+    rich_rule: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: disabled
+  loop: >-
+    {{ firewall_rich_rules.stdout_lines
+       | select('search', 'port port="' ~ firewall_close_port ~ '" protocol="tcp"') | list }}

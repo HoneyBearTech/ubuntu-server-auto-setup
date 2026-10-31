@@ -1,4 +1,7 @@
 ---
+# firewalld's zone for the rules: its default one, which every interface is in unless set otherwise.
+firewall_os_zone: public
+
 # What firewall_docker_sources entries, and the port, proto and from of firewall_docker_allow entries, may be: IPv4
 # or IPv6 addresses and networks, port numbers and ranges, nothing that could add an option or a line to UFW's
 # after.rules. tests/fuzz/ reads them from here.

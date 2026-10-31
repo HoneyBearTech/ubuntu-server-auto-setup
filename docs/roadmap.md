@@ -23,7 +23,8 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Done: integration tests that run every playbook against containers and a mock Proxmox API on every pull
   request, with idempotence checks and an 80% task coverage floor, plus a weekly run against the real
   Ubuntu ISO ([testing.md](testing.md)).
-- Run the baseline tests against Ubuntu 24.04 as well as 26.04.
+- Done (0.7.0): the baseline tests run on every release the baseline supports, from Ubuntu 22.04 to
+  AlmaLinux 10, on each pull request ([testing.md](testing.md)).
 - Done: a documented end-to-end test on real Proxmox VE before every release
   ([release-checklist.md](release-checklist.md)).
 
@@ -33,10 +34,11 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Done: an OS catalog that pins every supported image by URL and checksum, built from the vendors' indexes
   with their signatures checked against pinned keys, and checked weekly
   ([interfaces.md](interfaces.md#the-os-catalog)).
-- In progress (0.7.0): more operating systems, installed from the vendors' cloud images with the same
-  hardened baseline: Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and 10, Rocky Linux
-  9 and 10, and AlmaLinux 9 and 10 (UFW on Ubuntu and Debian, firewalld on the RHEL family). Ubuntu keeps its
-  installer ISO as a choice.
+- Done (0.7.0): the hardened baseline on more operating systems: Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12
+  and 13, CentOS Stream 9 and 10, Rocky Linux 9 and 10, and AlmaLinux 9 and 10 (UFW on Ubuntu and Debian,
+  firewalld on the RHEL family); any other release is refused unless you allow it.
+- In progress (0.7.0): installing all of those from the vendors' cloud images. Ubuntu keeps its installer ISO
+  as a choice.
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
 - Done: Secure Boot by default for new VMs, and optional LUKS2 disk encryption unlocked by the VM's
@@ -79,16 +81,18 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Keep the [OpenSSF Best Practices](https://www.bestpractices.dev/projects/15740) Passing and Silver
   criteria and the OpenSSF Baseline levels 1 and 2 met, and keep the OpenSSF Scorecard score up.
 - Signed releases with checksums, an SBOM and SLSA provenance from v0.1.0 on.
-- Test every new Ubuntu point release and Proxmox VE release, and follow Ansible's supported versions.
+- Test every new point release of the supported systems and every Proxmox VE release, and follow Ansible's
+  supported versions.
 
 ## What ubuntu-server-auto-setup will not do
 
 - **Touch existing VMs' disks.** Provisioning creates VMs that don't exist; it will never reinstall,
   resize or rebuild an existing one. Rebuilding is a deliberate manual step (delete the VM, then run it).
-- **Support other hypervisors or clouds.** It is built for Proxmox VE. The baseline works on any Ubuntu
-  server, but installing elsewhere (VMware, Hyper-V, public clouds) is out of scope. (Cloud images are
-  used, as disk images on Proxmox VE.)
-- **Support non-LTS or end-of-life Ubuntu releases**, or other distributions.
+- **Support other hypervisors or clouds.** It is built for Proxmox VE. The baseline works on any server
+  running a supported release, but installing elsewhere (VMware, Hyper-V, public clouds) is out of scope.
+  (Cloud images are used, as disk images on Proxmox VE.)
+- **Support non-LTS or end-of-life releases**, or distributions beyond Ubuntu, Debian and the RHEL family
+  above. The OS catalog lists exactly what is supported.
 - **Manage applications.** It produces a hardened, up-to-date base server. Web servers, databases,
   containers and their configuration belong in your own playbooks on top.
 - **Be a compliance benchmark.** It won't claim CIS or STIG conformance; optional hardening stays opt-in

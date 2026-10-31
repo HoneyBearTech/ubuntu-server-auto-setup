@@ -1,0 +1,22 @@
+---
+# Ubuntu and Debian: refresh the lists, upgrade (pkg_upgrade, apt's own modes) and install the base packages.
+# Also in check mode: refreshing the lists changes no packages, and without it a check run can't see
+# which packages exist or would be upgraded.
+- name: Refresh the package lists
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  changed_when: false
+  check_mode: false
+
+- name: Upgrade packages
+  ansible.builtin.apt:
+    upgrade: "{{ pkg_upgrade }}"
+    autoremove: true
+  when: pkg_upgrade != 'no'
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages + (['qemu-guest-agent'] if ansible_facts.virtualization_type == 'kvm' else []) }}"
+    state: present
+  register: common_base_packages

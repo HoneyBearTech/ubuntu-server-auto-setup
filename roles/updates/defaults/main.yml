@@ -88,6 +88,19 @@ updates_allow_shared_become_password: false
 # Share of servers whose update may fail before no further server is started (0: stop at the first failure).
 updates_max_fail_percentage: 0
 
+# Waves (tasks/plan.yml): the servers are updated a wave at a time, in inventory order, each in the first wave
+# with room for it. A wave holds at most updates_serial servers (a number, or a percentage of the servers being
+# updated), at most updates_group_max_parallel of each update group, and at most updates_node_max_parallel that
+# may reboot (updates_reboot: if_required) on each Proxmox node; 0 means no limit for the last two. The run takes
+# these three from the first server: set them for all servers (group_vars/all, or -e).
+updates_serial: "25%"
+updates_group_max_parallel: 1
+updates_node_max_parallel: 2
+# The server's update groups: a name or a list of names (letters, digits, _ . -), per host or group. A VM on the
+# cluster is also in the group <name> for each Proxmox tag usas-group-<name>. Groups only order the waves: two
+# servers of a group that serve the same thing aren't updated, or rebooted, at the same time.
+updates_group: ""
+
 # Notifications, sent once per run from the control node (set them for all servers, in group_vars/all):
 # on-change (an apply updated or rebooted a server, a check found updates waiting, or a server failed or
 # couldn't be reached), always, or only-on-error.

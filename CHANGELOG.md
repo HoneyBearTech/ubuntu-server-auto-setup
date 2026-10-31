@@ -27,6 +27,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   leave the web UI's field empty) to follow the catalog from release to release.
 - A mirror in `ubuntu_iso_base_url` no longer needs to publish `SHA256SUMS.gpg` for the point release the
   catalog pins: the pinned checksum decides.
+- **The baseline stops on a release it doesn't support**, before changing anything. It supports the OS
+  catalog's releases: Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, CentOS Stream, Rocky Linux and
+  AlmaLinux 9 and 10. To run it on another Debian, Ubuntu or RHEL-family release anyway, set
+  `baseline_allow_unsupported: true` for that server; each run then warns about it. A release past the end of
+  its standard support still runs, with a warning.
 
 ### Added
 
@@ -58,6 +63,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
   control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
   (B23).
+- **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
+  the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
+  update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags
+  `usas-group-<name>`), and two that may reboot on each Proxmox node (`updates_node_max_parallel: 2`). A check
+  run plans the waves too; the report gives each server's wave, groups and whether Proxmox HA manages it.
+  `updates_serial` can now be set in the inventory as well as with `-e`.
 
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
@@ -126,8 +137,24 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
   job runs it on each of those releases and on Debian 12 and 13 (`make test-baseline`).
 
+- **The baseline runs on CentOS Stream, Rocky Linux and AlmaLinux 9 and 10**, with each family's own tools:
+  - dnf upgrades, and dnf-automatic for automatic updates: security updates on Rocky Linux and AlmaLinux,
+    every update on CentOS Stream, which publishes no security errata;
+  - firewalld instead of UFW, driven by the same `firewall_*` settings (SSH and the extra rules as rich rules;
+    `firewall_ssh_limit_rate`, 30 a minute, limits new SSH connections from all sources together);
+  - SELinux stays enforcing: a custom SSH port is labelled `ssh_port_t` before sshd moves;
+  - the admin user in `wheel`, sshd as `sshd.service`, no 127.0.1.1 line in `/etc/hosts`;
+  - Fail2Ban from EPEL, with `fail2ban-firewalld` (EPEL's key checked; `fail2ban_enabled: false` leaves both
+    out); the mail relay's msmtp from EPEL too;
+  - a waiting reboot found with `dnf needs-restarting`, the check the updates playbook will use on this family.
+
+  The CI baseline matrix runs every one of them.
+
 ### Changed
 
+- The OS catalog pins AlmaLinux 10's x86-64-v2 cloud image instead of the x86-64 (v3) one, so AlmaLinux 10 runs on
+  CPUs without AVX2 too (Intel Ivy Bridge and earlier). CentOS Stream 10 and Rocky Linux 10 publish only x86-64-v3
+  builds. `make catalog` keeps choosing the v2 build.
 - An inventory source that can't be read now stops a run instead of being skipped with a warning
   (`any_unparsed_is_failed` in `ansible.cfg`), so an unreachable cluster can't silently shrink an updates run.
 
@@ -150,27 +177,38 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Security
 
+- The baseline also deletes cloud-init's root-only copies of the user-data it booted with
+  (`/var/lib/cloud/instances/*/user-data.txt*`), which hold the admin password's hash, as it already did
+  for the Ubuntu installer's copy ([security.md](docs/security.md)).
+
+- **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
+  needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
+  boundary B21 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
 - pyasn1 0.6.5 (from 0.6.4) in the CI and web UI requirements, for GHSA-2qm8-x737-gmw5,
   GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p and GHSA-mm57-4v3p-rchx.
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
   [assurance case](docs/assurance-case.md).
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
 
 ### Fixed
 
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
-
-### Security
-
-- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
-  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
-  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
-  VM's key is pinned by cluster and VM ID.
+- The updates tests sometimes saw the update phased at 0 % as one to install: apt ignores phasing without a
+  machine ID, which a test container that has only just booted may not have yet. The test image now gives apt a
+  fixed one (`APT::Machine-ID`).
 
 ### Documentation
+
+- The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
+  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing Ubuntu Server LTS and
+  hardening Ubuntu, Debian and RHEL-family servers, with a supported-versions badge row.
 
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left
