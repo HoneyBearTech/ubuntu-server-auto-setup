@@ -672,6 +672,7 @@ cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 
 step "baseline: Docker-published ports: skipped without Docker, then blocked unless allowed"
+# At most three plays between pauses: UFW limits SSH to 6 new connections in 30 seconds.
 # The stand-in publishes the server's port 8080 (the runner's 127.0.0.1:2280) as Docker does, past UFW.
 published() { curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:2280/; }
 DOCKER_ON=(--tags firewall "${P2222[@]}" -e firewall_docker_enabled=true)
@@ -685,24 +686,19 @@ docker cp tests/fixtures/docker-stand-in/usas-docker-stand-in "$SRV":/usr/local/
 docker exec "$SRV" sh -c 'systemctl daemon-reload && systemctl start docker'
 for _ in $(seq 20); do published && break; sleep 0.5; done
 published || { echo "ERROR: the Docker stand-in's published port doesn't answer" >&2; exit 1; }
-cool_down
 play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}"
 ! published || { echo "ERROR: a published port answers with firewall_docker_enabled and no allowance" >&2; exit 1; }
-cool_down
 play --idempotent playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}"
 cool_down
 play tests/verify-docker-ports.yml -e ansible_port=2222
-cool_down
 play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e '{"firewall_docker_allow": [{"port": 8080}]}'
 published || { echo "ERROR: the published port allowed in firewall_docker_allow doesn't answer" >&2; exit 1; }
-cool_down
 play tests/verify-docker-ports.yml -e ansible_port=2222 -e '{"firewall_docker_allow": [{"port": 8080}]}'
 # The address the "container" saw the last request from: the runner, as the server sees it.
 client="$(docker exec "$SRV" sh -c "tail -n 1 /var/log/usas-ctr.log | cut -d' ' -f1")"
 cool_down
 play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e "{\"firewall_docker_sources\": [\"192.0.2.0/24\", \"fd00::/8\"]}"
 ! published || { echo "ERROR: a published port answers a source firewall_docker_sources doesn't list" >&2; exit 1; }
-cool_down
 play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e "{\"firewall_docker_sources\": [\"$client\"]}"
 published || { echo "ERROR: the published port doesn't answer $client, listed in firewall_docker_sources" >&2; exit 1; }
 cool_down
@@ -715,7 +711,6 @@ play_fails 'Each firewall_docker_allow entry is' playbooks/baseline.yml --limit 
 cool_down
 play playbooks/baseline.yml --limit srv-01 --tags firewall "${P2222[@]}"
 published || { echo "ERROR: turning firewall_docker_enabled off left the published port blocked" >&2; exit 1; }
-cool_down
 play tests/verify-docker-ports.yml -e ansible_port=2222 -e expect_docker_rules=false
 docker exec "$SRV" sh -c 'systemctl stop docker && rm /etc/systemd/system/docker.service && systemctl daemon-reload'
 
