@@ -1,4 +1,7 @@
 ---
+# Set false to leave Fail2Ban out of the baseline (not installed, or left as it is). On the RHEL family it comes
+# from EPEL, which this turns off too.
+fail2ban_enabled: true
 ssh_port: 22
 fail2ban_bantime: 1h
 fail2ban_findtime: 10m

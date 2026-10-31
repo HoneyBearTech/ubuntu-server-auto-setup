@@ -93,8 +93,9 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    and starts it. When the installer has finished and powered the VM off, it detaches both ISOs, deletes
    the seed ISO (it holds the password hash), starts the VM and waits for SSH. VMs that already exist are
    skipped, so reruns are safe.
-3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04
-   or Debian 12 or 13 server, not only ones this project installed:
+3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04,
+   Debian 12 or 13, CentOS Stream 9 or 10, Rocky Linux 9 or 10 or AlmaLinux 9 or 10 server, not only ones this
+   project installed (UFW on Ubuntu and Debian, firewalld and SELinux on the RHEL family):
    - `apt` full upgrade, hostname and timezone;
    - the admin user, with its `authorized_keys` kept exactly in sync with your GitHub keys;
    - an SSH hardening drop-in: no root login, no passwords, and optionally a different port (which also
@@ -304,6 +305,8 @@ still read until 1.0)
 | `ssh_allow_users` | `[]` | If set, only these users may log in over SSH (it must include `admin_user`; the run refuses otherwise). |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
 | `firewall_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
+| `firewall_ssh_limit_rate` | `30/m` | On firewalld (the RHEL family), the rate of new SSH connections allowed from all sources together; UFW limits each source on its own. |
+| `fail2ban_enabled` | `true` | Install and configure Fail2Ban (from EPEL on the RHEL family). |
 | `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
 | `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |

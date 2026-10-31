@@ -10,6 +10,10 @@
   pre_tasks:
     - name: Use a sudo that Ansible can give the password to
       ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
+
+    - name: Read the OS family
+      ansible.builtin.setup:
+        gather_subset: [min]
   tasks:
     - name: Read the effective sshd settings
       ansible.builtin.command: sshd -T
@@ -31,6 +35,7 @@
       ansible.builtin.command: ufw status verbose
       register: verify_ufw
       changed_when: false
+      when: ansible_facts.os_family == 'Debian'
 
     - name: Check the firewall
       ansible.builtin.assert:
@@ -40,6 +45,36 @@
           - verify_ufw.stdout is search('(?m)^' ~ want_port ~ '/tcp\s+LIMIT IN\s+Anywhere')
           - verify_ufw.stdout is search('(?m)^443/tcp\s+ALLOW IN\s+Anywhere')
           - want_port | int == 22 or verify_ufw.stdout is not search('(?m)^22/tcp')
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Read firewalld's settings
+      ansible.builtin.command:
+        argv: [firewall-cmd, --zone=public, "{{ item }}"]
+      loop: [--list-rich-rules, --list-ports, --list-services]
+      register: verify_firewalld
+      changed_when: false
+      when: ansible_facts.os_family == 'RedHat'
+
+    # The zone's target needs --permanent to read: it's what the zone does with everything else after a reload.
+    - name: Read the zone's default
+      ansible.builtin.command:
+        argv: [firewall-cmd, --permanent, --zone=public, --get-target]
+      register: verify_firewalld_target
+      changed_when: false
+      when: ansible_facts.os_family == 'RedHat'
+
+    - name: Check firewalld
+      ansible.builtin.assert:
+        that:
+          - rules is search('(?m)^rule port port="' ~ want_port ~ '" protocol="tcp" accept limit value="30/m"$')
+          - want_port | int == 22 or rules is not search('port="22"')
+          - verify_firewalld.results[1].stdout.split() == ['443/tcp']
+          - "'ssh' not in verify_firewalld.results[2].stdout.split()"
+          - verify_firewalld_target.stdout | trim == 'DROP'
+        fail_msg: "{{ verify_firewalld.results | map(attribute='stdout') | list }} {{ verify_firewalld_target.stdout }}"
+      vars:
+        rules: "{{ verify_firewalld.results[0].stdout }}"
+      when: ansible_facts.os_family == 'RedHat'
 
     - name: Read the sshd jail
       ansible.builtin.command: fail2ban-client get sshd {{ item }}
@@ -63,8 +98,10 @@
         path: "{{ item }}"
       loop:
         - /etc/sudoers.d/90-ansible-sysadmin
-        - /etc/apt/apt.conf.d/52unattended-upgrades-local
-        - /etc/apt/apt.conf.d/20auto-upgrades
+        - "{{ '/etc/dnf/automatic.conf' if ansible_facts.os_family == 'RedHat'
+              else '/etc/apt/apt.conf.d/52unattended-upgrades-local' }}"
+        - "{{ '/etc/systemd/system/timers.target.wants/dnf-automatic.timer' if ansible_facts.os_family == 'RedHat'
+              else '/etc/apt/apt.conf.d/20auto-upgrades' }}"
         - /var/log/installer/autoinstall-user-data
       register: verify_files
 

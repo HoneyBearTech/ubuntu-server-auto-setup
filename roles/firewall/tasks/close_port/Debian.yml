@@ -1,0 +1,9 @@
+---
+# The rules for an SSH port no longer in use (firewall_close_port), after SSH has moved: UFW.
+- name: Remove the old SSH port's firewall rules
+  community.general.ufw:
+    rule: "{{ item }}"
+    port: "{{ firewall_close_port | string }}"
+    proto: tcp
+    delete: true
+  loop: [limit, allow]

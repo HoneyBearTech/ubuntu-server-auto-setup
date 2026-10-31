@@ -16,7 +16,16 @@
 
 - name: Set up AppArmor
   ansible.builtin.import_tasks: apparmor.yml
-  when: hardening_apparmor_enabled | bool
+  when: hardening_apparmor_enabled | bool and ansible_facts.os_family == 'Debian'
+
+# AppArmor is Ubuntu's and Debian's; the RHEL family confines services with SELinux, which the baseline leaves
+# enforcing.
+- name: Report that AppArmor isn't used on the RHEL family
+  ansible.builtin.debug:
+    msg: >-
+      hardening_apparmor_enabled has no effect on {{ inventory_hostname }} ({{ ansible_facts.distribution }}): the RHEL
+      family uses SELinux instead (getenforce: {{ ansible_facts.selinux.mode | default('unknown') }}).
+  when: hardening_apparmor_enabled | bool and ansible_facts.os_family == 'RedHat'
 
 # Turning a part off removes its files; the kernel keeps the settings and rules it has until the next reboot.
 - name: Remove the sysctl settings when they are turned off

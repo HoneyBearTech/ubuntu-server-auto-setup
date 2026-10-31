@@ -1,0 +1,5 @@
+---
+# The RHEL family: sshd.service, never socket-activated. crypto-policies are left as they are; the hardening
+# drop-in (00-) still loads before 50-redhat.conf, so its settings win.
+ssh_os_service: sshd.service
+ssh_os_socket: ""

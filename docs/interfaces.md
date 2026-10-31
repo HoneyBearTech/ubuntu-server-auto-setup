@@ -149,9 +149,9 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `server_hostname`, `server_domain` | short inventory name, `""` | The hostname, and an optional domain for `/etc/hosts`. |
 | `timezone` | `Etc/UTC` | The timezone. |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. Its name before 0.7.0, `apt_upgrade`, is still read until 1.0. |
-| `reboot_if_required` | `false` | Reboot when upgrades ask for it: on Ubuntu when `/var/run/reboot-required` exists, on Debian when `/boot` has a newer kernel than the one running (the same check as the updates playbook's, `roles/updates/tasks/reboot_required/`). Otherwise the run reports it. |
-| `common_packages` | `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim` | Packages installed on every server. |
-| `unattended_upgrades_origins` | the distribution's (`roles/common/vars/`) | What unattended-upgrades installs, as `Allowed-Origins` entries. Ubuntu: the release and security pockets and ESM security; Debian: point releases and Debian-Security (no ESM). |
+| `reboot_if_required` | `false` | Reboot when upgrades ask for it: on Ubuntu when `/var/run/reboot-required` exists, on Debian when `/boot` has a newer kernel than the one running, on the RHEL family when `dnf needs-restarting -r` says so (the same check as the updates playbook's, `roles/updates/tasks/reboot_required/`). Otherwise the run reports it. |
+| `common_packages` | the distribution's (`roles/common/vars/`) | Packages installed on every server. Ubuntu and Debian: `ca-certificates`, `curl`, `htop`, `unattended-upgrades`, `vim`; the RHEL family: `ca-certificates`, `dnf-automatic`, `dnf-plugins-core`, `vim-enhanced` (`curl-minimal` already provides `curl`). |
+| `unattended_upgrades_origins` | the distribution's (`roles/common/vars/`) | What unattended-upgrades installs, as `Allowed-Origins` entries. Ubuntu: the release and security pockets and ESM security; Debian: point releases and Debian-Security (no ESM). On the RHEL family, dnf-automatic installs updates instead: security updates on Rocky Linux and AlmaLinux, every update on CentOS Stream (which publishes no security errata); `unattended_upgrades_mail`, `unattended_upgrades_auto_reboot` and `unattended_upgrades_reboot_time` apply to it too. |
 | `unattended_upgrades_auto_reboot`, `unattended_upgrades_reboot_time` | `false`, `"04:00"` | Automatic reboots after unattended upgrades. |
 | `unattended_upgrades_remove_unused` | `true` | Remove unused dependencies. |
 
@@ -159,10 +159,11 @@ Every server's settings are checked before anything is created or downloaded: `v
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `firewall_default_incoming` | `deny` | The default policy for incoming connections. |
+| `firewall_default_incoming` | `deny` | The default policy for incoming connections: `deny` drops them, `reject` refuses them, `allow` accepts them (on firewalld: the zone's target `DROP`, `%%REJECT%%` or `ACCEPT`). |
 | `ufw_default_outgoing` | `allow` | UFW's default policy for outgoing connections. |
 | `firewall_logging` | `low` | How much the firewall logs (UFW's log level). |
-| `firewall_ssh_limit` | `true` | Rate-limit SSH (`limit`) instead of a plain allow. |
+| `firewall_ssh_limit` | `true` | Rate-limit new SSH connections instead of a plain allow: UFW's `limit` (6 in 30 seconds per source), or on firewalld a rich-rule limit of `firewall_ssh_limit_rate` for all sources together (Fail2Ban still limits each source). |
+| `firewall_ssh_limit_rate` | `30/m` | firewalld only: that limit, as rich rules write it. |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from. |
 | `firewall_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
 
@@ -186,10 +187,11 @@ old name's value unless it's set itself, and each run says which old names the i
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `fail2ban_enabled` | `true` | Install and configure Fail2Ban. `false` leaves it out of the baseline (not installed, or left as it is); on the RHEL family it comes from EPEL, so this also keeps EPEL off (unless the mail relay needs it). |
 | `fail2ban_bantime`, `fail2ban_findtime`, `fail2ban_maxretry` | `1h`, `10m`, `5` | Ban length, window and failures. |
 | `fail2ban_bantime_increment`, `fail2ban_bantime_maxtime` | `true`, `1w` | Longer bans for repeat offenders, up to a maximum. |
 | `fail2ban_ignoreip` | `[]` | Never banned (besides localhost). |
-| `fail2ban_banaction` | `""` | Ban action; empty keeps Ubuntu's default (nftables). |
+| `fail2ban_banaction` | `""` | Ban action; empty keeps the distribution's default: nftables or iptables on Ubuntu and Debian, firewalld's rich rules on the RHEL family (`fail2ban-firewalld`). |
 | `fail2ban_sshd_mode` | `normal` | The `sshd` filter mode: `normal`, `ddos`, `extra` or `aggressive`. |
 
 **Baseline: extra hardening** (`hardening`; each part off by default, see [security.md](security.md#optional-hardening-and-notifications))

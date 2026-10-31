@@ -6,10 +6,13 @@ subfolders, such as the per-family files) and roles/*/handlers (blocks are conta
 skipped) and checks it against the "path:line" records written by tests/callback_plugins/task_coverage.py.
 Each test suite measures the roles it exercises: tests/run.sh every role but updates, tests/updates.sh updates.
 
-Usage: coverage.py RECORDS_FILE [--min PERCENT] [--roles R,...] [--skip-roles R,...]   (exits 1 below the minimum)
+Usage: coverage.py RECORDS_FILE [--min PERCENT] [--roles R,...] [--skip-roles R,...] [--skip-files GLOB,...]
+       (exits 1 below the minimum). --skip-files leaves out task files for an OS family the suite doesn't run
+       (tests/baseline.sh on Debian skips */RedHat.yml).
 """
 
 import argparse
+import fnmatch
 import pathlib
 import sys
 
@@ -37,11 +40,12 @@ def tasks_in(node, path, out):
         out.append((path, item.start_mark.line + 1, name))
 
 
-def all_tasks(roles=None, skip=()):
+def all_tasks(roles=None, skip=(), skip_files=()):
     out = []
     for path in sorted(ROOT.glob("roles/*/tasks/**/*.yml")) + sorted(ROOT.glob("roles/*/handlers/*.yml")):
         role = path.relative_to(ROOT).parts[1]
-        if (roles and role not in roles) or role in skip:
+        rel = path.relative_to(ROOT).as_posix()
+        if (roles and role not in roles) or role in skip or any(fnmatch.fnmatch(rel, g) for g in skip_files):
             continue
         tasks_in(yaml.compose(path.read_text()), path.relative_to(ROOT).as_posix(), out)
     return out
@@ -53,6 +57,7 @@ def main():
     parser.add_argument("--min", type=float, default=80.0)
     parser.add_argument("--roles", default="", help="only these roles (comma-separated)")
     parser.add_argument("--skip-roles", default="", help="every role but these (comma-separated)")
+    parser.add_argument("--skip-files", default="", help="leave out task files matching these globs (comma-separated)")
     args = parser.parse_args()
     only = {r for r in args.roles.split(",") if r}
     skip = {r for r in args.skip_roles.split(",") if r}
@@ -63,7 +68,7 @@ def main():
         rel = path.split("/roles/", 1)[-1]
         ran.add((f"roles/{rel}", int(lineno)))
 
-    tasks = all_tasks(only, skip)
+    tasks = all_tasks(only, skip, [g for g in args.skip_files.split(",") if g])
     missed = [t for t in tasks if (t[0], t[1]) not in ran]
     covered = len(tasks) - len(missed)
     pct = 100.0 * covered / len(tasks)

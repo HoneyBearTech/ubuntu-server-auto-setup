@@ -1,0 +1,3 @@
+---
+# CentOS Stream publishes no security errata, so dnf-automatic's "security" would install nothing: every update.
+common_os_dnf_upgrade_type: default

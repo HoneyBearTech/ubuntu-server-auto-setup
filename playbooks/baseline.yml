@@ -39,8 +39,10 @@
       tags: [firewall]
     - role: ssh_hardening
       tags: [ssh]
+    # Off with fail2ban_enabled: false (on the RHEL family it comes from EPEL).
     - role: fail2ban
       tags: [fail2ban]
+      when: fail2ban_enabled | default(true) | bool
     # Off unless hardening_sysctl_enabled, hardening_auditd_enabled or hardening_apparmor_enabled is set.
     - role: hardening
       tags: [hardening]

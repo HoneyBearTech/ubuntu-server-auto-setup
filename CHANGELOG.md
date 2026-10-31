@@ -126,6 +126,19 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
   job runs it on each of those releases and on Debian 12 and 13 (`make test-baseline`).
 
+- **The baseline runs on CentOS Stream, Rocky Linux and AlmaLinux 9 and 10**, with each family's own tools:
+  - dnf upgrades, and dnf-automatic for automatic updates: security updates on Rocky Linux and AlmaLinux,
+    every update on CentOS Stream, which publishes no security errata;
+  - firewalld instead of UFW, driven by the same `firewall_*` settings (SSH and the extra rules as rich rules;
+    `firewall_ssh_limit_rate`, 30 a minute, limits new SSH connections from all sources together);
+  - SELinux stays enforcing: a custom SSH port is labelled `ssh_port_t` before sshd moves;
+  - the admin user in `wheel`, sshd as `sshd.service`, no 127.0.1.1 line in `/etc/hosts`;
+  - Fail2Ban from EPEL, with `fail2ban-firewalld` (EPEL's key checked; `fail2ban_enabled: false` leaves both
+    out); the mail relay's msmtp from EPEL too;
+  - a waiting reboot found with `dnf needs-restarting`, the check the updates playbook will use on this family.
+
+  The CI baseline matrix runs every one of them.
+
 ### Changed
 
 - The OS catalog pins AlmaLinux 10's x86-64-v2 cloud image instead of the x86-64 (v3) one, so AlmaLinux 10 runs on
@@ -153,25 +166,25 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Security
 
+- **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
+  needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
+  boundary B21 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
 - pyasn1 0.6.5 (from 0.6.4) in the CI and web UI requirements, for GHSA-2qm8-x737-gmw5,
   GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p and GHSA-mm57-4v3p-rchx.
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
   [assurance case](docs/assurance-case.md).
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
 
 ### Fixed
 
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
-
-### Security
-
-- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
-  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
-  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
-  VM's key is pinned by cluster and VM ID.
 
 ### Documentation
 

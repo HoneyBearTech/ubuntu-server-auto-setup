@@ -1,0 +1,7 @@
+---
+# Ubuntu and Debian.
+fail2ban_os_packages: [fail2ban, python3-systemd]
+# The webhook action runs curl.
+fail2ban_os_webhook_packages: [curl]
+# Ban mail (fail2ban_destemail): the sendmail actions come with fail2ban.
+fail2ban_os_mail_packages: []

@@ -23,12 +23,10 @@ timezone: Etc/UTC
 pkg_upgrade: "{{ apt_upgrade }}"
 apt_upgrade: dist            # the name before 0.7.0, still read until 1.0: set pkg_upgrade instead
 reboot_if_required: false    # reboot after upgrades when /var/run/reboot-required exists
-common_packages:
-  - ca-certificates
-  - curl
-  - htop
-  - unattended-upgrades
-  - vim
+# Installed on every server: the distribution's set (roles/common/vars), with qemu-guest-agent on a VM. Ubuntu and
+# Debian: ca-certificates, curl, htop, unattended-upgrades, vim; the RHEL family: ca-certificates, dnf-automatic,
+# dnf-plugins-core, vim-enhanced (curl-minimal provides curl).
+common_packages: "{{ common_os_packages }}"
 
 # What unattended-upgrades installs, as Allowed-Origins ("origin:suite"). The default is the distribution's
 # (roles/common/vars): Ubuntu's release and security pockets plus ESM security; Debian's point releases and

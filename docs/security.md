@@ -121,13 +121,24 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - The admin user's `authorized_keys` matches the keys on GitHub (plus `admin_extra_ssh_keys`) after every
   baseline run or `make keys`; a key removed from GitHub is removed from the servers. An empty or failed
   response from GitHub never empties the file: the run stops instead.
-- UFW denies all incoming connections except SSH (rate-limited: more than 6 connections in 30 seconds from
-  one address are refused) and the rules you list in `firewall_allow`.
+- The firewall denies all incoming connections except SSH and the rules you list in `firewall_allow`: UFW on
+  Ubuntu and Debian, with SSH rate-limited (more than 6 connections in 30 seconds from one address are
+  refused); firewalld on the RHEL family, with firewalld's own open `ssh` service removed and SSH allowed by a
+  rich rule whose rate limit (`firewall_ssh_limit_rate`, 30 a minute) counts all sources together, since
+  firewalld can't count per source (Fail2Ban does).
+- On the RHEL family SELinux stays enforcing: for a custom SSH port the baseline labels that port `ssh_port_t`
+  (`semanage port`) before sshd moves, rather than relaxing SELinux. crypto-policies are left as they are.
 - Fail2Ban bans addresses that fail SSH authentication 5 times in 10 minutes for an hour, longer for
-  repeat offenders (up to a week), except those in `fail2ban_ignoreip`.
-- Security updates are installed automatically every day by unattended-upgrades: on Ubuntu from the security
-  pockets (and Ubuntu Pro ESM security updates where enabled), on Debian from Debian-Security and the point
-  releases.
+  repeat offenders (up to a week), except those in `fail2ban_ignoreip`. On the RHEL family it comes from
+  **EPEL** (with `fail2ban-firewalld`, which bans with firewalld's rich rules): the baseline installs
+  `epel-release` from the distribution's own signed repositories, which brings EPEL's signing key, enables
+  CRB, and stops unless EPEL's repository keeps `gpgcheck` on, so every EPEL package is checked against that
+  key. `fail2ban_enabled: false` leaves Fail2Ban, and with it EPEL, out (the mail relay's msmtp also comes
+  from EPEL).
+- Security updates are installed automatically every day: by unattended-upgrades on Ubuntu from the security
+  pockets (and Ubuntu Pro ESM security updates where enabled) and on Debian from Debian-Security and the
+  point releases; by dnf-automatic on the RHEL family, security updates on Rocky Linux and AlmaLinux and every
+  update on CentOS Stream, which publishes no security errata.
 - The changes are made in an order that keeps the running SSH session working: the firewall allows the SSH
   port before it is enabled, and a new SSH port is opened and verified before port 22 is closed.
 

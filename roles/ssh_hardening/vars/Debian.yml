@@ -1,0 +1,4 @@
+---
+# Ubuntu and Debian: sshd is ssh.service, and ssh.socket can start it on demand (Ubuntu does from 22.10 on).
+ssh_os_service: ssh.service
+ssh_os_socket: ssh.socket

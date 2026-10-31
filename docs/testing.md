@@ -10,7 +10,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Updates tests | the updates playbook against two servers with updates waiting in a signed test repository, on Ubuntu 22.04, 24.04 and 26.04: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=ubuntu-24.04` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
-| Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`), a move to port 2222, and the baseline roles' task coverage | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
+| Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`; the RHEL family: `dnf needs-restarting` after a core package is installed again), a move to port 2222, notifications and the mail relay, and the baseline roles' task coverage (each run counting its own family's task files) | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
@@ -170,15 +170,20 @@ uploads them as an artifact for 7 days. It takes about 6 minutes per release.
 ## The baseline tests
 
 `tests/baseline.sh` runs only the baseline, against one container built from `tests/images/ubuntu-target`
-for the release `OS` names (`debian-12`, `debian-13`, or an Ubuntu LTS release; `debian-13` by default). A
-Debian container stands in for a VM installed from Debian's cloud image: classic `sudo`, `sshd` from
-`ssh.service` with no socket activation, and the admin user with the sudoers file the cloud-init seed writes.
+for the release `OS` names (an Ubuntu LTS release, `debian-12` or `debian-13`, or `centos-stream-`, `rocky-` or
+`alma-` with `9` or `10`; `debian-13` by default). A Debian or RHEL-family container stands in for a VM
+installed from the vendor's cloud image: classic `sudo`, `sshd` with no socket activation, and the admin user
+(in `wheel` on the RHEL family) with the sudoers file the cloud-init seed writes. On the RHEL family firewalld
+runs in the container; SELinux doesn't (containers have none), so the SSH port's SELinux label isn't covered
+here: the pre-release checklist runs the baseline on real RHEL-family VMs.
 It uses `tests/inventory/hosts.yml` and `tests/verify-baseline.yml` as `tests/run.sh` does, and the same
 container name and ports, so only one of the two runs at a time. The steps: check mode on the fresh server
 changes nothing; a first run, a second that changes nothing, and the checks; check mode again; the
 unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and then gone (Debian: a kernel in
-`/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`); SSH moved to port 2222 and checked
-there; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`.
+`/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`; the RHEL family: nothing right after a
+restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay
+and passwordless sudo on and off again; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening`
+and `fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`).
 
 ## Secure Boot and disk encryption in a VM
 
