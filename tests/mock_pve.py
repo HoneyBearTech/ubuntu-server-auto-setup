@@ -257,6 +257,9 @@ def listed_status(vm):
     return previous if time.time() - since < RESOURCES_LAG_SECONDS else vm["status"]
 
 
+IMAGE_NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._+-"
+
+
 def _import_from(config, node):
     """Checks a disk's import-from as Proxmox does: an image in Import content of a storage the node has, into a new
     volume (<storage>:0). Returns an error message, or None."""
@@ -270,7 +273,8 @@ def _import_from(config, node):
             return f"{key}: import-from needs a new volume (<storage>:0), got '{target}'"
         if storage not in NODE_STORAGES.get(node, []) or "import" not in STORAGES[storage]["content"].split(","):
             return f"{key}: storage '{storage}' doesn't allow Import content on {node}"
-        if not re.fullmatch(r"import/[A-Za-z0-9._+-]+\.qcow2", volume):
+        name = volume.removeprefix("import/")
+        if name == volume or not name.endswith(".qcow2") or name.strip(IMAGE_NAME_CHARS) or "/" in name:
             return f"{key}: '{source}' isn't an image in Import content"
     return None
 
@@ -542,7 +546,9 @@ class PveHandler(BaseHTTPRequestHandler):
         if action == "resize" and method == "PUT":
             # Proxmox VE 9 answers with a task; only an absolute size larger than the disk's is taken here.
             disk, size = form.get("disk", ""), form.get("size", "")
-            if disk not in vm["config"] or not re.fullmatch(r"[1-9][0-9]*G", size):
+            digits = size[:-1]
+            if disk not in vm["config"] or not (size.endswith("G") and digits.isdigit() and not digits.startswith("0")
+                                                and len(digits) <= 6):
                 return self._reply(400, {"size": f"can't resize {disk!r} to {size!r}"})
             vm.setdefault("resized", []).append({"disk": disk, "size": size})
             return self._reply(200, upid("resize", vmid, node))
