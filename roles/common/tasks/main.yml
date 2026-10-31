@@ -45,6 +45,18 @@
   when: mail_relay_enabled | bool
   no_log: true
 
+- name: Check the time servers
+  ansible.builtin.assert:
+    that:
+      - time_sync_servers is sequence and time_sync_servers is not string and time_sync_servers is not mapping
+      - time_sync_pools is sequence and time_sync_pools is not string and time_sync_pools is not mapping
+      - (time_sync_servers + time_sync_pools) | reject('string') | list | length == 0
+      - (time_sync_servers + time_sync_pools) | reject('match', common_time_server_pattern) | list | length == 0
+    fail_msg: >-
+      time_sync_servers and time_sync_pools must be lists of host names or IP addresses, without spaces or line
+      breaks.
+    quiet: true
+
 - name: Check for cloud-init
   ansible.builtin.stat:
     path: /usr/bin/cloud-init
@@ -101,6 +113,9 @@
 - name: Set the timezone
   community.general.timezone:
     name: "{{ timezone }}"
+
+- name: Set the time sources
+  ansible.builtin.import_tasks: time_sync.yml
 
 - name: Create the admin user
   ansible.builtin.user:

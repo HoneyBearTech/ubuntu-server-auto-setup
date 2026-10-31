@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+# The time sources the baseline sets (time_sync_servers and time_sync_pools), in place of the OS's own.
+[Time]
+NTP={{ (time_sync_servers + time_sync_pools) | join(' ') }}
