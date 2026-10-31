@@ -150,6 +150,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Security
 
+- pyasn1 0.6.5 (from 0.6.4) in the CI and web UI requirements, for GHSA-2qm8-x737-gmw5,
+  GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p and GHSA-mm57-4v3p-rchx.
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
