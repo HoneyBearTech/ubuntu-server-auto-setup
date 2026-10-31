@@ -2,7 +2,8 @@
 # Integration tests of the updates playbook: runs playbooks/updates.yml against two containers that have
 # updates waiting in a signed test repository (tests/images/ubuntu-target, stage "updates"), checks what was
 # installed, the reports, reboots and health checks, that a second run changes nothing, and the role's task
-# coverage. OS picks the Ubuntu release (ubuntu-26.04 by default; CI runs each). Needs Docker (privileged
+# coverage. OS picks the release (ubuntu-26.04 by default; ubuntu-22.04, ubuntu-24.04, debian-12 and debian-13
+# too; CI runs each). Needs Docker (privileged
 # containers, for systemd), Python with requirements-ci.txt and the Ansible collections. Run it with
 # make test-updates. With USAS_LOG_DIR set, a failed run keeps its logs there. See docs/testing.md.
 set -euo pipefail
@@ -11,7 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 OS="${OS:-ubuntu-26.04}"
-case "$OS" in ubuntu-22.04|ubuntu-24.04|ubuntu-26.04) ;; *) echo "OS must be ubuntu-22.04, ubuntu-24.04 or ubuntu-26.04" >&2; exit 2;; esac
+case "$OS" in ubuntu-22.04|ubuntu-24.04|ubuntu-26.04|debian-12|debian-13) ;;
+  *) echo "OS must be ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, debian-12 or debian-13" >&2; exit 2;; esac
+VERSION="${OS#*-}"
+case "$OS" in ubuntu-*) DISTRO=Ubuntu ;; *) DISTRO=Debian ;; esac
 TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/usas-updates.XXXXXX")"
 export TEST_TMP
 export ANSIBLE_CONFIG="$ROOT/ansible.cfg"
@@ -20,6 +24,10 @@ export ANSIBLE_CALLBACKS_ENABLED=task_coverage
 export TASK_COVERAGE_FILE="$TEST_TMP/coverage.txt"
 export ANSIBLE_FORCE_COLOR=0
 INV=(-i tests/inventory/updates.yml)
+# Debian has no reboot-required file: the role compares the newest kernel in /boot with the running one, which a
+# container (sharing the Docker host's kernel) can't change. The test kernel package asks for a reboot with the
+# file, so the reboot steps read the file there too; "Debian's kernel check" below tests the comparison.
+if [ "$DISTRO" = Debian ]; then INV+=(-e updates_os_reboot_check=file); fi
 IMAGE="usas-test-upd:$OS"
 UPD1=usas-test-upd1
 UPD2=usas-test-upd2
@@ -168,7 +176,18 @@ report "run['mode'] == 'check'" \
   "h['upd-usas']['reboot']['expected'] and not h['upd-usas']['reboot']['required']" \
   "h['upd-usas']['auto_updates'] == 'Automatic: security daily, no reboot'" \
   "h['upd-usas']['installed_by_usas'] and not h['upd-other']['installed_by_usas']" \
-  "h['upd-usas']['os']['facts'] == 'Ubuntu ${OS#ubuntu-}'"
+  "h['upd-usas']['os']['facts'].startswith('$DISTRO $VERSION')"
+
+if [ "$DISTRO" = Debian ]; then
+  step "Debian's kernel check: a newer kernel in /boot than the one running wants a reboot"
+  docker exec "$UPD1" sh -c 'mkdir -p /boot && touch /boot/vmlinuz-999.0.0-usas-test'
+  play --idempotent --check --limit upd-usas -e updates_os_reboot_check=kernel
+  report "h['upd-usas']['reboot']['required']" \
+    "'linux-image-999.0.0-usas-test' in h['upd-usas']['reboot']['packages']"
+  docker exec "$UPD1" rm /boot/vmlinuz-999.0.0-usas-test
+  play --idempotent --check --limit upd-usas -e updates_os_reboot_check=kernel
+  report "not h['upd-usas']['reboot']['required']"
+fi
 
 step "Security updates only, on a server this project installed"
 play --limit upd-usas -e updates_scope=security
@@ -231,7 +250,7 @@ report "all(r['status'] == 'skipped' and 'opted out' in r['reason'] for r in h.v
 play --idempotent --limit upd-usas -e '{"updates_supported_releases": []}'
 report "h['upd-usas']['status'] == 'unsupported'"
 play --idempotent --check --limit upd-usas \
-  -e "{\"updates_supported_releases\": [{\"distribution\": \"Ubuntu\", \"version\": \"${OS#ubuntu-}\", \"eol\": \"2020-04-30\"}]}"
+  -e "{\"updates_supported_releases\": [{\"distribution\": \"$DISTRO\", \"version\": \"$VERSION\", \"eol\": \"2020-04-30\"}]}"
 report "'past the end of its standard support (2020-04-30)' in h['upd-usas']['os']['warning']"
 expect_versions "$UPD1" usas-test-tool=1.0
 

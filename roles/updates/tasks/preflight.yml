@@ -1,11 +1,14 @@
 ---
 # After the connection, sudo and facts: is the OS one this role updates, is the package manager free, what would
 # be installed, and what does the server already do on its own. Read-only, so check runs (--check) do all of it.
+# Ubuntu's version is the release (24.04); Debian's has the point release after it (13.7), so the major
+# version names the release there.
 - name: Find the server's release in the supported list
   ansible.builtin.set_fact:
     updates_release: >-
       {{ updates_supported_releases | selectattr('distribution', 'equalto', ansible_facts.distribution)
-      | selectattr('version', 'equalto', ansible_facts.distribution_version) | first | default({}) }}
+      | selectattr('version', 'in', [ansible_facts.distribution_version, ansible_facts.distribution_major_version])
+      | first | default({}) }}
     usas_updates_result: >-
       {{ usas_updates_result | combine({'os': usas_updates_result.os | combine({'facts': os_text,
       'warning': hint_warning})}) }}
