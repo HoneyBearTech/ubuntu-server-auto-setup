@@ -138,10 +138,11 @@ class FakeVendors:
             for n in names:
                 self.add(f"{base}/{n}.CHECKSUM", f"SHA256 ({n}) = {digest(n)}\n", sign=True)
         else:
-            base = f"https://repo.almalinux.org/almalinux/{v}/cloud/x86_64/images"
-            names = [f"AlmaLinux-{v}-GenericCloud-{v}.2-20260101.x86_64.qcow2",
-                     f"AlmaLinux-{v}-GenericCloud-{v}.2-20260102.0.x86_64.qcow2"]
-            self.add(f"{base}/", listing(*names, f"AlmaLinux-{v}-GenericCloud-latest.x86_64.qcow2", "CHECKSUM"))
+            arch = "x86_64_v2" if v == "10" else "x86_64"
+            base = f"https://repo.almalinux.org/almalinux/{v}/cloud/{arch}/images"
+            names = [f"AlmaLinux-{v}-GenericCloud-{v}.2-20260101.{arch}.qcow2",
+                     f"AlmaLinux-{v}-GenericCloud-{v}.2-20260102.0.{arch}.qcow2"]
+            self.add(f"{base}/", listing(*names, f"AlmaLinux-{v}-GenericCloud-latest.{arch}.qcow2", "CHECKSUM"))
             self.add(f"{base}/CHECKSUM", "".join(f"{digest(n)}  {n}\n" for n in names), sign=True)
         self.heads.update(f"{base}/{n}" for n in names)
 
@@ -183,7 +184,9 @@ def test_build_pins_the_newest_build_of_every_release(fake):
     assert entries["rocky-9"]["methods"]["cloud_image"]["build"] == "9.2-20260101.0"
     assert entries["rocky-9"]["methods"]["cloud_image"]["signed"] is True
     alma = entries["alma-10"]["methods"]["cloud_image"]
-    assert alma["file"] == "AlmaLinux-10-GenericCloud-10.2-20260102.0.x86_64.qcow2"
+    assert alma["file"] == "AlmaLinux-10-GenericCloud-10.2-20260102.0.x86_64_v2.qcow2"
+    assert "/cloud/x86_64_v2/images/" in alma["url"]
+    assert entries["alma-9"]["methods"]["cloud_image"]["file"].endswith(".x86_64.qcow2")
     assert set(entries["rocky-10"]["methods"]) == {"cloud_image"}
     assert entries["debian-12"]["eol"] == "2028-06-30" and entries["debian-12"]["codename"] == "bookworm"
 
