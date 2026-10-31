@@ -278,7 +278,34 @@ The overview lists the steps and whether each is done.
    wave). **Run it for real** works as for the baseline, for 30 minutes and once, and its confirmation names
    the VMs that may reboot; **Install the updates for real** starts it. The audit log records the playbook and
    these choices with each run, and what each server ended as.
-7. **Run**: choose `build-installer`, `provision`, `baseline`, `site`, `keys` (the baseline's key sync
+
+   **Updates on a schedule.** A passing updates check run's page also offers **Schedule this plan**: the same
+   VMs and choices in a weekly window. Give it a **Name**, choose **List the pending updates** (check only) or
+   **Install the updates** (each time a new check first, then the update only if the check passed and no server
+   failed, couldn't be reached or would lose packages), the **Days**, the **Start time**, how long the
+   **Window** stays open (30 to 720 minutes) and the **Time zone**, and enter your **Current password**: a
+   schedule runs without anyone there. Each server's own update window (`updates_window`) still applies.
+7. **Updates**: each server's newest result from the web UI's updates runs (its status, how many packages
+   were pending or upgraded, security updates, the reboot, and a link to the run), the **Schedules** (their
+   window, the next run, the last outcome and run; **Delete**), and the updates playbook's **Settings** for
+   every server (what to install, how apt upgrades, kernels, packages to leave alone, reboots, services,
+   snapshots, waves, notifications), from the role's defaults like the Hardening page.
+
+   The scheduler looks every 30 seconds. A window's run starts once. While another run is going it waits; if
+   the window closes first, the run is skipped. A window that passed while the container was stopped is
+   skipped too. Every run, skip and refusal is in the audit log and in the schedule's last outcome. Each run
+   builds the plan again from the cluster's listing and the host keys pinned then, so a VM whose key isn't
+   pinned any more, or that is gone, refuses the whole run. Mail and webhook notifications come from the
+   updates playbook's own settings (`updates_notify`). To run schedules from the host instead (cron or a
+   systemd timer), set `USAS_SCHEDULER=off` and run:
+
+   ```bash
+   docker exec usas python -m usas_web updates --schedule <id>
+   ```
+
+   It runs the schedule now, with the same code and the same lock (never next to another run), waits for it
+   (and an install schedule's update) and exits 0 when it succeeded. The **ID** is on the Updates page.
+8. **Run**: choose `build-installer`, `provision`, `baseline`, `site`, `keys` (the baseline's key sync
    only), `updates-check` (the updates playbook's check: what each server would install) or `updates`
    (install them, with the inventory's settings), optionally check mode (`--check`), differences (`--diff`) and a limit (servers, nodes or groups,
    separated by commas). The page shows where `build-installer` puts the installer ISOs and cloud images:
@@ -368,6 +395,7 @@ directories):
 | `audit.jsonl` | The audit log of the VMs page: one JSON object per line. At 5 MB it is renamed `audit.jsonl.1` (and `.1` to `.2`, `.2` to `.3`; the oldest is dropped). |
 | `runs/` | The run history: one `.json` and one `.log` per run; for a VMs page run also its inventory (`.inventory.yml`, no secrets), the allowlisted variables it ran with (`.vars.yml`) and each host's result (`.hosts.json`). `.lock` is held while a run goes. |
 | `updates/reports/` | The updates playbook's reports from the web UI's runs (`<run id>.json` and `.txt`, [updates.md](updates.md#the-report)). |
+| `schedules.json` | The updates schedules: each one's window, VMs, choices, who made it (a hash of the session) and from which check run, and its last outcome. |
 | `updates/state.json` | Each server's newest result from the web UI's updates runs (the run, whether it was a check, when it finished, and the result as the run's page shows it). |
 
 **The Vault password is in the same volume by default**, so the encryption protects `vault.yml` when it is
@@ -429,6 +457,7 @@ The container reads these environment variables; the defaults suit the documente
 | `USAS_SESSION_HOURS` | `12` | The longest a session lasts. |
 | `USAS_PUBLIC_URL` | (none: `http://localhost` on any port) | The address the UI is opened at, `https://host[:port]`: passkeys belong to its host name and are accepted only from it ([passkeys](#passkeys)). It must use a host name and HTTPS (unless it is `localhost`); the name is added to `USAS_ALLOWED_HOSTS`. |
 | `USAS_PORT` | `8080` | The port inside the container. |
+| `USAS_SCHEDULER` | `on` | `off` stops the updates schedules' thread; schedules then run only from the command line (`python -m usas_web updates --schedule <id>`). Nothing runs until a schedule exists. |
 | `USAS_VERSION` | the image's version | The version in the page footer. Release images set it from their tag; images you build yourself say `dev`. |
 
 ## Security
@@ -538,7 +567,7 @@ For reference:
 | Path | Methods | What |
 | --- | --- | --- |
 | `/healthz` | GET | `ok`; the container's health check. No sign-in. |
-| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/vms`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
+| `/`, `/proxmox`, `/ssh`, `/defaults`, `/servers`, `/hardening`, `/vms`, `/updates`, `/run`, `/runs`, `/runs/<id>`, `/account`, `/setup`, `/login` | GET | The pages (HTML). Without a sign-in they redirect to `/login?next=…` (or `/setup` on the first run). |
 | `/api/session` | GET | Whether a password is set and the session signed in, its CSRF token, the version, the theme, and whether passkeys are registered or required. |
 | `/api/setup`, `/api/login`, `/api/logout`, `/api/account` | POST | First-run password, sign-in, sign-out, password change. |
 | `/api/account` | GET | The passkeys (name, when added and last used, never the key), whether one is required, and their host name; whether a status token exists, how it starts, and when and from where it was last used (never the token). |
@@ -552,6 +581,8 @@ For reference:
 | `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, whether the playbooks support them and whether they can be selected, and their pinned host keys. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. |
 | `/api/vms/hostkey` | POST | A VM's host keys: `scan` (address and port), `trust` (the scanned keys, with `confirm`), `forget`, or `test` the login. |
 | `/api/vms/plan` | POST | Check the selected VMs (`vmid`, up to 25) and their settings (`vm-<vmid>-address`, `-port`, `-user`, `-ufw`, `-hostname`, `-override`) with a `preset` (and `tags` for custom; `updates` with `updates-scope`, `updates-reboot`, `updates-snapshot` and `updates-window` for the updates playbook), and answer the plan to review with a plan ID that lasts 10 minutes, or the errors per field. |
+| `/api/updates` | GET, POST | The Updates page: each server's newest result, the schedules with their next and last runs, and the updates settings; POST saves the settings. |
+| `/api/updates/schedules` | POST | `action=create` makes a schedule from a passing updates check run (`run_id`, `name`, `kind`, `day-<mon..sun>`, `start`, `minutes`, `timezone`) after the current password (`schedule_current`); `action=delete` removes one (`id`). |
 | `/api/vms/snapshots` | POST | Whether each selected VM (`vmid`) can have a snapshot before its updates: the token's `VM.Snapshot` on it and Proxmox's check of its disks, with the reason when it can't. |
 | `/api/vms/run` | POST | Run a reviewed plan (`plan_id`) in check mode (`mode=check`). |
 | `/api/vms/apply` | POST | Run a VMs page check run's plan for real (`run_id`, `confirm`): only if that check passed in the last 30 minutes, wasn't run for real yet, no settings were saved since and the pinned keys and the updates choices are the same. |
@@ -579,7 +610,8 @@ answers 401 with `WWW-Authenticate: Bearer` instead).
 - One run at a time, and sessions don't survive a restart of the container.
 - The VMs page runs the baseline or the updates playbook, on up to 25 VMs at a time, and for real only after
   a passing check. Updates from the VMs page take four choices; the rest of the updates settings come from
-  the inventory. Updates on a schedule come later.
+  the inventory. Schedules are weekly windows, at most 20, made from a passing check; their notifications are the
+  playbook's own.
   The audit log names a session, not a person (there is one password and no accounts).
 - It needs JavaScript (any current browser).
 - English only.

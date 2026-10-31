@@ -445,7 +445,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
 - **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (the cluster's VMs, and check
-  runs of the baseline or the updates playbook against the ones selected), run, history, account. Each form
+  runs of the baseline or the updates playbook against the ones selected), updates (each server's newest
+  updates result, the schedules, the `updates_*` settings), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
@@ -466,7 +467,10 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   `usas_pve_name`, `usas_pve_alias`, `usas_pve_tags` and `usas_pve_hastate` in its inventory, as the cluster
   inventory sets them. Every updates run from the UI sets `updates_report_dir` to `/data/updates/reports`,
   and `runs/<id>.hosts.json` then also holds each server's result (`updates`: status, packages, reboot,
-  snapshot, wave). One run at a time, also across processes (a lock on `runs/.lock`).
+  snapshot, wave). One run at a time, also across processes (a lock on `runs/.lock`). **Schedules** run the
+  updates playbook in weekly windows from the container's own scheduler (`USAS_SCHEDULER`, on by default), or
+  from the host with `docker exec <container> python -m usas_web updates --schedule <id>` (exit status 0 when
+  the run, and an install schedule's update, succeeded; 1 otherwise; 2 for an unknown schedule).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).

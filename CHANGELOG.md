@@ -80,6 +80,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
   control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
   (B23).
+- **The Updates page and updates on a schedule** ([docs/web-ui.md](docs/web-ui.md#walking-through-it)):
+  `/updates` shows each server's newest updates result, the schedules and the updates playbook's settings
+  for every server. A passing updates check run's page offers **Schedule this plan**, with the password again:
+  the check, or the check and then the update (only if the check passed with no failed or unreachable server
+  and no package removals), on chosen weekdays, from a start time for 30 to 720 minutes, in a time zone. The
+  container's own scheduler runs them (`USAS_SCHEDULER`, on by default); `docker exec usas python -m usas_web
+  updates --schedule <id>` runs one from host cron or a systemd timer instead. Every step is in the audit log.
 - **Updates from the VMs page** ([docs/web-ui.md](docs/web-ui.md#walking-through-it)): choose **Updates**
   for the selected VMs, then what to install (every update or security only), whether they may reboot, a
   Proxmox snapshot (offered only when the API token has `VM.Snapshot` and the disks can have one) and whether

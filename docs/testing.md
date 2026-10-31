@@ -393,7 +393,9 @@ packages' old versions and the signed test repository), is VM 4073: the driver p
 snapshot is offered without `VM.Snapshot`, runs the updates playbook's check with security updates only (the
 run's page lists the pending updates, the phased one deferred, and nothing is installed), refuses the real
 run without the confirmation, installs the security updates (and not the others), and finds nothing left in
-a second check. The audit log must name each step, the updates run with its choices, and no secret of the UI
+a second check. That check becomes a schedule (refused without the password), and `docker exec <app> python -m
+usas_web updates --schedule <id>` runs it: it exits 0, and the Updates page shows the run and the VM's newest
+result. The audit log must name each step, the updates run with its choices, and no secret of the UI
 may reach the VMs, the run files or the audit log.
 
 ### The browser tests

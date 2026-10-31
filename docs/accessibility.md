@@ -142,7 +142,15 @@ nothing uses the accent to mean a warning.
   comparison, and the review takes focus at its heading when it appears. A real run is offered on the
   check run's page behind a labelled confirmation checkbox. Each host's result is a table row with the
   outcome as an icon and a word; failed tasks are in `<details>`; the table refreshes while the run goes
-  without moving focus or announcing every change.
+  without moving focus or announcing every change. Choosing **Updates** shows its options as labelled radio
+  groups and checkboxes; a snapshot that isn't possible is a disabled checkbox whose help says why. The
+  updates results are a table with `<caption>` and `<th scope>`, each status an icon and a word, and the
+  package lists in `<details>`.
+- The Updates page's tables (servers, schedules) have captions and row headers; times are `<time datetime>`.
+  The schedule form groups its choices in `<fieldset>`/`<legend>` (what it does, the days as checkboxes),
+  takes the start as `<input type="time">` and an explicit time zone, and its errors go to the error summary,
+  which links to each field. Deleting a schedule is a labelled button ("Delete the schedule <name>") whose
+  answer is announced in a polite live region.
 - Run output is in a labelled, focusable region that scrolls with the keyboard. It isn't a live region, so
   a screen reader doesn't read every line of Ansible's output; the run's status is, and is announced when
   the run ends. Line numbers are drawn by CSS, so they aren't copied or read out with the text.

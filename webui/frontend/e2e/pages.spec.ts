@@ -7,7 +7,7 @@ import type { Browser, Page } from "@playwright/test";
 import { checkAxe, checkKeyboard, retype, tabTo } from "./helpers";
 
 // The pages the sidebar links to, and the account page; the run page from the flow is added below.
-const PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account"];
+const PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/updates", "/run", "/runs", "/account"];
 
 // The themes as the server applies them (the usas_theme cookie writes <html data-theme>); "System" follows the
 // browser, so it is checked with the browser preferring each.
