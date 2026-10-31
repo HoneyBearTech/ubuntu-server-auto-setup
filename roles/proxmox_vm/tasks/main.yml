@@ -150,15 +150,17 @@
     fail_msg: "{{ inventory_hostname }}: net_mac and the mac of each card in vm_extra_nics must all differ."
     quiet: true
 # The TPM only releases the disk key while PCR 7 (Secure Boot state) matches, so encryption without Secure
-# Boot would bind it to nothing. Subiquity encrypts only the lvm layout.
+# Boot would bind it to nothing. Subiquity encrypts only the lvm layout, and a cloud image comes unencrypted.
 - name: Check the disk encryption settings
   ansible.builtin.assert:
     that:
+      - vm_install_method == 'autoinstall'
       - vm_secure_boot | bool
       - autoinstall_storage_layout == 'lvm'
     fail_msg: >-
-      {{ inventory_hostname }}: vm_disk_encryption needs vm_secure_boot true (OVMF with pre-enrolled keys, which
-      the TPM binds the key to) and autoinstall_storage_layout lvm.
+      {{ inventory_hostname }}: vm_disk_encryption needs vm_install_method autoinstall (the Ubuntu installer encrypts
+      the disk; a cloud image comes unencrypted), vm_secure_boot true (OVMF with pre-enrolled keys, which the TPM
+      binds the key to) and autoinstall_storage_layout lvm.
     quiet: true
   when: vm_disk_encryption | bool
 
@@ -215,6 +217,7 @@
       node: "{{ pve_node }}"
       ssh_host: "{{ pve_ssh_host }}"
       storage: "{{ pve_iso_storage }}"
+      cloud_image: "{{ os_catalog_selected.method == 'cloud_image' }}"
 
 # Every server of the run at once: one error lists every host whose node or ISO storage is wrong.
 - name: Check the servers' nodes and ISO storages against the cluster
@@ -241,11 +244,15 @@
   vars:
     pve_ssh_check_host: "{{ '' if pve_vm_exists else pve_ssh_host }}"
 
+- name: Check that the node's CPU can run the OS
+  ansible.builtin.include_tasks: cpu_check.yml
+  when: not pve_vm_exists and os_catalog_selected.x86_64_v3 | bool
+
 - name: Check that the API token may ask a new DHCP VM's guest agent
   ansible.builtin.include_tasks: agent_check.yml
   when: not pve_vm_exists and net_mode == 'dhcp' and ansible_host | default('') in ['', inventory_hostname]
 
-- name: Install Ubuntu on a new VM
+- name: Install the OS on a new VM
   ansible.builtin.include_tasks: provision.yml
   when: not pve_vm_exists
 

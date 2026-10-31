@@ -1,11 +1,12 @@
 #!/bin/sh
-# Stands in for xorriso on the test node: keeps a copy of each NoCloud seed's user-data in /srv/seed-copies
-# (tests/verify-network.yml reads its network section; the role deletes the seed itself), then runs xorriso.
+# Stands in for xorriso on the test node: keeps a copy of each NoCloud seed's files in /srv/seed-copies
+# (tests/verify-network.yml and tests/verify-cloud-image.yml read them; the role deletes the seed itself), then
+# runs xorriso.
 for arg in "$@"; do
   case "$arg" in
-    */seed-*/user-data)
+    */seed-*/user-data | */seed-*/meta-data | */seed-*/network-config)
       copy="/srv/seed-copies/$(basename "$(dirname "$arg")")"
-      mkdir -p "$copy" && cp "$arg" "$copy/user-data"
+      mkdir -p "$copy" && cp "$arg" "$copy/$(basename "$arg")"
       ;;
   esac
 done

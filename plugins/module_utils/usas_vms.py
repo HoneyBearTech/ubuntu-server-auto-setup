@@ -22,7 +22,10 @@ HOSTNAME_PATTERN = NODE_PATTERN
 SKIP_INTERFACES = re.compile(r"^(lo|docker\d*|veth.*|br-.*|virbr\d*.*|cni\d*|flannel\..*|cali.*|vxlan\..*|tailscale\d*|"
                              r"wg\d*|lxcbr\d*|lxdbr\d*|podman\d*|kube-.*)\Z")
 OURS_DESCRIPTION = "Installed by ubuntu-server-auto-setup"
-SUPPORTED_UBUNTU = ("26.04", "24.04")
+# The OS catalog's ids (roles/os_catalog/vars/catalog.yml) start with these, and the guest's os-release reports
+# the ID on the right: the VMs page matches what a guest agent reports against the catalog's releases.
+OS_RELEASE_IDS = {"ubuntu": "ubuntu", "debian": "debian", "centos-stream": "centos", "rocky": "rocky",
+                  "alma": "almalinux"}
 MAX_TEXT = 120  # longest guest-reported string kept
 MAX_ADDRESSES = 16  # addresses kept per VM
 MAX_TAGS = 16
@@ -189,6 +192,40 @@ def parse_interfaces(result: Any, network: ipaddress.IPv4Network | None = None) 
     return found
 
 
+@dataclass(frozen=True)
+class Release:
+    """A release the playbooks support: an OS catalog entry, as a guest's os-release names it."""
+
+    os_id: str  # os-release ID: "ubuntu", "debian", "centos", "rocky", "almalinux"
+    version: str  # "24.04", "13", "9"
+    name: str  # the catalog's name, "Rocky Linux"
+
+    def matches(self, os: "OsInfo") -> bool:
+        """Ubuntu's VERSION_ID is the release ("24.04"); the RHEL family's has the minor version too ("9.4")."""
+        if os.id != self.os_id:
+            return False
+        return os.version_id == self.version or ("." not in self.version and
+                                                  os.version_id.split(".", 1)[0] == self.version)
+
+
+def catalog_releases(entries: Any) -> tuple[Release, ...]:
+    """The releases of the OS catalog's entries (each with an id such as "rocky-9" and a name); entries of a kind
+    this file doesn't know are left out."""
+    found = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        prefix, _, version = str(entry.get("id", "")).rpartition("-")
+        if prefix in OS_RELEASE_IDS and version:
+            found.append(Release(OS_RELEASE_IDS[prefix], version, str(entry.get("name") or prefix)))
+    return tuple(found)
+
+
+def _names(items: list[str]) -> str:
+    items = list(dict.fromkeys(items))
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 @dataclass
 class OsInfo:
     """An agent's get-osinfo result: the guest's own claim about its OS."""
@@ -224,27 +261,31 @@ def pick_ip(agent: list[str], inventory: str = "", ipconfig0: str = "") -> tuple
 SUPPORTED, NEEDS_OVERRIDE, UNKNOWN, UNSUPPORTED = "supported", "override", "unknown", "unsupported"
 
 
-def classify(vm: Vm, config: VmConfig | None, os: OsInfo | None) -> tuple[str, str]:
-    """(support, reason). The guest reports its own OS, so "supported" is advice, not proof."""
+def classify(vm: Vm, config: VmConfig | None, os: OsInfo | None, releases: tuple[Release, ...]) -> tuple[str, str]:
+    """(support, reason) against releases, the OS catalog's. The guest reports its own OS, so "supported" is
+    advice, not proof."""
+    systems = _names([r.name for r in releases]) if releases else "none"
     if vm.type == "lxc":
         return UNSUPPORTED, "A container (LXC), not a VM: the playbooks set up whole servers."
     if vm.template:
         return UNSUPPORTED, "A template: clone it into a VM first."
     ostype = config.ostype if config else ""
     if ostype.startswith("win") or (os and os.id == "mswindows"):
-        return UNSUPPORTED, "Windows: the playbooks set up Ubuntu Server only."
+        return UNSUPPORTED, f"Windows: the playbooks set up {systems}."
     if os is None:
         if ostype in ("solaris", "other"):
-            return UNSUPPORTED, f"Proxmox says the OS type is {ostype}: the playbooks set up Ubuntu Server only."
+            return UNSUPPORTED, f"Proxmox says the OS type is {ostype}: the playbooks set up {systems}."
         if vm.status != "running":
-            return UNKNOWN, "Not running, so its guest agent can't report the OS: confirm it is Ubuntu."
-        return UNKNOWN,"The guest agent didn't report the OS: confirm it is Ubuntu before running a playbook."
+            return UNKNOWN, f"Not running, so its guest agent can't report the OS: confirm it is {systems}."
+        return UNKNOWN, f"The guest agent didn't report the OS: confirm it is {systems} before running a playbook."
     name = os.pretty or os.id
-    if os.id != "ubuntu":
-        return UNSUPPORTED, f"{name} (reported by the guest): the playbooks set up Ubuntu Server only."
-    if os.version_id in SUPPORTED_UBUNTU:
+    if any(r.matches(os) for r in releases):
         return SUPPORTED, f"{name} (reported by the guest)."
-    return NEEDS_OVERRIDE, f"{name} (reported by the guest): only {' and '.join(SUPPORTED_UBUNTU)} are tested."
+    same = [r for r in releases if r.os_id == os.id]
+    if same:
+        versions = _names([r.version for r in same])
+        return NEEDS_OVERRIDE, f"{name} (reported by the guest): only {same[0].name} {versions} are in the OS catalog."
+    return UNSUPPORTED, f"{name} (reported by the guest): the playbooks set up {systems}."
 
 
 # --- What a run calls a VM, and the name its host keys are pinned under -----------------------------------------

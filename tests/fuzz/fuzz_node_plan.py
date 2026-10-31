@@ -27,6 +27,9 @@ NAMES = ["pve-a", "pve-b", "PVE-A", "pve-c", ""]
 STORAGES = ["local", "nfs", "cephfs", "usb"]
 ISOS = [{"name": n, "release": r, "point_release": "", "base_url": f"https://releases.ubuntu.com/{r}"}
         for n, r in (("ubuntu-26.04.1-live-server-amd64.iso", "26.04"), ("ubuntu-24.04.5-live-server-amd64.iso", "24.04"))]
+# A cloud image goes in like an ISO, into the storage's Import folder.
+ISOS.append({"name": "debian-13-genericcloud-amd64-20261021-2638.qcow2", "checksum": "sha512:" + "0" * 128,
+             "url": "https://cloud.debian.org/images/cloud/trixie/20261021-2638/debian-13-genericcloud-amd64-20261021-2638.qcow2"})
 
 
 def one_input(data):

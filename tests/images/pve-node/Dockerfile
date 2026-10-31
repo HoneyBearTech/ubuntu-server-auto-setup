@@ -39,12 +39,15 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && touch -d 2000-01-01 /var/lib/apt/lists \
  && mkdir -p /run/sshd /root/.ssh /var/lib/vz/template/iso /mnt/pve/synology-nfs/template/iso \
+      /mnt/pve/synology-nfs/import \
  && chmod 700 /root/.ssh \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/10-test.conf
 # Proxmox's storage tool, faked: the roles ask it which storages allow ISO images and where they keep them.
 COPY --chmod=0755 pvesm /usr/local/bin/pvesm
-# xorriso, wrapped to keep a copy of each seed's user-data for the tests to check.
+# xorriso, wrapped to keep a copy of each seed's files for the tests to check.
 COPY --chmod=0755 xorriso /usr/local/bin/xorriso
+# CPU descriptions for the x86-64-v3 check (provision_cpuinfo_file): the runner's own CPU can be anything.
+COPY cpuinfo-ivybridge cpuinfo-haswell /srv/cpuinfo/
 # Served over HTTP as the stand-in for releases.ubuntu.com. gpgv isn't installed: the role installs it.
 COPY --from=release /srv/ubuntu /srv/ubuntu
 COPY --from=release /srv/test-signing /srv/test-signing

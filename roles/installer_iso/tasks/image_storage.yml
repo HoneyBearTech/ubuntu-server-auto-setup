@@ -1,0 +1,62 @@
+---
+# Downloads one cloud image (installer_image) into one storage's Import folder (installer_image_storage), checked
+# against its checksum. The node downloads it as the node user (pve_ssh_user): the API token can't, since
+# Proxmox's download-url needs Datastore.AllocateTemplate. Included once per storage by image.yml.
+
+# As in storage.yml: start from the inventory's ISO folder, if any, so the lookup is this storage's.
+- name: Start from the ISO folder set in the inventory, if any
+  ansible.builtin.set_fact:
+    pve_iso_dir: "{{ installer_iso_dir_override }}"
+
+- name: Find the folder of storage {{ installer_image_storage }}
+  ansible.builtin.include_role:
+    name: os_catalog
+    tasks_from: iso_dir
+  vars:
+    pve_iso_storage: "{{ installer_image_storage }}"
+
+# Proxmox keeps a storage's ISO images in <storage>/template/iso and its Import content in <storage>/import, and
+# makes that folder once Import content is allowed on the storage.
+- name: Note the Import folder of storage {{ installer_image_storage }}
+  ansible.builtin.set_fact:
+    installer_import_dir: "{{ pve_iso_dir | dirname | dirname }}/import"
+
+- name: Look at the Import folder
+  ansible.builtin.stat:
+    path: "{{ installer_import_dir }}"
+    get_checksum: false
+  register: installer_import_dir_stat
+  failed_when: false
+
+- name: Fail unless the node user can write to the Import folder
+  ansible.builtin.assert:
+    that:
+      - installer_import_dir_stat.stat.isdir | default(false)
+      - installer_import_dir_stat.stat.writeable | default(false)
+    fail_msg: >-
+      {{ installer_import_dir }} on {{ inventory_hostname }}
+      {{ "doesn't exist: allow Import content on storage " ~ installer_image_storage ~ " (Datacenter → Storage → "
+         ~ installer_image_storage ~ " → Content: Import), which creates it"
+         if not installer_import_dir_stat.stat.exists | default(false)
+         else ("isn't writable by " ~ pve_ssh_user ~ (": run playbooks/prepare-node.yml again" if pve_ssh_user != 'root'
+         else '')) if installer_import_dir_stat.stat.isdir | default(false) else "isn't a folder" }}.
+    quiet: true
+
+# A copy that's already there is kept only if it has the checksum; a new download replaces it only if it has.
+- name: Download the cloud image
+  block:
+    - name: Download the image, checked against its checksum, to {{ installer_image.name }}
+      ansible.builtin.get_url:
+        url: "{{ installer_image.url }}"
+        dest: "{{ installer_import_dir }}/{{ installer_image.name }}"
+        checksum: "{{ installer_image.checksum }}"
+        mode: "0644"
+        timeout: 120
+  rescue:
+    - name: Fail with what went wrong and what to do
+      ansible.builtin.fail:
+        msg: >-
+          Couldn't download {{ installer_image.url }} with the checksum {{ installer_image.checksum }}:
+          {{ ansible_failed_result.msg | default('') }}. If the vendor has removed it, update ubuntu-server-auto-setup,
+          whose newer OS catalog pins a newer build (or run make catalog). A file with a different checksum is not the
+          image the catalog pinned: use another mirror, or check vm_os_image_sha256.

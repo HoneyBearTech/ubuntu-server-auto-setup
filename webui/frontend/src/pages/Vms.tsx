@@ -354,7 +354,7 @@ export function Vms() {
       <PageHead title="VMs" crumb={crumb} actions={actions} />
       <p className="lead">
         Every VM and container on the cluster, with the address the playbooks would use and whether they support
-        it. The list refreshes every 30 seconds while this page is open. Select running Ubuntu VMs to run the
+        it. The list refreshes every 30 seconds while this page is open. Select running VMs to run the
         baseline against them: first a check run, which changes nothing.
       </p>
       {error ? <Notice notice={{ kind: "error", message: `The last refresh failed: ${error}` }} /> : null}

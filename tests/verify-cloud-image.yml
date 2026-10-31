@@ -1,0 +1,102 @@
+---
+# After tests/run.sh provisions srv-cloud (VM 4070) from Debian 13's cloud image: what the API was asked, what the
+# seed held (xorriso kept a copy of its files in /srv/seed-copies/, tests/fixtures/xorriso) and what's left.
+- name: Verify the VM installed from a cloud image, through the API
+  hosts: localhost
+  gather_facts: false
+  vars:
+    catalog: "{{ (lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'TEST_TMP') ~ '/catalog.yml') | from_yaml).os_catalog }}"
+    image: "{{ (catalog | selectattr('id', 'equalto', 'debian-13') | first).methods.cloud_image }}"
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the create call, the resize and the VM's lifecycle
+      vars:
+        vm: "{{ verify_api.json.data.vms['4070'] }}"
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form')
+                    | selectattr('vmid', 'equalto', '4070') | list }}"
+      ansible.builtin.assert:
+        that:
+          - create | length == 1
+          # The disk is a copy of the image in the NFS storage's Import content, the seed the only CD-ROM.
+          - create[0].scsi0 == 'local-lvm:0,import-from=synology-nfs:import/' ~ image.file ~ ',discard=on,iothread=1,ssd=1'
+          - create[0].ide2 == 'synology-nfs:iso/seed-srv-cloud.iso,media=cdrom'
+          - "'ide3' not in create[0]"
+          - create[0].boot == 'order=scsi0'
+          - create[0].description == 'Installed by ubuntu-server-auto-setup (Debian 13 cloud image ' ~ image.build ~ ')'
+          - create[0].tags == 'debian,ansible'
+          - "vm.resized == [{'disk': 'scsi0', 'size': '32G'}]"
+          # Started for the first boot, powered itself off, the seed detached, started again from its disk.
+          - vm.installed
+          - vm.starts == 2
+          - vm.config_updates[0].delete == 'ide2'
+          - vm.config_updates | length == 1
+          - vm.config.boot == 'order=scsi0'
+          - "'ide2' not in vm.config"
+
+- name: Verify the cloud-init seed and what's left on the node
+  hosts: pve-test
+  gather_facts: false
+  tasks:
+    - name: Read the seed's files
+      ansible.builtin.slurp:
+        src: /srv/seed-copies/seed-srv-cloud/{{ item }}
+      loop: [user-data, meta-data, network-config]
+      register: verify_seed
+
+    - name: Check the user-data
+      vars:
+        text: "{{ verify_seed.results[0].content | b64decode }}"
+        user_data: "{{ text | from_yaml }}"
+        user: "{{ user_data.users[0] }}"
+      ansible.builtin.assert:
+        that:
+          - text is match('#cloud-config\n')
+          - "'autoinstall' not in user_data"
+          - user_data.hostname == 'srv-cloud'
+          - user_data.users | length == 1
+          - user.name == 'sysadmin' and not user.lock_passwd and user.passwd is match('\$6\$')
+          - user.ssh_authorized_keys is search('test@ubuntu-server-auto-setup')
+          - user_data.ssh_pwauth == false and user_data.disable_root
+          # Passwordless sudo from the file the baseline manages, not cloud-init's own.
+          - "'sudo' not in user"
+          - >-
+            user_data.write_files == [{'path': '/etc/sudoers.d/90-ansible-sysadmin', 'owner': 'root:root',
+            'permissions': '0440', 'content': 'sysadmin ALL=(ALL:ALL) NOPASSWD: ALL\n'}]
+          - user_data.runcmd == [['touch', '/etc/cloud/cloud-init.disabled']]
+          - user_data.power_state.mode == 'poweroff'
+          # A static address: the guest agent isn't needed to find the VM.
+          - "'packages' not in user_data"
+
+    - name: Check the meta-data and the network configuration
+      vars:
+        meta: "{{ verify_seed.results[1].content | b64decode | from_yaml }}"
+        network: "{{ verify_seed.results[2].content | b64decode | from_yaml }}"
+        primary: "{{ network.ethernets.primary }}"
+      ansible.builtin.assert:
+        that:
+          - "meta == {'instance-id': 'srv-cloud-4070', 'local-hostname': 'srv-cloud'}"
+          - network.version == 2
+          - network.ethernets | list == ['primary']
+          # Matched by MAC address: the RHEL family's images name the card eth0, the others ens18.
+          - primary.match.macaddress is match('bc:24:11:')
+          - primary.addresses == ['127.0.0.1/24']
+          - "primary.routes == [{'to': 'default', 'via': '10.10.10.1'}]"
+          - primary.nameservers.addresses == ['10.10.10.1']
+
+    - name: Look for the seed ISO and its files
+      ansible.builtin.find:
+        paths: [/mnt/pve/synology-nfs/template/iso, /var/tmp/ubuntu-server-auto-setup]
+        patterns: ["seed-srv-cloud*"]
+        file_type: any
+      register: verify_seeds
+
+    - name: Check none are left (they hold the password hash)
+      ansible.builtin.assert:
+        that: verify_seeds.matched == 0
+        fail_msg: "Seed files left on the node: {{ verify_seeds.files | map(attribute='path') | list }}"

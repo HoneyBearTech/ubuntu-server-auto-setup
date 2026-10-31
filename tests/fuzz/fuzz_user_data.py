@@ -9,7 +9,8 @@ words, each network card's Proxmox setting holds exactly the given options (a va
 installed system matches every card by its MAC address, and exactly one card has the default route. With
 disk encryption, the passphrase is exactly the storage layout's password and the content of the installer's key
 file, the enrollment script is the same for every input, and every passphrase the role accepts is 12 to 512
-printable ASCII characters without braces.
+printable ASCII characters without braces. A cloud image's seed (cloud-user-data.j2 and network-config.j2) is
+valid YAML with the same network, user, keys and sudo, and nothing else an input could add.
 """
 
 import re
@@ -26,6 +27,8 @@ with atheris.instrument_imports():
 TASKS = "roles/proxmox_vm/tasks/main.yml"
 USER_DATA = roles.template("proxmox_vm", "user-data.j2")
 META_DATA = roles.template("proxmox_vm", "meta-data.j2")
+CLOUD_USER_DATA = roles.template("proxmox_vm", "cloud-user-data.j2")
+NETWORK_CONFIG = roles.template("proxmox_vm", "network-config.j2")
 PATTERNS = roles.role_vars("proxmox_vm")
 REQUIRED = roles.assert_conditions(TASKS, "Check required variables")
 FORMATS = roles.assert_conditions(TASKS, "Check the formats of values the installer uses")
@@ -278,6 +281,26 @@ def one_input(data):
 
     meta = yaml.safe_load(META_DATA.render(values))
     assert meta == {"instance-id": f"{host}-{values['pve_vmid']}", "local-hostname": host}, meta
+
+    # A cloud image's seed: the same network in a file of its own, the same user, keys and sudo.
+    assert yaml.safe_load(NETWORK_CONFIG.render(values)) == {"version": 2, "ethernets": ethernets}
+    text = CLOUD_USER_DATA.render(values)
+    assert text.startswith("#cloud-config\n"), text[:40]
+    cloud = yaml.safe_load(text)
+    dhcp = values["net_mode"] == "dhcp"
+    assert sorted(cloud) == sorted(["hostname", "preserve_hostname", "users", "disable_root", "ssh_pwauth",
+                                    "write_files", "runcmd", "power_state"] + (["packages"] if dhcp else [])), cloud
+    assert cloud["hostname"] == host and cloud["preserve_hostname"] is False
+    assert cloud["users"] == [{"name": user, "gecos": values["admin_realname"], "shell": "/bin/bash",
+                               "lock_passwd": False, "passwd": values["provision_password_hash"],
+                               "ssh_authorized_keys": values["provision_ssh_keys"]}], cloud["users"]
+    assert cloud["disable_root"] is True and cloud["ssh_pwauth"] is False
+    assert cloud["write_files"] == [{"path": f"/etc/sudoers.d/90-ansible-{user}", "owner": "root:root",
+                                     "permissions": "0440", "content": f"{user} ALL=(ALL:ALL) NOPASSWD: ALL\n"}]
+    assert cloud["runcmd"] == [["touch", "/etc/cloud/cloud-init.disabled"]]
+    assert cloud["power_state"] == {"mode": "poweroff", "delay": "now", "condition": True}
+    if dhcp:
+        assert cloud["packages"] == ["qemu-guest-agent"]
 
 
 def main():

@@ -16,8 +16,8 @@ It also serves a public-keys file over plain HTTP, standing in for https://githu
 
 With --fixture-vms it also lists the fixed VMs in FIXTURE_VMS, for the web UI's VMs page: their configs and
 their guest agents (network-get-interfaces, get-osinfo, get-host-name), including an agent that isn't
-running, a slow one, one the token may not ask, Debian, Windows, a template, a container, and hostile
-strings. Off by default, so the playbook tests see only the VMs they create.
+running, a slow one, one the token may not ask, Debian, an Ubuntu and a Fedora release the OS catalog doesn't
+have, Windows, a template, a container, and hostile strings. Off by default, so the playbook tests see only the VMs they create.
 
 To stand in for pveproxy restarting a worker, POST /mock/drop with JSON {"method": "GET", "path": "<regex>",
 "when": "before" or "after", "times": 1} drops the next matching API calls: "before" closes the connection
@@ -59,7 +59,7 @@ NODE_STORAGES = {
 STORAGES = {
     "local": {"type": "dir", "content": "iso,vztmpl,backup", "shared": 0},
     "local-lvm": {"type": "lvmthin", "content": "images,rootdir", "shared": 0},
-    "synology-nfs": {"type": "nfs", "content": "images,iso", "shared": 1},
+    "synology-nfs": {"type": "nfs", "content": "images,iso,import", "shared": 1},
     "usb-iso": {"type": "dir", "content": "iso", "shared": 0},
 }
 HANG_VMIDS = {4099}
@@ -134,6 +134,15 @@ FIXTURE_VMS = {
     112: {"name": "jammy", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
           "config": {"agent": "1", "ostype": "l26"},
           "agent": ("ok", [_iface("ens18", "10.10.10.32")], _ubuntu("22.04", "Jammy Jellyfish"), "jammy")},
+    # Releases the OS catalog doesn't have: an Ubuntu release (needs an override) and another system (not supported).
+    113: {"name": "plucky", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.33")],
+                    {"id": "ubuntu", "version-id": "25.04", "pretty-name": "Ubuntu 25.04"}, "plucky")},
+    114: {"name": "fedora-41", "maxcpu": 1, "mem": 268_435_456, "maxmem": 1_073_741_824, "uptime": 50,
+          "config": {"agent": "1", "ostype": "l26"},
+          "agent": ("ok", [_iface("ens18", "10.10.10.34")],
+                    {"id": "fedora", "version-id": "41", "pretty-name": "Fedora Linux 41"}, "fedora-41")},
     200: {"name": "ct-dns", "type": "lxc", "maxcpu": 1, "mem": 67_108_864, "maxmem": 536_870_912, "uptime": 99_999},
 }
 
@@ -255,6 +264,28 @@ def listed_status(vm):
     """A VM's status as /cluster/resources shows it: the previous one for a few seconds after a change."""
     previous, since = vm.get("listed", (vm["status"], 0))
     return previous if time.time() - since < RESOURCES_LAG_SECONDS else vm["status"]
+
+
+IMAGE_NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._+-"
+
+
+def _import_from(config, node):
+    """Checks a disk's import-from as Proxmox does: an image in Import content of a storage the node has, into a new
+    volume (<storage>:0). Returns an error message, or None."""
+    for key, value in config.items():
+        if not re.fullmatch(r"(scsi|virtio|sata|ide)[0-9]+", key) or "import-from=" not in value:
+            continue
+        target, *options = value.split(",")
+        source = dict(option.partition("=")[::2] for option in options)["import-from"]
+        storage, _, volume = source.partition(":")
+        if not target.endswith(":0"):
+            return f"{key}: import-from needs a new volume (<storage>:0), got '{target}'"
+        if storage not in NODE_STORAGES.get(node, []) or "import" not in STORAGES[storage]["content"].split(","):
+            return f"{key}: storage '{storage}' doesn't allow Import content on {node}"
+        name = volume.removeprefix("import/")
+        if name == volume or not name.endswith(".qcow2") or name.strip(IMAGE_NAME_CHARS) or "/" in name:
+            return f"{key}: '{source}' isn't an image in Import content"
+    return None
 
 
 def upid(action, vmid, node=NODE):
@@ -495,7 +526,7 @@ class PveHandler(BaseHTTPRequestHandler):
             if vmid in vms:
                 return self._reply(500, {"vmid": f"VM {vmid} already exists"})
             config = dict(form)
-            error = _special_disks(config, vmid)
+            error = _special_disks(config, vmid) or _import_from(config, node)
             if error:
                 return self._reply(400, {"config": error})
             for key in [k for k in config if re.fullmatch(r"net[0-9]+", k)]:
@@ -505,7 +536,8 @@ class PveHandler(BaseHTTPRequestHandler):
             vms[vmid] = {"node": node, "config": config, "status": "stopped", "starts": 0, "polls": 0,
                          "installed": False, "config_updates": [], "agent_polls": 0}
             return self._reply(200, upid("qmcreate", vmid, node))
-        m = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|status/current|status/start|agent/network-get-interfaces)", path)
+        m = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|resize|status/current|status/start|agent/network-get-interfaces)",
+                         path)
         if not m:
             return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
         node, vmid, action = m.group(1), m.group(2), m.group(3)
@@ -520,6 +552,15 @@ class PveHandler(BaseHTTPRequestHandler):
                 vm["config"].pop(key.strip(), None)
             vm["config"].update({k: v for k, v in form.items() if k != "delete"})
             return self._reply(200, None)
+        if action == "resize" and method == "PUT":
+            # Proxmox VE 9 answers with a task; only an absolute size larger than the disk's is taken here.
+            disk, size = form.get("disk", ""), form.get("size", "")
+            digits = size[:-1]
+            if disk not in vm["config"] or not (size.endswith("G") and digits.isdigit() and not digits.startswith("0")
+                                                and len(digits) <= 6):
+                return self._reply(400, {"size": f"can't resize {disk!r} to {size!r}"})
+            vm.setdefault("resized", []).append({"disk": disk, "size": size})
+            return self._reply(200, upid("resize", vmid, node))
         if action == "agent/network-get-interfaces" and method == "GET":
             return self._agent_interfaces(int(vmid), vm)
         if action == "status/start" and method == "POST":

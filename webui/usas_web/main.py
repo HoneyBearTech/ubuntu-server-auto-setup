@@ -187,7 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     runner = Runner(settings, on_finish=run_ended)
     keys = Keys(settings)
-    lister = VmLister()
+    lister = VmLister(releases=vms.catalog_releases(schema.os_catalog))
     tokens = status.StatusTokens(settings.status_token_file, store.vault_password)
     throttle = status.Throttle()
     counts = status.ClusterCounts()
@@ -1285,7 +1285,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for target in plan.targets:
             if target.override:
                 audit.record("vm.override", **who(request), run=started.id, vmid=target.vmid, name=target.name,
-                             reason="the playbooks aren't tested on its OS; the user confirmed it runs Ubuntu Server")
+                             reason="its OS isn't a release of the OS catalog, or the guest didn't report it; "
+                                    "run anyway")
         audit.record("run.check", **who(request), run=started.id, plan=plan.digest, tags=plan.tags,
                      targets=plan.summary())
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
