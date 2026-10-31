@@ -255,6 +255,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- A Debian 12 VM installed from its cloud image never finished its first boot: Debian 12's cloud kernel has no SATA
+  driver, and the seed was an IDE CD-ROM, which q35 puts on its SATA controller, so cloud-init never saw it. The
+  seed is now a SCSI CD-ROM (`scsi30`), and `vm_extra_disks` takes up to 29 disks (`scsi1` to `scsi29`). Found by
+  the new weekly cloud-image test.
 - On a server installed from a cloud image, the baseline's first run lost sudo after removing passwordless sudo:
   the admin user joined its sudo group in the same SSH session, which kept its old groups. The baseline now logs in
   again after the admin user's groups change. Found by the new weekly cloud-image test.

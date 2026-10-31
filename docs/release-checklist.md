@@ -142,7 +142,7 @@ default `vm_cpu_type: host`). `192.0.2.20` stands for whichever of them a step i
   each VM's console the image boots once, powers off, and starts again from its disk:
 
   ```bash
-  qm config 9010 | grep -E '^(scsi0|ide2|boot):'   # scsi0 ... size=32G; no ide2; boot: order=scsi0
+  qm config 9010 | grep -E '^(scsi0|scsi30|boot):'   # scsi0 ... size=32G; no scsi30; boot: order=scsi0
   ```
 
 - [ ] On a node without AVX2 (an Intel Ivy Bridge Xeon, for example), `make provision LIMIT=test-12 ARGS="-e

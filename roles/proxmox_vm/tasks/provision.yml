@@ -149,12 +149,15 @@
         memory: "{{ vm_memory_mb }}"
         scsihw: virtio-scsi-single
         # A cloud image's disk is a copy of the image (Proxmox converts it to the storage's format), grown below.
-        scsi:
-          scsi0: >-
-            {{ pve_storage }}:{{ ('0,import-from=' ~ pve_iso_storage ~ ':import/' ~ os_catalog_selected.image.file)
-            if provision_cloud else vm_disk_gb }},discard=on,iothread=1,ssd=1
+        # Its seed is a SCSI CD-ROM (scsi30, the last slot; extra disks count up from scsi1): some cloud kernels,
+        # such as Debian 12's, have no SATA driver, and q35 puts IDE drives on its SATA controller.
+        scsi: >-
+          {{ {'scsi0': pve_storage ~ ':' ~ (('0,import-from=' ~ pve_iso_storage ~ ':import/' ~ os_catalog_selected.image.file)
+                                            if provision_cloud else vm_disk_gb | string) ~ ',discard=on,iothread=1,ssd=1'}
+             | combine({'scsi30': pve_iso_storage ~ ':iso/seed-' ~ inventory_hostname ~ '.iso,media=cdrom'}
+                       if provision_cloud else {}) }}
         ide: >-
-          {{ {'ide2': pve_iso_storage ~ ':iso/seed-' ~ inventory_hostname ~ '.iso,media=cdrom'} if provision_cloud
+          {{ omit if provision_cloud
              else {'ide2': pve_iso_storage ~ ':iso/' ~ installer_iso_name ~ ',media=cdrom',
                    'ide3': pve_iso_storage ~ ':iso/seed-' ~ inventory_hostname ~ '.iso,media=cdrom'} }}
         net: "{{ dict(provision_nics | map(attribute='key') | zip(provision_nics | map(attribute='proxmox'))) }}"
@@ -289,7 +292,7 @@
         timeout: "{{ pve_api_timeout | int }}"
         body_format: form-urlencoded
         body: >-
-          {{ {'delete': 'ide2' if provision_cloud else 'ide2,ide3', 'boot': 'order=scsi0'}
+          {{ {'delete': 'scsi30' if provision_cloud else 'ide2,ide3', 'boot': 'order=scsi0'}
              | combine(data_disks_list | pve_extra_disks) }}
       delegate_to: localhost
       become: false

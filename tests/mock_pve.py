@@ -566,6 +566,9 @@ class PveHandler(BaseHTTPRequestHandler):
         if action == "config" and method == "GET":
             return self._reply(200, vm["config"])
         if action == "config" and method == "PUT":
+            deleted = {key.strip() for key in form.get("delete", "").split(",") if key.strip()}
+            if deleted & set(form):
+                return self._reply(400, {"delete": f"can't delete and set {', '.join(sorted(deleted & set(form)))}"})
             error = _new_disks(form, node)
             if error:
                 return self._reply(400, {"config": error})

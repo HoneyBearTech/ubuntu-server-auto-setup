@@ -2,9 +2,9 @@
 # One release's real cloud image, end to end, the way the playbooks install it on Proxmox VE and then harden it:
 #   - downloads the image the OS catalog pins (or takes it from the cache) and checks the catalog's checksum,
 #   - renders the proxmox_vm role's own seed (cloud-user-data.j2, network-config.j2, meta-data.j2) for a static
-#     address, packs it as the CIDATA ISO the role attaches,
+#     address, packs it as the CIDATA ISO the role attaches (a SCSI CD-ROM, scsi30),
 #   - boots the image on a copy of its disk in a VM set up as Proxmox sets up the role's VMs (q35, OVMF with
-#     Secure Boot and Microsoft's keys, VirtIO SCSI and network, the seed on an IDE CD-ROM) and waits for the
+#     Secure Boot and Microsoft's keys, VirtIO SCSI and network, the seed on a SCSI CD-ROM) and waits for the
 #     seed's poweroff, then boots it again without the seed, as provisioning does,
 #   - checks what the first boot left: Secure Boot on, cloud-init disabled, the host name, the admin user's sudoers
 #     file,
@@ -170,8 +170,8 @@ start_vm() {
 }
 
 step "First boot with the seed: cloud-init sets the server up and powers it off"
-start_vm first -drive "if=none,id=drive-ide2,file=$W/seed.iso,format=raw,media=cdrom,readonly=on" \
-  -device ide-cd,drive=drive-ide2,bus=ide.2
+start_vm first -drive "if=none,id=drive-scsi30,file=$W/seed.iso,format=raw,media=cdrom,readonly=on" \
+  -device scsi-cd,drive=drive-scsi30,bus=scsihw0.0,scsi-id=30
 started=$SECONDS
 while kill -0 "$qemu_pid" 2>/dev/null; do
   if (( SECONDS - started > FIRST_BOOT_TIMEOUT )); then

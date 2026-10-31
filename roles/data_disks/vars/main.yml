@@ -12,5 +12,6 @@ data_disks_storage_pattern: '^[A-Za-z][A-Za-z0-9._-]{0,63}\Z'
 data_disks_mount_pattern: '^(/[A-Za-z0-9_][A-Za-z0-9._-]{0,63}){1,8}\Z'
 data_disks_mount_reserved: [/bin, /boot, /boot/efi, /dev, /etc, /home, /lib, /lib64, /proc, /root, /run, /sbin, /sys,
                             /tmp, /usr, /var, /var/lib, /var/log]
-# scsi0 is the system disk; scsi1 to scsi30 are free for these.
-data_disks_max: 30
+# scsi0 is the system disk; scsi1 to scsi29 are free for these (a cloud image's seed is on scsi30 until the first
+# boot is done, and goes in the same update that adds these disks).
+data_disks_max: 29

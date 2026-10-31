@@ -247,7 +247,7 @@ For one release (an OS catalog id) it downloads the cloud image the catalog pins
 checksum, renders the proxmox_vm role's seed (`cloud-user-data.j2`, `network-config.j2`, `meta-data.j2`) for a
 static address, and boots the image in a VM set up as Proxmox sets up the role's VMs: q35, OVMF with Secure Boot
 and Microsoft's keys enrolled, a VirtIO SCSI disk backed by the image and grown to 32 GB, a VirtIO network card
-with the MAC address `network-config` matches, and the seed on an IDE CD-ROM. Then:
+with the MAC address `network-config` matches, and the seed on a SCSI CD-ROM (`scsi30`). Then:
 
 - cloud-init sets the server up from the seed and powers it off, within 15 minutes;
 - booted again without the seed, as provisioning does, it has Secure Boot on (the vendor's shim, boot loader and
