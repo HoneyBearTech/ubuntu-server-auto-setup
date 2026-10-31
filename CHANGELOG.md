@@ -175,6 +175,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left
   handed over to it ([installing.md](docs/installing.md#6-optional-a-node-user-other-than-root)).
+- The screen-reader walk-through is dropped from the accessibility docs and the pre-release checklist: it was
+  never run, and isn't planned. The automated keyboard, focus and axe-core checks stay;
+  [accessibility.md](docs/accessibility.md#known-gaps) says what they don't cover.
 
 ## [0.6.0] - 2026-10-25
 
