@@ -69,8 +69,7 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Done: a new look (the USAS name and mark, a dark theme by default with light and system themes, the
   Atkinson Hyperlegible fonts), with axe-core and a contrast check of every colour pair in CI.
 - Done: an automated keyboard and axe-core check of every page in a real browser in CI (Playwright,
-  Chromium). Written, not yet run: a screen-reader walk-through with VoiceOver and NVDA, now part of the
-  pre-release checklist ([accessibility.md](accessibility.md#screen-reader-walk-through)).
+  Chromium).
 
 **Supply chain**
 - Done: CI and the image install hash-pinned sets of Python packages (`requirements-ci.txt`,
