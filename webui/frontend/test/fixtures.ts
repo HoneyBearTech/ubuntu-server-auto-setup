@@ -54,12 +54,12 @@ export const runPage: RunPageData = {
   steps: overview.steps,
   current_run: null,
   iso_plan: {
-    storage: "synology-nfs", shared: true, known: true, builders: ["ares"],
+    storage: "synology-nfs", shared: true, known: true, builders: ["ares", "hephaestus"],
     pairs: [
-      { node: "ares", storage: "synology-nfs", iso: "ubuntu-26.04.1-live-server-amd64.iso", shared: true,
-        built_by: "ares", servers: ["db-01"], address: "" },
-      { node: "hephaestus", storage: "synology-nfs", iso: "ubuntu-26.04.1-live-server-amd64.iso", shared: true,
-        built_by: "ares", servers: ["web-01"], address: "192.168.1.20" },
+      { node: "ares", storage: "synology-nfs", iso: "debian-13-genericcloud-amd64-20261021-2638.qcow2", image: true,
+        shared: true, built_by: "ares", servers: ["db-01"], address: "" },
+      { node: "hephaestus", storage: "synology-nfs", iso: "ubuntu-26.04.1-live-server-amd64.iso", image: false,
+        shared: true, built_by: "hephaestus", servers: ["web-01"], address: "192.168.1.20" },
     ],
   },
 };
@@ -69,9 +69,11 @@ export const ssh: SshData = {
   key_info: { type: "ssh-ed25519", fingerprint: "SHA256:q9Vx1y2z3fQk", comment: "ubuntu-server-auto-setup" },
   nodes: [
     { name: "hephaestus", address: "192.168.1.20", default: true, in_use: true, servers: ["web-01"],
-      trusted: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:trusted1" }] },
-    { name: "ares", address: "192.168.1.21", default: false, in_use: true, servers: ["db-01"], trusted: [] },
-    { name: "hermes", address: "192.168.1.22", default: false, in_use: false, servers: [], trusted: [] },
+      trusted: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:trusted1" }],
+      cpu: { model: "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz", missing: ["avx2", "bmi2", "fma", "movbe"] } },
+    { name: "ares", address: "192.168.1.21", default: false, in_use: true, servers: ["db-01"], trusted: [],
+      cpu: { model: "AMD EPYC 7302P 16-Core Processor", missing: [] } },
+    { name: "hermes", address: "192.168.1.22", default: false, in_use: false, servers: [], trusted: [], cpu: null },
   ],
   pending: { node: "hephaestus", keys: [{ keytype: "ssh-ed25519", fingerprint: "SHA256:offered1" }] },
   pve_node: "hephaestus",

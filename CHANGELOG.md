@@ -127,6 +127,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   installer on the nodes whose servers need it. Every server's OS settings are checked before anything is
   created or downloaded; a release past its end of support installs with a warning.
 
+- **The web UI installs from cloud images too** ([web-ui.md](docs/web-ui.md#walking-through-it)): an **Install method**
+  on the Defaults page and an Install method column on the Servers page (Ubuntu installer or Cloud image), and
+  every release in the OS catalog in the OS dropdowns. The pages refuse what the playbooks would refuse before
+  creating a VM: the Ubuntu installer for another system, a cloud image with disk encryption on, a cloud image
+  when the last connection test listed the ISO storage without Import content (the Proxmox page now marks the
+  storages that allow it), and Rocky Linux 10 or CentOS Stream 10 on a node whose CPU lacks x86-64-v3: the SSH
+  page's **Test the SSH login** now reads each node's CPU and shows it. The Run page's plan lists the cloud
+  images `build-installer` downloads.
+
 - **Installs from the vendors' cloud images** (`vm_install_method: cloud_image`), for every release in the OS
   catalog: Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux. `build-installer.yml` downloads each image
   a server needs into its ISO storage's Import content (once for a storage the cluster shares), checked against

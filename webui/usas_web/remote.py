@@ -33,6 +33,7 @@ class PveResult:
     status: dict[str, str] = field(default_factory=dict)  # node name -> "online", "offline", ...
     cluster: str = ""  # the cluster's name; empty for a single node, or if the token can't read it
     iso_storages: dict[str, str] = field(default_factory=dict)  # storage ID -> type ("nfs, shared"), ISO content
+    import_storages: list[str] | None = None  # those of them that allow Import content too; None if not listed
 
 
 def api_url(host: str, port: int) -> str:
@@ -77,23 +78,28 @@ def test_proxmox(host: str, port: int, user: str, token_id: str, secret: str, va
         status = {str(n["node"]): str(n.get("status", "unknown")) for n in nodes.json()["data"]}
     except (ValueError, KeyError, TypeError):
         raise RemoteProblem("That doesn't look like a Proxmox VE API.") from None
+    storages, imports = iso_storages(base, headers, verify)
     return PveResult(version=str(data.get("version", "?")), nodes=sorted(status), status=status,
-                     cluster=cluster_name(base, headers, verify), iso_storages=iso_storages(base, headers, verify))
+                     cluster=cluster_name(base, headers, verify), iso_storages=storages, import_storages=imports)
 
 
-def iso_storages(base: str, headers: dict[str, str], verify: bool | str) -> dict[str, str]:
-    """The storages whose content includes ISO images, from /storage; {} if the token can't list them."""
+def iso_storages(base: str, headers: dict[str, str], verify: bool | str) -> tuple[dict[str, str], list[str] | None]:
+    """The storages whose content includes ISO images, from /storage, and those of them that allow Import content
+    too (where cloud images go); ({}, None) if the token can't list them."""
     try:
         response = requests.get(f"{base}/storage", headers=headers, verify=verify, timeout=TIMEOUT)
         response.raise_for_status()
-        found = {}
+        found, imports = {}, []
         for entry in response.json()["data"]:
-            if "iso" in str(entry.get("content", "")).split(","):
+            content = str(entry.get("content", "")).split(",")
+            if "iso" in content:
                 kind = str(entry.get("type", "?")) + (", shared" if entry.get("shared") else "")
                 found[str(entry["storage"])] = kind
-        return dict(sorted(found.items()))
+                if "import" in content:
+                    imports.append(str(entry["storage"]))
+        return dict(sorted(found.items())), sorted(imports)
     except (requests.exceptions.RequestException, ValueError, KeyError, TypeError, AttributeError):
-        return {}
+        return {}, None
 
 
 def cluster_name(base: str, headers: dict[str, str], verify: bool | str) -> str:

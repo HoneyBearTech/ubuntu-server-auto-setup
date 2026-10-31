@@ -129,20 +129,22 @@ def test_proxmox_cluster_name_is_optional(monkeypatch, status):
 def test_proxmox_iso_storages(monkeypatch):
     storages = Response(data={"data": [
         {"storage": "local", "type": "dir", "content": "iso,vztmpl,backup"},
-        {"storage": "synology-nfs", "type": "nfs", "content": "images,iso", "shared": 1},
+        {"storage": "synology-nfs", "type": "nfs", "content": "images,iso,import", "shared": 1},
+        {"storage": "local-import", "type": "dir", "content": "import"},  # Import content without ISO images
         {"storage": "local-lvm", "type": "lvmthin", "content": "images,rootdir"},
         {"storage": "isolated", "type": "dir", "content": "backup"},  # "iso" only as a whole entry counts
     ]})
     result = run(monkeypatch, {"version": Response(data={"data": {"version": "9.1.1"}}),
                                "nodes": Response(data={"data": [{"node": "pve"}]}), "storage": storages})
     assert result.iso_storages == {"local": "dir", "synology-nfs": "nfs, shared"}
+    assert result.import_storages == ["synology-nfs"]
 
 
 def test_proxmox_iso_storages_are_optional(monkeypatch):
     # Without Datastore.Audit the token can't list storages; the field stays free text.
     result = run(monkeypatch, {"version": Response(data={"data": {"version": "9.1.1"}}),
                                "nodes": Response(data={"data": [{"node": "pve"}]}), "storage": Response(status=403)})
-    assert result.iso_storages == {}
+    assert result.iso_storages == {} and result.import_storages is None
 
 
 # --- The VMs page: the API client and the lister ---------------------------------------------------------

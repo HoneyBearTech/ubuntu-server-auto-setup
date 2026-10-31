@@ -1,6 +1,7 @@
 """The UI's key pair, host keys and the Proxmox CA certificate."""
 
 import datetime
+import re
 import shutil
 import stat
 import subprocess
@@ -12,6 +13,8 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 from cryptography.x509.oid import NameOID
 from usas_web import sshkeys as k
 from usas_web.sshkeys import HostKey, KeyProblem, Keys
+
+from .conftest import REPO
 
 
 @pytest.fixture
@@ -129,6 +132,21 @@ def test_scan_trust_forget(keys, settings, monkeypatch):
         keys.scan("pve")  # the reason only, not the exception's text with its path
 
 
+def test_node_cpu(keys, monkeypatch):
+    keys.generate()
+    keys.trust("pve", [HostKey("pve", "ssh-ed25519", "AAAA")])
+    seen = []
+    cpuinfo = (REPO / "tests/fixtures/cpuinfo-ivybridge").read_text()
+    first = [line for line in cpuinfo.splitlines() if re.match(r"^(model name|flags)\s*:", line)][:2]
+    monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: seen.append(argv) or completed("\n".join(first)))
+    model, flags = keys.cpu("pve", "root")
+    assert seen[0][seen[0].index("--") + 1:] == ["pve", "grep", "-m", "2", "-E", "^(model name|flags)[[:space:]]*:",
+                                                 "/proc/cpuinfo"]
+    assert model == "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz" and "avx" in flags and "avx2" not in flags
+    monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: completed("", 2, "No such file"))
+    assert keys.cpu("pve", "root") == ("", set())
+
+
 def test_ssh_login_and_ca_fetch(keys, settings, monkeypatch):
     with pytest.raises(KeyProblem, match="Create or upload"):
         keys.test_login("pve", "root")
@@ -174,7 +192,7 @@ def test_ssh_login_and_ca_fetch(keys, settings, monkeypatch):
 def test_the_node_user_pattern_is_the_roles():
     import yaml
 
-    from .conftest import REPO
+
 
     release = yaml.safe_load((REPO / "roles/os_catalog/vars/main.yml").read_text())
     common = yaml.safe_load((REPO / "roles/common/vars/main.yml").read_text())

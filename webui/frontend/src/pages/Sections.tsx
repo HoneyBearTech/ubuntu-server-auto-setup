@@ -95,7 +95,18 @@ function ClusterFacts({ cluster }: { cluster: Cluster }) {
                 ))}
               </ul>
             </dd>
-            {storages.length ? <><dt>ISO storages</dt><dd><ul>{storages.map((s) => <li key={s}>{s}</li>)}</ul></dd></> : null}
+            {storages.length ? (
+              <>
+                <dt>ISO storages</dt>
+                <dd>
+                  <ul>
+                    {storages.map((s) => (
+                      <li key={s}>{s}{cluster.import_storages?.includes(s) ? " (Import content too)" : ""}</li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            ) : null}
           </dl>
         ) : (
           <p className="help">
