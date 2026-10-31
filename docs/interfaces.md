@@ -167,10 +167,27 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `firewall_ssh_limit_rate` | `30/m` | firewalld only: that limit, as rich rules write it. |
 | `firewall_ssh_sources` | `[any]` | Where SSH is allowed from. |
 | `firewall_allow` | `[]` | Extra rules: `{port, proto (default tcp), from (default any), comment}`. |
+| `firewall_docker_enabled` | `false` | Make Docker-published ports obey the firewall (Ubuntu and Debian; below). |
+| `firewall_docker_sources` | `[]` | IPv4 or IPv6 addresses or networks (CIDR) that may reach every published port. |
+| `firewall_docker_allow` | `[]` | Published ports open to everyone or one network: `{port, proto (tcp, udp or any; default tcp), from (default any)}`. `port` is the port on the server (8080 in `-p 8080:80`), or a range like `9000:9010`. |
 
 The `firewall_*` names are new in 0.7.0. Their names before, `ufw_default_incoming`, `ufw_logging`,
 `ufw_ssh_limit`, `ufw_ssh_sources` and `ufw_allow`, are still read until 1.0: a `firewall_*` setting takes the
 old name's value unless it's set itself, and each run says which old names the inventory still uses.
+
+Docker forwards a published port (`docker run -p`, `ports:` in Compose) to its container through its own
+`DOCKER-USER` chain, before UFW's rules, so the port is open to everyone whatever UFW says.
+`firewall_docker_enabled` fills that chain from UFW's `/etc/ufw/after.rules` and `after6.rules`, between the
+markers `# BEGIN`/`# END USAS: Docker-published ports`: new connections Docker forwards to a published port are
+dropped (and logged with the prefix `[USAS DOCKER BLOCK]` unless `firewall_logging` is `off`) unless they come
+from `firewall_docker_sources` or match `firewall_docker_allow`. Replies, connections the containers make, and
+containers on the host network (which UFW's own rules already cover) aren't affected. Each file is checked with
+`iptables-restore --test` before it is saved, and UFW is reloaded. On a server without Docker (`docker.service`
+or the snap's `snap.docker.dockerd.service`) the run says so and writes nothing: run the baseline again after
+installing Docker. Turned off again, the rules are removed and the chain emptied. Values are checked against
+`\Z`-anchored patterns (`roles/firewall/vars/main.yml`). Not available on the RHEL family (firewalld): there the
+run stops with a message. Docker's experimental nftables firewall backend has no `DOCKER-USER` chain, so the
+rules don't apply to it.
 
 **Baseline: SSH** (`ssh_hardening`)
 

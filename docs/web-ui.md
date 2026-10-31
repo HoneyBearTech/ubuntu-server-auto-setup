@@ -190,7 +190,8 @@ The overview lists the steps and whether each is done.
    provisioning role's own formats, and so is the rule that exactly one card has the default route
    ([interfaces.md](interfaces.md#networks)).
 5. **Hardening**: the SSH port, the users allowed to log in over SSH, root login, passwordless sudo, the
-   firewall's SSH sources and rules for every server, and the Fail2Ban settings. Below them, off until you
+   firewall's SSH sources and rules for every server, whether Docker-published ports obey the firewall (and
+   which sources and ports may reach them), and the Fail2Ban settings. Below them, off until you
    turn them on: the extra hardening (sysctl, auditd, AppArmor), where update reports and ban notices go
    (mail addresses, a webhook), and a mail relay. The relay password and the webhook URL are kept in the
    Vault; tick **Remove the saved value** to delete one.

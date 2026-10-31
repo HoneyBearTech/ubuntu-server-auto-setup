@@ -129,7 +129,16 @@ run; your own `~/.ssh` is never touched. The steps:
    Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
    leaves them out and checks only the per-network-namespace ones. A container can't see some keys at all
    (`net.core.bpf_jit_harden`); the role reports and skips those, and the test checks the rest.
-10. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
+10. **Docker-published ports** (`firewall_docker_enabled`): a run without Docker must say so and write no rules.
+   Then a stand-in for Docker starts (`tests/fixtures/docker-stand-in/`): a network namespace with a web
+   server, published on the server's port 8080 the way Docker does it (DNAT, and `FORWARD` through
+   `DOCKER-USER` first), reachable from the runner on `127.0.0.1:2280` although UFW denies it. With the option
+   on it must stop answering; a rerun must change nothing; `tests/verify-docker-ports.yml` checks each of
+   UFW's files has the rules once and the live chains hold exactly those rules; allowing port 8080, or the
+   runner's address as a source, must make it answer again, and a source that isn't the runner must not.
+   Values that could add a rule or an option must be refused, and turning the option off must remove the
+   rules and empty the chain.
+11. **Task coverage**: `tests/callback_plugins/task_coverage.py` records every role task and handler that ran
    (not skipped), and `tests/coverage.py` fails the run if fewer than 80% of them did (every role but
    `updates`, which `tests/updates.sh` measures the same way). Ansible has no
    statement coverage tool; a task is its unit of execution, so this is the closest equivalent. The tasks
@@ -201,8 +210,10 @@ passwordless sudo and the time source settings of `tests/hardening-vars.yml` on,
 the time service's sources checked (`tests/verify-time-sync.yml`: systemd-timesyncd's merged settings, or the
 sources in chrony's configuration on the RHEL family), then all off again with the OS's time sources back; on
 Ubuntu and Debian, the time sources on, a rerun and off again once more with chrony installed in place of
-systemd-timesyncd; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`,
-counting the task files of the server's own family only (`tests/coverage.py --skip-files`).
+systemd-timesyncd; `firewall_docker_enabled` without Docker (no rules, and a message; on the RHEL family,
+refused before firewalld changes); and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and
+`fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
+`docker.yml` is left out on the RHEL family).
 
 ## Secure Boot and disk encryption in a VM
 
@@ -274,7 +285,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_os_catalog.py` | `tools/update_os_catalog.py`: the directory-listing and checksum-file parsers (vendor input), and the catalog file's reader and validation | only plain file names (not `.` or `..`, no path) and hex checksums of the right length come out of a listing or checksum file, exactly as they appear; any catalog text fails with the script's own error or reads as entries with only HTTPS URLs on the vendors' hosts, plain file names and sha256/sha512 checksums, which write back to the same text |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
-| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the time servers' assert and `chrony.sources.j2` and `timesyncd.conf.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; every accepted time server or pool is one chrony directive with only `iburst` added, and the timesyncd drop-in has only `[Time]` and one `NTP=` line with exactly the given names |
+| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the time servers' assert and `chrony.sources.j2` and `timesyncd.conf.j2`, the firewall's Docker port checks and `docker-user.rules.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; every accepted time server or pool is one chrony directive with only `iburst` added, and the timesyncd drop-in has only `[Time]` and one `NTP=` line with exactly the given names |
 | `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_update_plan.py` | `roles/updates/filter_plugins/usas_updates.py`: the wave planner and update groups, the storages read from a VM's config and the nearly full ones, the explanation of a failed API call; the role's wave and snapshot patterns | every server with a plain name is planned exactly once and nothing else is; no wave is empty, larger than `updates_serial`, or over the group or node limit; a server is in a later wave only when no earlier one had room for it; groups are plain lower-case names from `updates_group` and `usas-group-` tags only; the clean-up names only snapshots with both the `usas_upd_` name (a real time) and the description marker, never the operator's or `current`, each once, and exactly the ones older than the age limit or beyond the number to keep (worked out independently); storage names are plain; explanations are clean |

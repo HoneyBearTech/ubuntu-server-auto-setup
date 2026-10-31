@@ -164,7 +164,7 @@ docker run -d --name "$PVE2" --hostname pve-test-2 -p 127.0.0.1:2212:22 -v "$NFS
   usas-test-pve:latest >/dev/null
 docker run -d --name "$SRV" --hostname srv-01 --privileged --cgroupns=host \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
-  -p 127.0.0.1:2201:22 -p 127.0.0.1:2222:2222 usas-test-srv:latest >/dev/null
+  -p 127.0.0.1:2201:22 -p 127.0.0.1:2222:2222 -p 127.0.0.1:2280:8080 usas-test-srv:latest >/dev/null
 
 # What the installer would have left: the admin's key on the server. The "nodes" get root's key.
 for node in "$PVE" "$PVE2"; do
@@ -670,6 +670,54 @@ cool_down
 play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
 cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
+
+step "baseline: Docker-published ports: skipped without Docker, then blocked unless allowed"
+# The stand-in publishes the server's port 8080 (the runner's 127.0.0.1:2280) as Docker does, past UFW.
+published() { curl -fsS --max-time 3 -o /dev/null http://127.0.0.1:2280/; }
+DOCKER_ON=(--tags firewall "${P2222[@]}" -e firewall_docker_enabled=true)
+cool_down
+play_says "Docker isn't installed on srv-01: no DOCKER-USER rules were written" playbooks/baseline.yml \
+  --limit srv-01 "${DOCKER_ON[@]}"
+docker exec "$SRV" sh -c '! grep -q "USAS: Docker" /etc/ufw/after.rules' \
+  || { echo "ERROR: DOCKER-USER rules were written without Docker" >&2; exit 1; }
+docker cp tests/fixtures/docker-stand-in/docker.service "$SRV":/etc/systemd/system/docker.service
+docker cp tests/fixtures/docker-stand-in/usas-docker-stand-in "$SRV":/usr/local/sbin/usas-docker-stand-in
+docker exec "$SRV" sh -c 'systemctl daemon-reload && systemctl start docker'
+for _ in $(seq 20); do published && break; sleep 0.5; done
+published || { echo "ERROR: the Docker stand-in's published port doesn't answer" >&2; exit 1; }
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}"
+! published || { echo "ERROR: a published port answers with firewall_docker_enabled and no allowance" >&2; exit 1; }
+cool_down
+play --idempotent playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}"
+cool_down
+play tests/verify-docker-ports.yml -e ansible_port=2222
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e '{"firewall_docker_allow": [{"port": 8080}]}'
+published || { echo "ERROR: the published port allowed in firewall_docker_allow doesn't answer" >&2; exit 1; }
+cool_down
+play tests/verify-docker-ports.yml -e ansible_port=2222 -e '{"firewall_docker_allow": [{"port": 8080}]}'
+# The address the "container" saw the last request from: the runner, as the server sees it.
+client="$(docker exec "$SRV" sh -c "tail -n 1 /var/log/usas-ctr.log | cut -d' ' -f1")"
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e "{\"firewall_docker_sources\": [\"192.0.2.0/24\", \"fd00::/8\"]}"
+! published || { echo "ERROR: a published port answers a source firewall_docker_sources doesn't list" >&2; exit 1; }
+cool_down
+play playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" -e "{\"firewall_docker_sources\": [\"$client\"]}"
+published || { echo "ERROR: the published port doesn't answer $client, listed in firewall_docker_sources" >&2; exit 1; }
+cool_down
+play_fails 'firewall_docker_sources must be a list of IPv4 or IPv6 addresses' playbooks/baseline.yml --limit srv-01 \
+  "${DOCKER_ON[@]}" -e '{"firewall_docker_sources": ["0.0.0.0/0 -j ACCEPT"]}'
+play_fails 'Each firewall_docker_allow entry is' playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" \
+  -e '{"firewall_docker_allow": [{"port": "8080\n-A DOCKER-USER -j ACCEPT"}]}'
+play_fails 'Each firewall_docker_allow entry is' playbooks/baseline.yml --limit srv-01 "${DOCKER_ON[@]}" \
+  -e '{"firewall_docker_allow": [{"port": "8080", "proto": "tcp -j ACCEPT"}]}'
+cool_down
+play playbooks/baseline.yml --limit srv-01 --tags firewall "${P2222[@]}"
+published || { echo "ERROR: turning firewall_docker_enabled off left the published port blocked" >&2; exit 1; }
+cool_down
+play tests/verify-docker-ports.yml -e ansible_port=2222 -e expect_docker_rules=false
+docker exec "$SRV" sh -c 'systemctl stop docker && rm /etc/systemd/system/docker.service && systemctl daemon-reload'
 
 step "baseline: sudo-rs without the classic sudo is refused before anything changes"
 cool_down

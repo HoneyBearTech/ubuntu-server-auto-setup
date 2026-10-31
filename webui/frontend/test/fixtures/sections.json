@@ -511,6 +511,39 @@
     "choices": null
    },
    {
+    "name": "firewall_docker_enabled",
+    "label": "Apply the firewall to Docker-published ports",
+    "kind": "bool",
+    "help": "Docker opens a container's published ports to everyone, past the firewall. On, only the sources and ports below reach them. Ubuntu and Debian only; servers without Docker are skipped. Docker-published ports. Docker forwards a published port (docker run -p, ports: in Compose) to its container through its own DOCKER-USER chain, before UFW's rules, so the port is open to everyone whatever UFW says. On, /etc/ufw/after.rules and after6.rules fill that chain: new connections to a published port are dropped unless they come from firewall_docker_sources or match firewall_docker_allow. Replies, and connections the containers make themselves, aren't affected. Skipped, with a message, on a server without Docker (run the baseline again after installing it). Not available on the RHEL family (firewalld) yet: the run stops there instead.",
+    "required": false,
+    "advanced": false,
+    "variable": "firewall_docker_enabled",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "firewall_docker_sources",
+    "label": "Docker ports allowed from",
+    "kind": "list",
+    "help": "Addresses or networks (CIDR) that may reach every published port, one per line. Addresses or networks (IPv4 or IPv6, CIDR) that may reach every published port.",
+    "required": false,
+    "advanced": false,
+    "variable": "firewall_docker_sources",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "firewall_docker_allow",
+    "label": "Docker ports open",
+    "kind": "list",
+    "help": "One rule per line, with the port on the server (8080 in -p 8080:80): port or range, optional /tcp or /udp, optional \"from\" a network. Example: 8080/tcp or 9000:9010/udp from 10.0.0.0/24. Published ports open to everyone, or to one network: the port on the server (8080 in -p 8080:80), or a range, e.g.",
+    "required": false,
+    "advanced": false,
+    "variable": "firewall_docker_allow",
+    "default": null,
+    "choices": null
+   },
+   {
     "name": "fail2ban_ignoreip",
     "label": "Never ban",
     "kind": "list",
@@ -812,6 +845,9 @@
    "firewall_ssh_limit": true,
    "firewall_ssh_sources": "any",
    "firewall_allow": "",
+   "firewall_docker_enabled": false,
+   "firewall_docker_sources": "",
+   "firewall_docker_allow": "",
    "fail2ban_ignoreip": "10.0.0.0/24",
    "fail2ban_maxretry": "5",
    "fail2ban_findtime": "10m",

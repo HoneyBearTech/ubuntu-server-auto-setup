@@ -35,6 +35,10 @@ NOT_FORM_FORMATS = frozenset({
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
     "pve_iso_dirs_file", "common_time_sync_other_services", "common_timesyncd_dropin", "common_chrony_sources_file",
     "common_chrony_off_mark",
+    # The Docker port rules' parts, checked by the role's own assert (the form parses firewall_docker_allow like
+    # firewall_allow), and the files and services the role works with.
+    "firewall_docker_port_pattern", "firewall_docker_protos", "firewall_docker_allow_keys", "firewall_docker_services",
+    "firewall_docker_rules_files",
     # What a dropped API connection looks like in proxmox_kvm's errors, for retrying it: not a value anyone types.
     "pve_api_dropped_pattern",
     # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
@@ -278,6 +282,15 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           default=[],
           help='One rule per line: port or range, optional /tcp or /udp, optional "from" a network. '
                "Example: 443/tcp or 5432/tcp from 10.0.0.0/24."),
+        S("firewall_docker_enabled", "Apply the firewall to Docker-published ports", "bool", "firewall",
+          help="Docker opens a container's published ports to everyone, past the firewall. On, only the sources "
+               "and ports below reach them. Ubuntu and Debian only; servers without Docker are skipped."),
+        S("firewall_docker_sources", "Docker ports allowed from", "list", "firewall",
+          pattern_var="firewall_docker_source_pattern",
+          help="Addresses or networks (CIDR) that may reach every published port, one per line."),
+        S("firewall_docker_allow", "Docker ports open", "list", "firewall", ui_pattern="ufw_rule", default=[],
+          help='One rule per line, with the port on the server (8080 in -p 8080:80): port or range, optional /tcp '
+               'or /udp, optional "from" a network. Example: 8080/tcp or 9000:9010/udp from 10.0.0.0/24.'),
         S("fail2ban_ignoreip", "Never ban", "list", "fail2ban", pattern_var="fail2ban_ignoreip_pattern",
           help="Your own management networks, so a typo can't lock you out."),
         S("fail2ban_maxretry", "Failures before a ban", "int", "fail2ban", minimum=1, maximum=1000),
