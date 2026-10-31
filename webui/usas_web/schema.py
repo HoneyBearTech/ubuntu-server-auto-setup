@@ -25,7 +25,10 @@ ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh
 # are still supported and that this release can install, with one of these methods.
 CATALOG = Path("roles/os_catalog/vars/catalog.yml")
 OS_CATALOG = "os_catalog"
-INSTALL_METHODS = ("autoinstall",)
+INSTALL_METHODS = ("autoinstall", "cloud_image")
+# What the forms show for each install method (roles/os_catalog/vars/main.yml os_catalog_install_methods).
+INSTALL_METHOD_VAR = "os_catalog_install_methods"
+INSTALL_METHOD_LABELS = {"autoinstall": "Ubuntu installer (autoinstall)", "cloud_image": "Cloud image"}
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
 # doesn't edit, the rest are file paths and package or platform lists.
@@ -33,7 +36,8 @@ NOT_FORM_FORMATS = frozenset({
     "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
-    "pve_iso_dirs_file",
+    "pve_iso_dirs_file", "common_time_sync_other_services", "common_timesyncd_dropin", "common_chrony_sources_file",
+    "common_chrony_off_mark",
     # What a dropped API connection looks like in proxmox_kvm's errors, for retrying it: not a value anyone types.
     "pve_api_dropped_pattern",
     # The keys a network card may have: the Servers page writes only keys it parsed (parse_nic).
@@ -41,7 +45,7 @@ NOT_FORM_FORMATS = frozenset({
     "provision_installer_config_copies",
     # A server's OS: checked by the roles (roles/os_catalog/tasks/select.yml); an image outside the catalog is
     # set in the inventory, not in the UI.
-    "os_catalog_id_pattern", "os_catalog_install_methods", "os_catalog_families", "vm_os_image_url_pattern",
+    "os_catalog_id_pattern", "os_catalog_families", "vm_os_image_url_pattern",
     "vm_os_image_sha256_pattern",
     # firewalld's zone on the RHEL family: fixed, not a setting.
     "firewall_os_zone",
@@ -240,8 +244,14 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_password", "Admin password", "secret", required=True, vault="vault_admin_password", default="",
           help="For the console and sudo; SSH stays key-only. Hashed (SHA-512) before it reaches the installer."),
         S("timezone", "Time zone", "text", "common", ui_pattern=TIMEZONE),
+        S("time_sync_servers", "Time servers (NTP)", "list", "common", pattern_var="common_time_server_pattern"),
+        S("time_sync_pools", "Time server pools (NTP)", "list", "common", pattern_var="common_time_server_pattern",
+          advanced=True),
         S("vm_os", "Default OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="ubuntu-26.04",
           help="For servers that don't choose their own on the Servers page."),
+        S("vm_install_method", "Install method", "choice", "os_catalog", choices_var=INSTALL_METHOD_VAR,
+          help="For servers that don't choose their own on the Servers page. A cloud image is imported as the VM's "
+               "disk; it comes with the vendor's own disk layout."),
         S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern",
           help="Needed for servers with a static address (unless an extra network card has the default route)."),
         S("net_prefix", "Network prefix length", "int", "proxmox_vm", minimum=PREFIX_RANGE[0],
@@ -327,6 +337,8 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
       help="The Proxmox node of this server's VM; empty uses the node on the Proxmox page."),
     S("vm_os", "OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="",
       help="Empty uses the default OS on the Defaults page."),
+    S("vm_install_method", "Install method", "choice", choices_var=INSTALL_METHOD_VAR, default="",
+      help="Empty uses the install method on the Defaults page."),
     S("vm_cores", "Cores", "int", "proxmox_vm", minimum=1, maximum=512),
     S("vm_memory_mb", "Memory (MB)", "int", "proxmox_vm", minimum=512, maximum=16777216),
     S("vm_disk_gb", "Disk (GB)", "int", "proxmox_vm", minimum=8, maximum=131072),
@@ -344,9 +356,11 @@ class Schema:
         catalog = yaml.safe_load((project_dir / CATALOG).read_text(encoding="utf-8"))["os_catalog"]
         self.os_catalog = catalog
         self.os_choices = os_choices(catalog, datetime.date.today())
-        # Each release's installer ISO, for the Run page's plan.
-        self.installer_isos = {str(e["id"]): str(e["methods"]["autoinstall"]["file"])
-                               for e in catalog if "autoinstall" in e["methods"]}
+        # Each release's image file for each install method (the installer ISO, the cloud image), for the Run
+        # page's plan and the checks of the Servers page.
+        self.os_images = {str(e["id"]): {str(m): str(image["file"]) for m, image in e["methods"].items()}
+                          for e in catalog}
+        self.os_names = {str(e["id"]): f"{e['name']} {e['version']}" for e in catalog}
         self.sections = {name: [self._resolve(spec) for spec in specs] for name, specs in SECTIONS.items()}
         self.server_columns = [self._resolve(spec) for spec in SERVER_COLUMNS]
         self.by_name = {f.name: f for fields in self.sections.values() for f in fields}
@@ -364,8 +378,9 @@ class Schema:
         names = (spec.pattern_var,) if isinstance(spec.pattern_var, str) else (spec.pattern_var or ())
         patterns = tuple(self.roles.var(name) for name in names) or ((spec.ui_pattern,) if spec.ui_pattern else ())
         pattern = patterns[0] if patterns else None
-        labels = self.os_choices if spec.choices_var == OS_CATALOG else {}
-        if labels:
+        labels = (self.os_choices if spec.choices_var == OS_CATALOG
+                  else INSTALL_METHOD_LABELS if spec.choices_var == INSTALL_METHOD_VAR else {})
+        if spec.choices_var == OS_CATALOG:
             choices: tuple[str, ...] | None = tuple(labels)
         elif spec.choices_var:
             choices = tuple(str(c) for c in self.roles.var(spec.choices_var))

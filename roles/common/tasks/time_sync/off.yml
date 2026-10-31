@@ -1,0 +1,39 @@
+---
+# Removes only what the role added, so a server it never set time sources on stays as it is. The sourcedir line
+# added to the RHEL family's chrony.conf stays: it reads an empty folder.
+- name: Remove the time sources set for systemd-timesyncd
+  ansible.builtin.file:
+    path: "{{ common_timesyncd_dropin }}"
+    state: absent
+  notify: Restart systemd-timesyncd
+
+- name: Remove the time sources set for chrony
+  ansible.builtin.file:
+    path: "{{ common_os_chrony_sources_dir }}/{{ common_chrony_sources_file }}"
+    state: absent
+  notify: Restart chrony
+
+- name: Look for chrony's configuration
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ common_os_chrony_conf }}"
+    - "{{ common_os_chrony_sources_dir }}"
+  register: common_chrony_paths
+
+- name: Find the chrony sources the role turned off
+  ansible.builtin.find:
+    paths: "{{ ([common_os_chrony_conf | dirname] if common_chrony_paths.results[0].stat.exists else [])
+      + ([common_os_chrony_sources_dir] if common_chrony_paths.results[1].stat.exists else []) }}"
+    patterns: ["{{ common_os_chrony_conf | basename }}", "*.sources"]
+    contains: "^{{ common_chrony_off_mark }}"
+  register: common_chrony_turned_off
+  when: common_chrony_paths.results | selectattr('stat.exists') | list | length > 0
+
+- name: Turn the OS's own chrony sources back on
+  ansible.builtin.replace:
+    path: "{{ item }}"
+    regexp: "^{{ common_chrony_off_mark }}"
+    replace: ""
+  loop: "{{ common_chrony_turned_off.files | default([]) | map(attribute='path') | sort }}"
+  notify: Restart chrony

@@ -172,6 +172,27 @@ test.describe("keyboard", () => {
     await checkAxe(page, "/servers with a network card error");
   });
 
+  test("the servers table: a cloud image by keyboard, and an ISO storage without Import content is explained", async ({ page }) => {
+    await page.goto("/servers");
+    await settled(page);
+    const os = page.getByRole("combobox", { name: "OS, row 1" });
+    await tabTo(page, os);
+    await page.keyboard.type("Debian 13"); // type-ahead picks the option, on every platform
+    await expect(os).toHaveValue("debian-13");
+    const method = page.getByRole("combobox", { name: "Install method, row 1" });
+    await tabTo(page, method);
+    await page.keyboard.type("Cloud");
+    await expect(method).toHaveValue("cloud_image");
+    await tabTo(page, page.getByRole("button", { name: "Save" }));
+    await page.keyboard.press("Enter");
+    // The flow's ISO storage is local, which the mock cluster lists without Import content: nothing is saved.
+    const summary = page.locator("#error-summary");
+    await expect(summary).toBeFocused();
+    await expect(summary).toContainText("local doesn't allow Import content, which cloud images need");
+    await expect(method).toHaveAttribute("aria-invalid", "true");
+    await checkAxe(page, "/servers with an Import content error");
+  });
+
   test("disk encryption by keyboard: a passphrase the role would refuse is explained, and nothing is saved", async ({ page }) => {
     await page.goto("/defaults");
     await settled(page);

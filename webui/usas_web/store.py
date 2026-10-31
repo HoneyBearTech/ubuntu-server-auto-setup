@@ -30,7 +30,7 @@ OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "vm_disk_passphrase": "vault_disk_passphrase"}
 SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics")
 # Host variables that hold text the user typed (written as !unsafe).
-SERVER_TEXT_VARS = ("pve_node", "vm_os")
+SERVER_TEXT_VARS = ("pve_node", "vm_os", "vm_install_method")
 # Names an inventory written before 0.7.0 may hold, and the fields they now fill (the playbooks read both until 1.0).
 OLD_NAMES = {"ufw_ssh_limit": "firewall_ssh_limit", "ufw_ssh_sources": "firewall_ssh_sources"}
 # The servers' group, and its name before 0.7.0: an older inventory is read from it and written back as servers.
@@ -187,19 +187,43 @@ class Store:
         return data if isinstance(data, dict) else {}
 
     def cluster(self) -> dict[str, Any]:
-        """The cluster's name and nodes ({"name": ..., "nodes": {name: status}}) from the last connection test."""
+        """The cluster's name and nodes ({"name": ..., "nodes": {name: status}}), its ISO storages and those that
+        allow Import content ("import_storages", only if the last connection test could list them), from the last
+        connection test."""
         cluster = self._ui_settings().get("cluster") or {}
         nodes = cluster.get("nodes") if isinstance(cluster, dict) else None
         if not isinstance(nodes, dict):
             return {}
         storages = cluster.get("iso_storages")
-        return {"name": str(cluster.get("name") or ""), "nodes": {str(k): str(v) for k, v in nodes.items()},
-                "iso_storages": {str(k): str(v) for k, v in storages.items()} if isinstance(storages, dict) else {}}
+        result = {"name": str(cluster.get("name") or ""), "nodes": {str(k): str(v) for k, v in nodes.items()},
+                  "iso_storages": {str(k): str(v) for k, v in storages.items()} if isinstance(storages, dict) else {}}
+        imports = cluster.get("import_storages")
+        if isinstance(imports, list):
+            result["import_storages"] = [str(i) for i in imports]
+        return result
 
-    def save_cluster(self, name: str, nodes: dict[str, str], iso_storages: dict[str, str] | None = None) -> None:
+    def node_cpus(self) -> dict[str, dict[str, Any]]:
+        """Each node's CPU from the last login test on the SSH page: {node: {"model", "missing"}}, missing being the
+        x86-64-v3 flags it lacks."""
+        cpus = self._ui_settings().get("node_cpus")
+        return {str(node): {"model": str(cpu.get("model") or ""), "missing": [str(f) for f in cpu.get("missing") or []]}
+                for node, cpu in (cpus.items() if isinstance(cpus, dict) else ()) if isinstance(cpu, dict)}
+
+    def save_cluster(self, name: str, nodes: dict[str, str], iso_storages: dict[str, str] | None = None,
+                     import_storages: list[str] | None = None) -> None:
         data = self._ui_settings()
         data["cluster"] = {"name": name, "nodes": dict(sorted(nodes.items())),
                            "iso_storages": dict(sorted((iso_storages or {}).items()))}
+        if import_storages is not None:
+            data["cluster"]["import_storages"] = sorted(import_storages)
+        write_private(self.settings.settings_file, json.dumps(data, indent=2) + "\n")
+
+    def save_node_cpu(self, node: str, model: str, missing: list[str]) -> None:
+        """A node's CPU model and the x86-64-v3 flags it lacks, from the SSH page's login test."""
+        data = self._ui_settings()
+        cpus = data.get("node_cpus") if isinstance(data.get("node_cpus"), dict) else {}
+        cpus[node] = {"model": model, "missing": sorted(missing)}
+        data["node_cpus"] = dict(sorted(cpus.items()))
         write_private(self.settings.settings_file, json.dumps(data, indent=2) + "\n")
 
     # --- Inventory ---------------------------------------------------------------------------------------

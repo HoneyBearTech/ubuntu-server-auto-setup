@@ -33,6 +33,7 @@ KEY_COMMENT = "ubuntu-server-auto-setup-webui"
 SCAN_TYPES = "ed25519,ecdsa,rsa"
 TIMEOUT = 15
 PVE_CA_PATH = "/etc/pve/pve-root-ca.pem"
+CPUINFO_PATH = "/proc/cpuinfo"
 # A Linux user name, as roles/os_catalog/vars/main.yml's pve_ssh_user_pattern (the tests check they match).
 NODE_USER = r"^[a-z_][a-z0-9_-]{0,31}\Z"
 SYSTEM_CAS = (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt"))
@@ -279,6 +280,19 @@ class Keys:
         if result.returncode != 0:
             raise KeyProblem(f"SSH to {user}@{host} failed: {result.stderr.strip()[-300:] or result.returncode}")
         return f"Logged in to {user}@{host} with the UI's key."
+
+    def cpu(self, host: str, user: str) -> tuple[str, set[str]]:
+        """The node's CPU model and flags, from the first processor in /proc/cpuinfo (as
+        roles/proxmox_vm/tasks/cpu_check.yml reads them); ("", set()) if it can't be read."""
+        result = self._ssh(host, user, "grep", "-m", "2", "-E", "^(model name|flags)[[:space:]]*:", CPUINFO_PATH)
+        model, flags = "", set()
+        for line in result.stdout.splitlines() if result.returncode == 0 else []:
+            key, _, value = line.partition(":")
+            if key.strip() == "model name":
+                model = " ".join(value.split())[:100]
+            elif key.strip() == "flags":
+                flags = set(value.split())
+        return model, flags
 
     def fetch_ca(self, host: str, user: str) -> str:
         """The cluster CA certificate from the node, read over the verified SSH connection."""

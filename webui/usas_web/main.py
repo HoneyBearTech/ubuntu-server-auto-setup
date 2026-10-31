@@ -173,6 +173,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     os.umask(0o077)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     schema = Schema(settings.project_dir)
+    # What an x86-64-v3 release needs of the node's CPU (roles/proxmox_vm/tasks/cpu_check.yml).
+    x86_64_v3_ids = tuple(str(i) for i in schema.roles.var("os_catalog_x86_64_v3_ids"))
+    x86_64_v3_flags = tuple(str(f) for f in schema.roles.var("provision_x86_64_v3_flags"))
     store = Store(settings, schema)
     auth = Auth(settings)
     passkeys = Passkeys(settings)
@@ -773,7 +776,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except RemoteProblem as exc:
                 return reply(test_error=exc.message)
             # The node list (names and status only) is kept for the node dropdown; the form isn't saved.
-            store.save_cluster(result.cluster, result.status, result.iso_storages)
+            store.save_cluster(result.cluster, result.status, result.iso_storages, result.import_storages)
             message = f"Connected to Proxmox VE {result.version}"
             message += f", cluster {result.cluster}." if result.cluster else "."
             message += f" Nodes: {', '.join(result.nodes)}. The node name is now a list of them"
@@ -781,12 +784,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 message += (", and the ISO storage a list of the storages that allow ISO images "
                             f"({', '.join(result.iso_storages)})")
             message += "."
+            if result.import_storages is not None and result.iso_storages:
+                allowed = ", ".join(result.import_storages)
+                message += (f" Import content, which cloud images need, is allowed on {allowed}." if allowed
+                            else " None of them allows Import content, which cloud images need.")
             node = str(form.get("pve_node") or "")
             if node and node not in result.nodes:
                 message += " The node name you entered isn't one of them."
             message += " Nothing was saved yet."
             return reply(test_result={"version": result.version, "cluster": result.cluster, "nodes": result.nodes,
-                                      "iso_storages": list(result.iso_storages)},
+                                      "iso_storages": list(result.iso_storages),
+                                      "import_storages": result.import_storages},
                          message=message, cluster=store.cluster())
         errors = {}
         problem = node_problem(str(config.values.get("pve_node") or ""))
@@ -798,6 +806,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             errors["pve_iso_storage"] = (f"{iso_storage} isn't a storage that allows ISO images "
                                          f"({', '.join(storages)}). Allow ISO images on it in Proxmox "
                                          "(Datacenter → Storage → Content), then test the connection again.")
+        elif any(p.kind == "import" for s in config.servers for p in os_problems(config, s)):
+            errors["pve_iso_storage"] = import_problem(iso_storage)
         if errors:
             return reply(422, errors=errors)
         store.save(config)
@@ -837,6 +847,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                  ("github_user", "github_keys_url", "admin_extra_ssh_keys") if preview else ())
         if not preview:
             disk_encryption_problems(config, problems.errors)
+            default_os_problems(config, problems.errors)
         if problems:
             return reply(422, errors=problems.errors)
         if preview:
@@ -922,7 +933,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             problem = node_problem(str(row.get("pve_node") or ""))
             if problem and f"servers-{i}-pve_node" not in errors:
                 errors[f"servers-{i}-pve_node"] = problem
+            if f"servers-{i}-vm_os" not in errors and f"servers-{i}-vm_install_method" not in errors:
+                for p in os_problems(config, row):
+                    errors.setdefault(f"servers-{i}-{p.field}", p.message)
         return rows, errors
+
+    @dataclass(frozen=True)
+    class OsProblem:
+        field: str  # the server's field it is shown on: vm_os or vm_install_method
+        kind: str  # method, encryption, import or cpu
+        message: str
+
+    def server_os(config: Config, server: dict[str, Any]) -> tuple[str, str]:
+        """A server's OS and install method: its own, or the Defaults page's."""
+        return (str(server.get("vm_os") or setting(config, "vm_os")),
+                str(server.get("vm_install_method") or setting(config, "vm_install_method")))
+
+    def import_problem(storage: str) -> str:
+        return (f"{storage} doesn't allow Import content, which cloud images need. Allow it in Proxmox (Datacenter → "
+                f"Storage → {storage} → Edit → Content: Import), then test the connection again.")
+
+    def os_problems(config: Config, server: dict[str, Any]) -> list[OsProblem]:
+        """What roles/os_catalog and roles/proxmox_vm would refuse about a server's OS before creating its VM: an
+        install method the release doesn't have, disk encryption with a cloud image, an ISO storage without Import
+        content (if the last connection test listed it), and an x86-64-v3 release on a node whose CPU lacks it (if
+        the SSH page's login test read the node's CPU)."""
+        os_id, method = server_os(config, server)
+        name = schema.os_names.get(os_id, os_id)
+        found = []
+        if method not in schema.os_images.get(os_id, {}):
+            found.append(OsProblem("vm_install_method", "method", (
+                f"{name} can't be installed with the Ubuntu installer, which takes only Ubuntu: choose Cloud image."
+                if method == "autoinstall" else f"The OS catalog has no {method} for {name}.")))
+        elif method != "autoinstall" and setting(config, "vm_disk_encryption"):
+            found.append(OsProblem("vm_install_method", "encryption", (
+                "Disk encryption (Defaults page) needs the Ubuntu installer: a cloud image comes unencrypted.")))
+        storage = str(setting(config, "pve_iso_storage"))
+        imports = store.cluster().get("import_storages")
+        if method == "cloud_image" and imports is not None and storage not in imports:
+            found.append(OsProblem("vm_install_method", "import", import_problem(storage)))
+        node = config.server_node(server)
+        cpu = store.node_cpus().get(node)
+        if os_id in x86_64_v3_ids and cpu and cpu["missing"]:
+            model = f" ({cpu['model']})" if cpu["model"] else ""
+            found.append(OsProblem("vm_os", "cpu", (
+                f"{name} needs an x86-64-v3 CPU, and node {node}'s{model} lacks {', '.join(cpu['missing'])}. Choose "
+                "another node, or AlmaLinux 10, which runs on older CPUs.")))
+        return found
+
+    def default_os_problems(config: Config, errors: dict[str, str]) -> None:
+        """os_problems of the servers that use the Defaults page's OS or install method, on those fields."""
+        for srv in config.servers:
+            for p in os_problems(config, srv):
+                if p.kind == "encryption":
+                    errors.setdefault("vm_disk_encryption", f"{srv['name']}: {p.message}")
+                elif not srv.get(p.field):
+                    errors.setdefault(p.field, f"{srv['name']}: {p.message}")
 
     def network_problem(row: dict[str, Any], config: Config, errors: dict[str, str]) -> None:
         """The checks of roles/proxmox_vm/tasks/main.yml that involve more than one of a row's fields."""
@@ -963,7 +1029,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config = store.load()
         return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config),
                      nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node,
-                     default_os=str(setting(config, "vm_os")))
+                     default_os=str(setting(config, "vm_os")),
+                     default_install_method=str(setting(config, "vm_install_method")))
 
     @app.post("/api/servers")
     async def servers(request: Request):
@@ -987,7 +1054,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"name": name, "address": address, "default": name == config.default_node,
                 "in_use": name in config.nodes_in_use(),
                 "servers": sorted(s["name"] for s in config.servers if config.server_node(s) == name),
-                "trusted": [hostkey(k) for k in (keys.trusted(address) if address else [])]}
+                "trusted": [hostkey(k) for k in (keys.trusted(address) if address else [])],
+                "cpu": store.node_cpus().get(name)}
 
     @app.get("/api/ssh")
     async def ssh_data(request: Request):
@@ -1058,7 +1126,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 keys.forget(address)
                 return reply(message=f"Forgot {address}'s host keys (node {node}).", node=node)
             if action == "test":
-                return reply(message=keys.test_login(address, store.node_user(config)), node=node)
+                message = keys.test_login(address, store.node_user(config))
+                try:
+                    model, flags = keys.cpu(address, store.node_user(config))
+                except KeyProblem:
+                    model, flags = "", set()  # the login worked; the CPU is checked again when a VM is created
+                if flags:
+                    missing = sorted(set(x86_64_v3_flags) - flags)
+                    store.save_node_cpu(node, model, missing)
+                    message += f" Its CPU{f' ({model})' if model else ''} " + (
+                        f"lacks {', '.join(missing)}: servers on {node} can't install "
+                        f"{' or '.join(schema.os_names.get(i, i) for i in x86_64_v3_ids)}, which need x86-64-v3."
+                        if missing else "is x86-64-v3: it runs every release in the OS catalog.")
+                return reply(message=message, node=node)
         except KeyProblem as exc:
             area = {"generate": "key", "upload": "key", "address": "address"}.get(action, "hostkey")
             return reply(422, area=area, node=node, error=exc.message)
@@ -1368,7 +1448,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                      names=sorted(store.host_names()), steps=readiness(config),
                      current_run=run_json(runner.current()),
                      iso_plan=nodes.iso_plan(plan, config, str(setting(config, "pve_iso_storage")), store.cluster(),
-                                             schema.installer_isos, str(setting(config, "vm_os"))))
+                                             schema.os_images, lambda s: server_os(config, s)))
 
     @app.post("/api/run")
     async def run(request: Request):

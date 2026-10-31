@@ -25,6 +25,7 @@ export interface Cluster {
   name?: string;
   nodes?: Record<string, string>;
   iso_storages?: Record<string, string>;
+  import_storages?: string[]; // those that allow Import content too (cloud images); absent if not listed
 }
 
 export interface Certificate {
@@ -133,7 +134,8 @@ export interface Playbook {
 export interface IsoPair {
   node: string;
   storage: string;
-  iso: string; // the installer ISO's file name
+  iso: string; // the installer ISO's or the cloud image's file name
+  image: boolean; // a cloud image, downloaded into the storage's Import folder
   shared: boolean;
   built_by: string; // the node that builds it
   servers: string[];
@@ -182,6 +184,7 @@ export interface SshNode {
   in_use: boolean; // the default node, or a server's
   servers: string[];
   trusted: HostKey[];
+  cpu: { model: string; missing: string[] } | null; // from the last login test; missing: the x86-64-v3 flags it lacks
 }
 
 export interface SshData {
@@ -199,6 +202,7 @@ export interface ServersData {
   nodes: string[]; // the cluster's nodes, from the last connection test
   default_node: string;
   default_os: string; // the Defaults page's OS, an OS catalog id
+  default_install_method: string; // the Defaults page's install method
 }
 
 export interface Notice {

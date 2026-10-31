@@ -1,0 +1,76 @@
+---
+# Checks the time sources that tests/hardening-vars.yml sets (time_sync_servers and time_sync_pools) in the time
+# service the server runs: chrony (Ubuntu 26.04, the RHEL family) or systemd-timesyncd (the other releases). With
+# -e expect_time_sync=false, checks that the OS's own sources are back. Neither service runs in a container (their
+# units skip containers), so this reads what each would use: the sources in chrony's configuration and its
+# sources folders, and systemd's merged timesyncd.conf. tests/run.sh and tests/baseline.sh run it.
+- name: Verify the time sources
+  hosts: srv-01
+  become: true
+  gather_facts: false
+  vars_files:
+    - hardening-vars.yml
+  vars:
+    expect_time_sync: true
+    verify_expected_sources: "{{ (time_sync_servers | map('regex_replace', '^', 'source ') | list
+      + time_sync_pools | map('regex_replace', '^', 'pool ') | list) | sort }}"
+  pre_tasks:
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
+  tasks:
+    - name: Look for chrony
+      ansible.builtin.stat:
+        path: /usr/sbin/chronyd
+      register: verify_chronyd
+
+    # -p prints the configuration with its include and confdir files read in, but not the sourcedir folders' files,
+    # which chronyd loads once it runs; the next task reads those (*.sources). A source is a "server X ...",
+    # "pool X ..." or "peer X ..." line in either.
+    - name: Print chrony's configuration
+      ansible.builtin.command:
+        argv: [chronyd, -p]
+      register: verify_chrony
+      changed_when: false
+      when: verify_chronyd.stat.exists
+
+    - name: Read the files of chrony's sources folders
+      ansible.builtin.command:
+        argv: "{{ ['sh', '-c', verify_script, 'sh'] + verify_chrony.stdout_lines | select('match', 'sourcedir\\s')
+          | map('split') | map('last') | list }}"
+      vars:
+        verify_script: 'for d in "$@"; do for f in "$d"/*.sources; do if [ -f "$f" ]; then cat "$f"; fi; done; done'
+      register: verify_chrony_dirs
+      changed_when: false
+      when: verify_chronyd.stat.exists
+
+    - name: Check chrony's sources
+      ansible.builtin.assert:
+        that: >-
+          (verify_sources == verify_expected_sources) if expect_time_sync | bool
+          else (verify_sources | length > 0
+                and verify_sources | select('in', verify_expected_sources) | list | length == 0)
+        fail_msg: "{{ verify_sources }}"
+      vars:
+        verify_sources: "{{ (verify_chrony.stdout_lines + verify_chrony_dirs.stdout_lines)
+          | select('match', '\\s*(server|pool|peer)\\s') | map('trim')
+          | map('regex_replace', '^(server|peer)\\s+(\\S+).*$', 'source \\2')
+          | map('regex_replace', '^pool\\s+(\\S+).*$', 'pool \\1') | sort }}"
+      when: verify_chronyd.stat.exists
+
+    - name: Read systemd-timesyncd's settings
+      ansible.builtin.command:
+        argv: [systemd-analyze, cat-config, systemd/timesyncd.conf]
+      register: verify_timesyncd
+      changed_when: false
+      when: not verify_chronyd.stat.exists
+
+    # The last NTP= line wins; the package's own file has it commented out.
+    - name: Check systemd-timesyncd's servers
+      ansible.builtin.assert:
+        that: >-
+          (verify_ntp | last | default('') == 'NTP=' ~ (time_sync_servers + time_sync_pools) | join(' '))
+          if expect_time_sync | bool else verify_ntp | length == 0
+        fail_msg: "{{ verify_ntp }}"
+      vars:
+        verify_ntp: "{{ verify_timesyncd.stdout_lines | select('match', 'NTP=') | list }}"
+      when: not verify_chronyd.stat.exists

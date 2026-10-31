@@ -14,3 +14,8 @@ common_os_hosts_loopback: 127.0.1.1
 common_os_msmtp_package: msmtp-mta
 common_os_other_mtas: [postfix, exim4-daemon-light, exim4-daemon-heavy, sendmail-bin, opensmtpd, nullmailer, dma, ssmtp,
                        courier-mta]
+# Time sync: the service a server without chrony gets, and chrony's files and service where it's installed.
+common_os_time_sync_package: systemd-timesyncd
+common_os_chrony_conf: /etc/chrony/chrony.conf
+common_os_chrony_sources_dir: /etc/chrony/sources.d
+common_os_chrony_service: chrony

@@ -1,0 +1,3 @@
+---
+# Ubuntu 26.04: Ubuntu Server installs chrony instead of systemd-timesyncd (since 25.10).
+common_os_time_sync_package: chrony

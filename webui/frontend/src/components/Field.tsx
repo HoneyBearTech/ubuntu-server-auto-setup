@@ -159,6 +159,7 @@ export function IsoStorageField({ field, values, error, cluster }: {
   const id = fieldId(field.name);
   const value = String(values[field.name] ?? "");
   const storages = cluster.iso_storages ?? {};
+  const imports = cluster.import_storages;
   return (
     <div className="field">
       <label htmlFor={id}>{field.label}</label>
@@ -167,12 +168,15 @@ export function IsoStorageField({ field, values, error, cluster }: {
                 aria-invalid={error ? true : undefined}>
           {value && !(value in storages) ? <option value={value}>{value} (doesn't allow ISO images)</option> : null}
           {Object.keys(storages).sort().map((name) => (
-            <option key={name} value={name}>{name} ({storages[name]})</option>
+            <option key={name} value={name}>
+              {name} ({storages[name]}{imports?.includes(name) ? ", Import" : ""})
+            </option>
           ))}
         </select>
       </div>
       <Help field={field} id={id}>
-        The storages that allow ISO images, from the last connection test. {field.help}{" "}
+        The storages that allow ISO images, from the last connection test{imports
+          ? "; Import marks those that allow Import content too, which cloud images need" : ""}. {field.help}{" "}
       </Help>
       <FieldError id={id} error={error} />
     </div>
