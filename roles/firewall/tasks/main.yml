@@ -47,3 +47,6 @@
     - name: Enable UFW
       community.general.ufw:
         state: enabled
+
+- name: Filter Docker-published ports
+  ansible.builtin.import_tasks: docker.yml

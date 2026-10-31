@@ -1,0 +1,16 @@
+---
+# What firewall_docker_sources entries, and the port, proto and from of firewall_docker_allow entries, may be: IPv4
+# or IPv6 addresses and networks, port numbers and ranges, nothing that could add an option or a line to UFW's
+# after.rules. tests/fuzz/ reads them from here.
+firewall_docker_source_pattern: >-
+  ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}(/([0-9]|[12][0-9]|3[0-2]))?|[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}(/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))?)\Z
+firewall_docker_port_pattern: '^[0-9]{1,5}(:[0-9]{1,5})?\Z'
+firewall_docker_protos: [tcp, udp, any]
+# The keys a firewall_docker_allow entry may have.
+firewall_docker_allow_keys: [port, proto, from]
+# Docker's service, from Docker's packages or the snap: without one, there's no DOCKER-USER chain to fill.
+firewall_docker_services: [docker.service, snap.docker.dockerd.service]
+# UFW's files for the rules, and the iptables-restore that checks each one before it's saved.
+firewall_docker_rules_files:
+  - { path: /etc/ufw/after.rules, family: 4, restore: iptables-restore }
+  - { path: /etc/ufw/after6.rules, family: 6, restore: ip6tables-restore }

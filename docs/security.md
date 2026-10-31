@@ -123,6 +123,12 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   response from GitHub never empties the file: the run stops instead.
 - UFW denies all incoming connections except SSH (rate-limited: more than 6 connections in 30 seconds from
   one address are refused) and the rules you list in `firewall_allow`.
+- Ports Docker publishes bypass those rules: Docker forwards them to the container before UFW sees them. With
+  `firewall_docker_enabled` (off by default, Ubuntu and Debian only), new connections to a published port are
+  dropped in Docker's `DOCKER-USER` chain unless they come from `firewall_docker_sources` or match
+  `firewall_docker_allow`; the rules live in UFW's `after.rules` and `after6.rules`, so every UFW reload and
+  boot restores them. Off by default because turning it on closes every published port that isn't listed,
+  which stops a running service until you allow it. Without Docker the run writes nothing and says so.
 - Fail2Ban bans addresses that fail SSH authentication 5 times in 10 minutes for an hour, longer for
   repeat offenders (up to a week), except those in `fail2ban_ignoreip`.
 - Security updates are installed automatically every day by unattended-upgrades: on Ubuntu from the security
@@ -475,6 +481,11 @@ pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vm
 - **Your inventory.** The project does what the inventory says. A wrong `pve_vmid`, `ssh_port`,
   `firewall_allow`, `firewall_ssh_sources` or `fail2ban_ignoreip` can create the wrong VM, open a port you didn't
   mean to, or lock you out.
+- **Docker-published ports without `firewall_docker_enabled`.** Docker opens them to everyone, whatever UFW
+  says. With the option on, only published ports (Docker's NAT) are filtered: a container reached directly on
+  its own address (a routed network, `macvlan`) isn't, and Docker's experimental nftables backend has no
+  `DOCKER-USER` chain. On the RHEL family the option isn't available yet; publish ports only on the addresses
+  that should reach them (`-p 127.0.0.1:8080:80`).
 - **The servers' applications and wider hardening.** The baseline covers access (SSH, firewall, brute
   force) and updates. It isn't a CIS or STIG benchmark, and it doesn't configure anything your applications
   need. Disk encryption, auditd, AppArmor reporting and kernel parameters are opt-in (above).

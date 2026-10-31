@@ -1,0 +1,52 @@
+---
+# Checks the firewall role's DOCKER-USER rules (firewall_docker_enabled) on the test server, with the Docker
+# stand-in running. run.sh passes the same firewall_docker_* variables as the baseline run; expect_docker_rules
+# false checks they're gone. Whether a published port answers is checked from outside, in run.sh.
+- name: Verify the rules for Docker-published ports
+  hosts: srv-01
+  become: true
+  gather_facts: false
+  vars:
+    verify_marker: "USAS: Docker-published ports (firewall role, firewall_docker_enabled)"
+    verify_expect: "{{ expect_docker_rules | default(true) | bool }}"
+  pre_tasks:
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
+  tasks:
+    - name: Read UFW's after.rules and after6.rules
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop: [/etc/ufw/after.rules, /etc/ufw/after6.rules]
+      register: verify_after_rules
+
+    - name: Read the live DOCKER-USER chains
+      ansible.builtin.command:
+        argv: ["{{ item }}", -w, -S, DOCKER-USER]
+      loop: [iptables, ip6tables]
+      register: verify_docker_user
+      changed_when: false
+      failed_when: false
+
+    - name: Check each file has the rules once, and the chain has exactly the file's rules
+      ansible.builtin.assert:
+        that:
+          - verify_text.count('# BEGIN ' ~ verify_marker) == (1 if verify_expect else 0)
+          - verify_text.count('# END ' ~ verify_marker) == (1 if verify_expect else 0)
+          - not verify_expect or verify_live | length == verify_block
+          - verify_expect or verify_live | select('search', '-j (DROP|LOG)') | list | length == 0
+        fail_msg: "{{ item.0.item }}: file {{ verify_block }}, chain {{ verify_live }}"
+        quiet: true
+      loop: "{{ verify_after_rules.results | zip(verify_docker_user.results) }}"
+      loop_control:
+        label: "{{ item.0.item }}"
+      vars:
+        verify_text: "{{ item.0.content | b64decode }}"
+        verify_block: "{{ verify_text.split('# BEGIN ' ~ verify_marker)[-1].split('# END ')[0].splitlines()
+          | select('match', '^-A DOCKER-USER ') | list | length }}"
+        verify_live: "{{ item.1.stdout_lines | default([]) | select('match', '^-A DOCKER-USER ') | list }}"
+
+    - name: Check the allowed port is in the live chain
+      ansible.builtin.command:
+        argv: [iptables, -w, -C, DOCKER-USER, -p, tcp, -m, conntrack, --ctorigdstport, "8080", -j, RETURN]
+      changed_when: false
+      when: verify_expect and firewall_docker_allow | default([]) | length > 0

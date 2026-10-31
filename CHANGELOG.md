@@ -30,6 +30,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Docker-published ports can obey the firewall** (`firewall_docker_enabled`, off by default; Ubuntu and
+  Debian): rules in Docker's `DOCKER-USER` chain, kept in UFW's `after.rules` and `after6.rules`, drop new
+  connections to published container ports unless their source is in `firewall_docker_sources` or the port is
+  in `firewall_docker_allow`. Skipped with a message on servers without Docker; refused on the RHEL family. On
+  the web UI's Hardening page too. A firewall change: trust boundary B24 in the
+  [assurance case](docs/assurance-case.md) ([interfaces](docs/interfaces.md), [security](docs/security.md)).
 - **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
   copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and
   `make updates` add the cluster's VMs, through a new inventory plugin (`usas_pve`) that reads the inventory's
