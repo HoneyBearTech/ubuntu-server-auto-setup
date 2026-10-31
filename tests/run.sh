@@ -558,7 +558,7 @@ play_fails "couldn't use sudo afterwards" playbooks/baseline.yml --limit srv-01 
 cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 
-step "baseline: optional hardening and notifications, all on, then a rerun that changes nothing"
+step "baseline: optional hardening, notifications and time sources, all on, then a rerun that changes nothing"
 P2222=(-e ssh_port=2222 -e ansible_port=2222 -e admin_sudo_nopasswd=true)
 HARDENING=(-e @tests/hardening-vars.yml)
 if [ "${CI:-}" != "true" ]; then
@@ -577,9 +577,11 @@ play --idempotent playbooks/baseline.yml --limit srv-01 "${P2222[@]}" "${HARDENI
 cool_down
 play tests/verify-hardening.yml -e ansible_port=2222 "${HARDENING[@]}"
 cool_down
+play tests/verify-time-sync.yml -e ansible_port=2222
+cool_down
 play --idempotent playbooks/baseline.yml --limit srv-01 --check --diff "${P2222[@]}" "${HARDENING[@]}"
 
-step "baseline: hardening and notification values that could inject settings are refused"
+step "baseline: hardening, notification and time source values that could inject settings are refused"
 cool_down
 play_fails 'fail2ban_webhook_url must be an http(s) URL' playbooks/baseline.yml --limit srv-01 --tags fail2ban \
   "${P2222[@]}" -e '{"fail2ban_webhook_url": "https://ntfy.example.com/x\nenabled = false"}'
@@ -600,6 +602,11 @@ play_fails 'hardening_sysctl and hardening_sysctl_extra keys must be' playbooks/
   -e '{"hardening_sysctl_extra": {"kernel.sysrq": "0\nkernel.core_pattern = |/tmp/x"}}'
 play_fails 'hardening_sysctl and hardening_sysctl_extra keys must be' playbooks/baseline.yml --limit srv-01 \
   --tags hardening "${P2222[@]}" -e hardening_sysctl_enabled=true -e '{"hardening_sysctl_extra": {"kernel.sysrq = 1": 0}}'
+cool_down
+play_fails 'time_sync_servers and time_sync_pools must be lists of host names' playbooks/baseline.yml --limit srv-01 \
+  --tags common "${P2222[@]}" -e '{"time_sync_servers": ["ntp.example.com iburst\nserver 203.0.113.9"]}'
+play_fails 'time_sync_servers and time_sync_pools must be lists of host names' playbooks/baseline.yml --limit srv-01 \
+  --tags common "${P2222[@]}" -e '{"time_sync_pools": "pool.example.net"}'
 docker exec "$SRV" sh -c '! test -e /pwned' || { echo "ERROR: an injected command ran" >&2; exit 1; }
 
 step "baseline: turning them off again removes their files"
@@ -607,8 +614,11 @@ cool_down
 play playbooks/baseline.yml --limit srv-01 "${P2222[@]}"
 docker exec "$SRV" sh -c '! test -e /etc/sysctl.d/90-usas-hardening.conf && ! test -e /etc/audit/rules.d/60-usas-hardening.rules \
   && ! test -e /etc/fail2ban/action.d/usas-webhook.conf && ! test -e /etc/msmtp-password \
-  && ! grep -q Mail /etc/apt/apt.conf.d/52unattended-upgrades-local && ! grep -Eq "^(action|destemail) =" /etc/fail2ban/jail.local' \
+  && ! grep -q Mail /etc/apt/apt.conf.d/52unattended-upgrades-local && ! grep -Eq "^(action|destemail) =" /etc/fail2ban/jail.local \
+  && ! test -e /etc/chrony/sources.d/usas.sources && ! grep -rq "^#usas-time-sync# " /etc/chrony' \
   || { echo "ERROR: turning the options off left their files behind" >&2; exit 1; }
+cool_down
+play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
 cool_down
 play tests/verify-baseline.yml -e expect_port=2222 -e ansible_port=2222 -e expect_nopasswd=true
 

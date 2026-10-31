@@ -127,7 +127,7 @@ play tests/verify-baseline.yml -e expect_port=2222
 cool_down
 play --idempotent playbooks/baseline.yml --limit srv-01 -e ssh_port=2222 -e ansible_port=2222
 
-step "notifications, a mail relay and passwordless sudo on, a rerun that changes nothing, then off again"
+step "notifications, a mail relay, time sources and passwordless sudo on, a rerun that changes nothing, then off again"
 # tests/hardening-vars.yml without the kernel, audit and AppArmor parts (tests/run.sh covers those on Ubuntu).
 python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1]))
 yaml.safe_dump({k: v for k, v in d.items() if not k.startswith("hardening_")}, open(sys.argv[2], "w"))' \
@@ -140,9 +140,13 @@ play --idempotent playbooks/baseline.yml --limit srv-01 "${P2222[@]}" -e "@$TEST
 docker exec "$SRV" sh -c 'test -s /etc/msmtprc && test -e /etc/sudoers.d/90-ansible-sysadmin' \
   || { echo "ERROR: the mail relay or passwordless sudo wasn't set up" >&2; exit 1; }
 cool_down
+play tests/verify-time-sync.yml -e ansible_port=2222
+cool_down
 play playbooks/baseline.yml --limit srv-01 "${P2222[@]}"
 docker exec "$SRV" sh -c '! test -e /etc/sudoers.d/90-ansible-sysadmin' \
   || { echo "ERROR: passwordless sudo wasn't removed again" >&2; exit 1; }
+cool_down
+play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
 
 step "Task coverage of the baseline roles on $OS"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles common,firewall,ssh_hardening,fail2ban

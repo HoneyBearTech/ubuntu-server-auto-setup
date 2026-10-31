@@ -261,6 +261,7 @@ in more detail, and every role lists all of its variables, with defaults and com
 | `admin_password` | `""` | Set it to `"{{ vault_admin_password }}"`. Hashed (SHA-512) before it reaches the installer; the baseline only uses it when it has to create the user. |
 | `admin_sudo_nopasswd` | `false` | Passwordless `sudo` for the admin user. The default removes the installer's passwordless `sudo` on the first baseline run; later runs use `ansible_become_password` (set to the admin password in the example inventory). |
 | `timezone` | `Etc/UTC` | Any [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name. |
+| `time_sync_servers`, `time_sync_pools` | `[]`, `[]` | NTP servers and pools in place of the OS's own (chrony or systemd-timesyncd); empty leaves the OS's time sync alone. |
 | `pve_api_host`, `pve_api_port` | `""`, `8006` | The Proxmox API. |
 | `pve_api_user` | `ansible@pve` | The user that owns the API token. |
 | `pve_api_token_id`, `pve_api_token_secret` | `""` | Set them to the Vault values. |

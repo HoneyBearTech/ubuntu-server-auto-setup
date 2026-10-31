@@ -1,0 +1,7 @@
+---
+# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux). Time sync: chrony, whose main file reads no sources
+# folder by default (the role adds the sourcedir line).
+common_os_time_sync_package: chrony
+common_os_chrony_conf: /etc/chrony.conf
+common_os_chrony_sources_dir: /etc/chrony/sources.d
+common_os_chrony_service: chronyd

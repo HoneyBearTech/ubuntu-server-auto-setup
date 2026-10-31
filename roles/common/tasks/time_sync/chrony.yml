@@ -1,0 +1,49 @@
+---
+# The role's sources go to a file of their own in chrony's sources folder; the OS's own pool, server and peer
+# lines (in the main file and the folder's other files) are turned off with a mark, so that they can be brought
+# back (time_sync/off.yml).
+- name: Make chrony's sources folder
+  ansible.builtin.file:
+    path: "{{ common_os_chrony_sources_dir }}"
+    state: directory
+    mode: "0755"
+  register: common_chrony_dir
+
+# In check mode a chrony this run would install has no files yet.
+- name: Set the time sources for chrony
+  when: not (ansible_check_mode and (common_time_sync_package is changed or common_chrony_dir is changed))
+  block:
+    # Debian and Ubuntu read the folder already; the RHEL family's chrony.conf doesn't.
+    - name: Read the sources folder in chrony's configuration
+      ansible.builtin.lineinfile:
+        path: "{{ common_os_chrony_conf }}"
+        line: sourcedir {{ common_os_chrony_sources_dir }}
+      notify: Restart chrony
+
+    - name: Write the time sources for chrony
+      ansible.builtin.template:
+        src: chrony.sources.j2
+        dest: "{{ common_os_chrony_sources_dir }}/{{ common_chrony_sources_file }}"
+        mode: "0644"
+      notify: Restart chrony
+
+    - name: Find the OS's own chrony sources
+      ansible.builtin.find:
+        paths: ["{{ common_os_chrony_sources_dir }}"]
+        patterns: ["*.sources"]
+        excludes: ["{{ common_chrony_sources_file }}"]
+      register: common_chrony_os_sources
+
+    - name: Turn off the OS's own chrony sources
+      ansible.builtin.replace:
+        path: "{{ item }}"
+        regexp: '^(?=(?:pool|server|peer)\s)'
+        replace: "{{ common_chrony_off_mark }}"
+      loop: "{{ [common_os_chrony_conf] + common_chrony_os_sources.files | map(attribute='path') | sort }}"
+      notify: Restart chrony
+
+# Left behind when chrony replaced systemd-timesyncd after the role had set its sources.
+- name: Remove the sources set for systemd-timesyncd
+  ansible.builtin.file:
+    path: "{{ common_timesyncd_dropin }}"
+    state: absent

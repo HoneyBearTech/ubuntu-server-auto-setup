@@ -161,7 +161,8 @@ The overview lists the steps and whether each is done.
    server uses any more keeps its address until you **remove** it.
 3. **Defaults**: the GitHub user whose keys are installed (**Preview the keys** shows what GitHub returns,
    filtered exactly as the roles filter it), extra public keys, whether to authorize the UI's own key on the
-   servers (on by default: the baseline logs in with it), the admin user and password, the time zone, the
+   servers (on by default: the baseline logs in with it), the admin user and password, the time zone,
+   the **time servers** (NTP; empty leaves the OS's own, with the pools under More settings), the
    **Default OS** (`vm_os`: a dropdown of the releases the project's OS catalog supports, such as
    `Ubuntu 24.04 (noble) · until 2029-05-31`; a release drops out of it when its support ends), the
    gateway (needed for servers with a static address), prefix length, DNS servers and search domains, the

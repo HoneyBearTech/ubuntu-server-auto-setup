@@ -288,6 +288,16 @@ removes its files; settings already loaded in the kernel stay until the next reb
   `mail_relay_from`; it refuses to replace an existing mail server (Postfix, Exim and the like). Off by
   default because they need an outside service and send information about the server (its name, the
   addresses it bans, its package updates) to it.
+- **Time sources** (`time_sync_servers`, `time_sync_pools`): the server sets its clock from your NTP
+  servers instead of the OS's (Ubuntu's, Debian's or the RHEL vendor's pools), through the time service it
+  already runs (chrony, or systemd-timesyncd). Off by default: the OS's own time sync is left as it is, and
+  emptying both lists again brings it back. When on, the servers are a new outbound dependency (UDP port 123,
+  which UFW's default outgoing policy allows), and whoever runs them, or can answer in their place on the
+  network path, sets the clocks that TLS certificates, Kerberos, TOTP and log timestamps depend on: plain NTP
+  isn't authenticated. On Ubuntu 26.04 this replaces Ubuntu's NTS-authenticated sources with plain NTP, so
+  prefer servers on a network you control. Names and addresses are checked against a `\Z`-anchored allowlist
+  pattern (no spaces or line breaks), so a value can't add a chrony directive or option, or a timesyncd
+  setting.
 - **Secrets for notifications**: the relay password (`vault_mail_relay_password`) and the webhook URL, which
   usually holds a token (`vault_fail2ban_webhook_url`), belong in the Vault like the other secrets. On the
   server they are in root-owned `0600` files (`/etc/msmtp-password`, read by msmtp's `passwordeval`, and

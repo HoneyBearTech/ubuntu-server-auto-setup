@@ -1,0 +1,18 @@
+---
+# A drop-in next to the package's timesyncd.conf: NTP= in it replaces the OS's servers (FallbackNTP is only used
+# when no server is set).
+- name: Make the systemd-timesyncd drop-in folder
+  ansible.builtin.file:
+    path: "{{ common_timesyncd_dropin | dirname }}"
+    state: directory
+    mode: "0755"
+  register: common_timesyncd_dir
+
+# In check mode a folder this run would create doesn't exist yet, so nothing can be written into it.
+- name: Write the time sources for systemd-timesyncd
+  ansible.builtin.template:
+    src: timesyncd.conf.j2
+    dest: "{{ common_timesyncd_dropin }}"
+    mode: "0644"
+  notify: Restart systemd-timesyncd
+  when: not (ansible_check_mode and common_timesyncd_dir is changed)

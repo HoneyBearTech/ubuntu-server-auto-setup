@@ -14,3 +14,12 @@ common_mail_tls_values: [starttls, tls, "off"]
 # Packages that are a mail transfer agent already; msmtp-mta would replace them.
 common_other_mtas: [postfix, exim4-daemon-light, exim4-daemon-heavy, sendmail-bin, opensmtpd, nullmailer, dma, ssmtp, courier-mta]
 common_msmtp_password_file: /etc/msmtp-password
+# NTP servers and pools end up in chrony's and systemd-timesyncd's configuration: host names, IPv4 or IPv6
+# addresses, without spaces (a space would add a chrony option) or line breaks. tests/fuzz/ reads it from here.
+common_time_server_pattern: '^[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?\Z'
+# NTP services that would be removed if the role installed systemd-timesyncd or chrony: the run stops instead.
+common_time_sync_other_services: [ntp, ntpsec, openntpd]
+common_timesyncd_dropin: /etc/systemd/timesyncd.conf.d/50-usas.conf
+# The role's chrony sources, and the mark that turns the OS's own sources off (removed again to bring them back).
+common_chrony_sources_file: usas.sources
+common_chrony_off_mark: "#usas-time-sync# "

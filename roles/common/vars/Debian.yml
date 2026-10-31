@@ -5,3 +5,8 @@
 common_os_unattended_origins:
   - "${distro_id}:${distro_codename}"
   - "${distro_id}:${distro_codename}-security"
+# Time sync: the service a server without chrony gets, and chrony's files and service where it's installed.
+common_os_time_sync_package: systemd-timesyncd
+common_os_chrony_conf: /etc/chrony/chrony.conf
+common_os_chrony_sources_dir: /etc/chrony/sources.d
+common_os_chrony_service: chrony
