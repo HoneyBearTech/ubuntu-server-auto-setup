@@ -191,8 +191,8 @@ changes nothing; a first run, a second that changes nothing, and the checks; che
 unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and then gone (Debian: a kernel in
 `/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`; the RHEL family: nothing right after a
 restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay
-and passwordless sudo on and off again; on the RHEL family, `firewall_docker_enabled` refused before firewalld
-changes; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening`
+and passwordless sudo on and off again; `firewall_docker_enabled` without Docker (no rules, and a message; on the
+RHEL family, refused before firewalld changes); and at least 80% task coverage of `common`, `firewall`, `ssh_hardening`
 and `fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
 `docker.yml` is left out on the RHEL family).
 

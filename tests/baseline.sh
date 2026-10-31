@@ -204,6 +204,15 @@ grep -q "firewall_docker_enabled isn't available on" "$TEST_TMP/docker.log" \
   || { cat "$TEST_TMP/docker.log"; echo "ERROR: the refusal doesn't say why" >&2; exit 1; }
 [ "$(docker exec "$SRV" firewall-cmd --list-all)" = "$before" ] \
   || { echo "ERROR: firewalld changed before the refusal" >&2; exit 1; }
+else
+step "firewall_docker_enabled without Docker writes no rules and says so"
+cool_down
+play playbooks/baseline.yml --limit srv-01 --tags firewall "${P2222[@]}" -e firewall_docker_enabled=true \
+  -e '{"firewall_docker_sources": ["192.0.2.0/24"], "firewall_docker_allow": [{"port": 8080}]}'
+grep -q "Docker isn't installed on srv-01: no DOCKER-USER rules were written" "$last_log" \
+  || { echo "ERROR: the run didn't say Docker isn't installed" >&2; exit 1; }
+docker exec "$SRV" sh -c '! grep -q DOCKER-USER /etc/ufw/after.rules /etc/ufw/after6.rules' \
+  || { echo "ERROR: DOCKER-USER rules were written without Docker" >&2; exit 1; }
 fi
 
 step "Task coverage of the baseline roles on $OS"
