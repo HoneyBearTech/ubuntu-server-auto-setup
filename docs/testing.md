@@ -19,6 +19,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | OS catalog tool | `tools/update_os_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
 | OS catalog check | every image the catalog pins, against the real vendors: the signature on the checksum file (pinned keys), the checksum, and that the image can still be downloaded; newer builds are listed | `make catalog-check` | pull requests that change the catalog, the script or its keys; weekly, opening or updating an issue when a pin fails or a newer build is out (and closing it when the catalog checks out again) |
 | Real installer ISO | the real Ubuntu 26.04 live-server ISO the OS catalog pins, checked against the catalog's checksum and again against Ubuntu's real signature on `SHA256SUMS` with the shipped key (as for an unpinned point release), and its remastering; then an install from it in QEMU with Secure Boot and a TPM 2.0, with an encrypted disk, and boots of the result | `tests/real-iso.sh` (set `USAS_ISO_CACHE` to a folder holding the ISO to skip the download, and `USAS_LOG_DIR` to keep each play's log; a failed play shows its failed tasks), then `tests/secure-boot-install.sh` (Linux with KVM) | weekly, and on pull requests that change the installer roles, the OS catalog or the installer's configuration; CI caches the ISO by its SHA-256 and keeps the logs of a failed run for 7 days |
+| Real cloud images | every cloud image the OS catalog pins, downloaded and checked against the catalog's checksum, then booted in QEMU with KVM, OVMF with Secure Boot and the proxmox_vm role's own cloud-init seed; then the baseline, twice, `tests/verify-baseline.yml`, and again on port 2222, with SELinux enforcing on the RHEL family | `tests/cloud-image-boot.sh <id>` (Linux with KVM; set `USAS_IMAGE_CACHE` to a folder that keeps the images) | weekly, by hand, and on pull requests that change the catalog, the seed templates or the test; one job per release; CI caches each image by its checksum and keeps the serial console and the playbook logs of a failed job for 14 days |
 | Real run | a disposable VM on a real Proxmox VE node | `make provision`, `make baseline` with `LIMIT=` | no, by hand (see the test policy), and before every release with the [pre-release checklist](release-checklist.md) |
 
 ## The integration tests
@@ -242,6 +243,28 @@ template for an encrypted disk. It installs unattended, then:
 
 The VM's serial logs, screen dumps and the LUKS header dump are kept as a workflow artifact when it fails.
 It needs about 3 GB for the ISO and up to 8 GB for the VM's disk, and takes 20 to 30 minutes.
+
+## Real cloud images in a VM
+
+The containers stand in for a freshly installed server; `tests/cloud-image-boot.sh` starts from the real thing.
+For one release (an OS catalog id) it downloads the cloud image the catalog pins and checks the catalog's
+checksum, renders the proxmox_vm role's seed (`cloud-user-data.j2`, `network-config.j2`, `meta-data.j2`) for a
+static address, and boots the image in a VM set up as Proxmox sets up the role's VMs: q35, OVMF with Secure Boot
+and Microsoft's keys enrolled, a VirtIO SCSI disk backed by the image and grown to 32 GB, a VirtIO network card
+with the MAC address `network-config` matches, and the seed on a SCSI CD-ROM (`scsi30`). Then:
+
+- cloud-init sets the server up from the seed and powers it off, within 15 minutes;
+- booted again without the seed, as provisioning does, it has Secure Boot on (the vendor's shim, boot loader and
+  kernel verified by the firmware), cloud-init disabled, its host name, and the admin user's sudoers file;
+- the baseline runs twice, the second run changing nothing, and `tests/verify-baseline.yml` passes (it also
+  checks that cloud-init's cached copies of the seed are gone);
+- SSH moves to port 2222, the checks pass there, and a rerun changes nothing; on the RHEL family SELinux is
+  enforcing throughout, so sshd holding port 2222 shows the baseline labelled it.
+
+`.github/workflows/cloud-images.yml` runs it for every release with a cloud image, one job each, weekly
+(vendors move and replace images, and each distribution's updates change what the baseline meets), by hand, and
+on pull requests that change the catalog, the seed templates or the test. A job takes 10 to 20 minutes; a
+failed one keeps the VM's serial console and the playbook logs.
 
 ## The OS catalog
 

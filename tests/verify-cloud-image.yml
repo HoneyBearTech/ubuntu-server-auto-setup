@@ -25,7 +25,8 @@
           - create | length == 1
           # The disk is a copy of the image in the NFS storage's Import content, the seed the only CD-ROM.
           - create[0].scsi0 == 'local-lvm:0,import-from=synology-nfs:import/' ~ image.file ~ ',discard=on,iothread=1,ssd=1'
-          - create[0].ide2 == 'synology-nfs:iso/seed-srv-cloud.iso,media=cdrom'
+          - create[0].scsi30 == 'synology-nfs:iso/seed-srv-cloud.iso,media=cdrom'
+          - "'ide2' not in create[0]"
           - "'ide3' not in create[0]"
           - create[0].boot == 'order=scsi0'
           - create[0].description == 'Installed by ubuntu-server-auto-setup (Debian 13 cloud image ' ~ image.build ~ ')'
@@ -34,10 +35,10 @@
           # Started for the first boot, powered itself off, the seed detached, started again from its disk.
           - vm.installed
           - vm.starts == 2
-          - vm.config_updates[0].delete == 'ide2'
+          - vm.config_updates[0].delete == 'scsi30'
           - vm.config_updates | length == 1
           - vm.config.boot == 'order=scsi0'
-          - "'ide2' not in vm.config"
+          - "'scsi30' not in vm.config"
 
 - name: Verify the cloud-init seed and what's left on the node
   hosts: pve-test

@@ -307,7 +307,7 @@ VLANs included. To allow SSH from one network only, set `firewall_ssh_sources`, 
 
 ### Disks and placement
 
-Each item of `vm_extra_disks` is a mapping with these keys (up to 30 disks):
+Each item of `vm_extra_disks` is a mapping with these keys (up to 29 disks):
 
 | Key | Default | Meaning |
 | --- | --- | --- |

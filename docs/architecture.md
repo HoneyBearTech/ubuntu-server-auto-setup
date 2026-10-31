@@ -124,7 +124,8 @@ node:
    VirtIO SCSI single with one disk, a VirtIO NIC on `pve_bridge` (optionally tagged), the guest agent
    enabled. With the installer: an empty disk, the installer ISO and the seed ISO as CD-ROMs, and the boot
    order disk then installer. With a cloud image: the disk imported from the image in the ISO storage's Import
-   content (`import-from`), grown to `vm_disk_gb`, the seed ISO as the only CD-ROM, and the boot order disk.
+   content (`import-from`), grown to `vm_disk_gb`, the seed ISO as the only CD-ROM (a SCSI one, `scsi30`: some
+   cloud kernels, such as Debian 12's, have no SATA driver for q35's IDE drives), and the boot order disk.
 6. Start the VM. The installer (or cloud-init, on the image's first boot) finds the seed ISO, sets the system
    up without asking, and powers the VM off. The playbook polls the VM's status until it is stopped (up to
    `vm_install_timeout`).

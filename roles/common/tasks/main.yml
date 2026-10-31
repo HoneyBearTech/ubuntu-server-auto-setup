@@ -129,6 +129,12 @@
   register: common_admin_user
   no_log: true
 
+# A session keeps the groups it started with: on a server installed from a cloud image the admin user gets its
+# sudo group only now, and sudo with a password would refuse it until Ansible logs in again.
+- name: Log in again, so the admin user's new group applies
+  ansible.builtin.meta: reset_connection
+  when: common_admin_user is changed  # noqa: no-handler (it must happen before the next sudo, not at the end)
+
 - name: Configure sudo for the admin user
   ansible.builtin.copy:
     content: "{{ admin_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"

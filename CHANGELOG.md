@@ -35,6 +35,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Every cloud image is booted and hardened in a real VM, weekly** ([testing.md](docs/testing.md#real-cloud-images-in-a-vm)):
+  `tests/cloud-image-boot.sh` downloads the image the OS catalog pins, checks its checksum, boots it in QEMU with
+  KVM and OVMF with Secure Boot on the proxmox_vm role's own cloud-init seed, then runs the baseline on it twice,
+  checks it, and moves SSH to port 2222, with SELinux enforcing on the RHEL family. The new "Cloud images"
+  workflow runs it for every release, weekly, by hand, and on pull requests that change the catalog, the seed
+  templates or the test.
+
 - **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
   - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
     install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts
@@ -259,6 +266,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- A Debian 12 VM installed from its cloud image never finished its first boot: Debian 12's cloud kernel has no SATA
+  driver, and the seed was an IDE CD-ROM, which q35 puts on its SATA controller, so cloud-init never saw it. The
+  seed is now a SCSI CD-ROM (`scsi30`), and `vm_extra_disks` takes up to 29 disks (`scsi1` to `scsi29`). Found by
+  the new weekly cloud-image test.
+- On a server installed from a cloud image, the baseline's first run lost sudo after removing passwordless sudo:
+  the admin user joined its sudo group in the same SSH session, which kept its old groups. The baseline now logs in
+  again after the admin user's groups change. Found by the new weekly cloud-image test.
 - The updates playbook's health checks after a reboot could find SSH gone again for a moment (sshd or a port
   forward still starting) and report the server as no longer answering. They now wait until a whole login works
   again, for up to `updates_health_timeout`.

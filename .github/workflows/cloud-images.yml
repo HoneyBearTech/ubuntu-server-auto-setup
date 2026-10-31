@@ -1,0 +1,126 @@
+---
+name: Cloud images
+
+# The integration tests and tests/baseline.sh run the baseline in containers that stand in for each release. This
+# workflow boots every cloud image the OS catalog pins in a real VM (KVM, OVMF with Secure Boot and Microsoft's
+# keys, as Proxmox VE runs the role's VMs), with the proxmox_vm role's own cloud-init seed, then runs the baseline
+# on it and checks it, SSH on port 2222 included (tests/cloud-image-boot.sh). That covers what containers can't: a
+# real first boot from the seed, the vendor's signed boot chain, a real firewall and SELinux enforcing. It also
+# downloads each pinned image and checks the catalog's checksum, so an image a vendor pruned or changed shows up.
+# Weekly (vendors move images and the distributions' updates change what the baseline meets), by hand, and on
+# changes to the catalog, the seed templates or this test. Images are cached by their checksum.
+on:  # yamllint disable-line rule:truthy
+  schedule:
+    - cron: "17 4 * * 4" # weekly, Thursday 04:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "roles/os_catalog/vars/catalog.yml"
+      - "roles/proxmox_vm/templates/cloud-user-data.j2"
+      - "roles/proxmox_vm/templates/network-config.j2"
+      - "roles/proxmox_vm/templates/meta-data.j2"
+      - "tests/cloud-image-boot.sh"
+      - ".github/workflows/cloud-images.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    name: List the pinned cloud images
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ids: ${{ steps.ids.outputs.ids }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the OS catalog
+        id: ids
+        run: |
+          ids="$(python3 -c 'import json, yaml
+          catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))["os_catalog"]
+          print(json.dumps([e["id"] for e in catalog if "cloud_image" in e["methods"]]))')"
+          echo "$ids" | python3 -c 'import json, re, sys
+          ids = json.load(sys.stdin)
+          assert ids and all(re.fullmatch(r"[a-z][a-z0-9.-]{1,40}", i) for i in ids), ids'
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+
+  boot:
+    name: Boot and harden ${{ matrix.os }}
+    needs: list
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.list.outputs.ids) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install the control-node packages and collections
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.txt
+          scripts/retry.sh ansible-galaxy collection install -r requirements.yml
+
+      - name: Install QEMU and OVMF, and open KVM to the runner's user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf xorriso
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Find the image's checksum
+        id: image
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          checksum="$(python3 -c 'import os, yaml
+          catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))["os_catalog"]
+          print(next(e for e in catalog if e["id"] == os.environ["OS"])["methods"]["cloud_image"]["checksum"])')"
+          [[ "$checksum" =~ ^sha(256|512):[0-9a-f]+$ ]]
+          echo "key=cloud-image-${checksum/:/-}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the cached image
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/image-cache
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Boot the image with the role's seed, run the baseline and check it
+        env:
+          OS: ${{ matrix.os }}
+        run: USAS_IMAGE_CACHE="$HOME/image-cache" tests/cloud-image-boot.sh "$OS" "$RUNNER_TEMP/cloud-image"
+
+      # Saved only after the script checked the image against the catalog's checksum.
+      - name: Save the image to the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/image-cache
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Keep the serial console and the playbook logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-image-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/cloud-image/serial-*.log
+            ${{ runner.temp }}/cloud-image/play.*
+            ${{ runner.temp }}/cloud-image/mock.log
+          if-no-files-found: ignore
+          retention-days: 14

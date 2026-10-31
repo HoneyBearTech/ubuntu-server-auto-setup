@@ -12,6 +12,7 @@
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/15740/baseline)](https://www.bestpractices.dev/projects/15740)
 [![Fuzzing](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/fuzz.yml)
 [![Installer ISO](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/installer-iso.yml)
+[![Cloud images](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/cloud-images.yml/badge.svg)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/actions/workflows/cloud-images.yml)
 [![Release](https://img.shields.io/github/v/release/HoneyBearTech/ubuntu-server-auto-setup?sort=semver)](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/latest)
 [![Docker Hub](https://img.shields.io/docker/v/honeybeartech/ubuntu-server-auto-setup?sort=semver&logo=docker&logoColor=white&label=Docker%20Hub)](https://hub.docker.com/r/honeybeartech/ubuntu-server-auto-setup)
 [![Image size](https://img.shields.io/docker/image-size/honeybeartech/ubuntu-server-auto-setup?sort=semver&logo=docker&logoColor=white&label=image%20size)](https://hub.docker.com/r/honeybeartech/ubuntu-server-auto-setup/tags)
