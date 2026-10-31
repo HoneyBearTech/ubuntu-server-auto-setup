@@ -1,0 +1,7 @@
+---
+# The apt family (Ubuntu and Debian), and Debian itself; vars/Ubuntu.yml overrides it for Ubuntu. Loaded by the
+# role's first task: the family's file, then the distribution's, then the release's.
+# Debian: point releases and Debian-Security (the codename-security suite); Debian has no ESM.
+common_os_unattended_origins:
+  - "${distro_id}:${distro_codename}"
+  - "${distro_id}:${distro_codename}-security"

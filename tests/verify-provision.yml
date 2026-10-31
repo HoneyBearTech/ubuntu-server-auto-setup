@@ -56,6 +56,9 @@
           - vm.starts == 2
           - create | length == 1
           - create[0].name == 'srv-two'
+          # vm_os: ubuntu-24.04, so the 24.04 installer that pve-test-2 built.
+          - create[0].ide2 == 'local:iso/ubuntu-24.04.5-live-server-amd64-autoinstall.iso,media=cdrom'
+          - create[0].description == 'Installed by ubuntu-server-auto-setup (Ubuntu 24.04.5)'
           - create[0].ide3 == 'local:iso/seed-srv-two.iso,media=cdrom'
           - verify_api.json.data.requests | selectattr('path', 'search', '^/nodes/pve-test/qemu/4081/') | list | length == 0
 

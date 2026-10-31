@@ -35,7 +35,12 @@
       restart_services: []
       auto_updates: ""
       health: {status: skipped, problems: []}
-      snapshot: ""
+      snapshot: {status: "off", name: "", node: "", reason: "", warning: "", deleted: []}
+      pve:
+        vmid: "{{ usas_pve_vmid | default(pve_vmid | default('')) }}"
+        node: "{{ usas_pve_node | default(pve_node | default('')) }}"
+        name: "{{ usas_pve_name | default('') | usas_clean_text(64) }}"
+        alias: "{{ usas_pve_alias | default('') }}"
       started: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
       finished: ""
   vars:
@@ -48,6 +53,19 @@
   ansible.builtin.group_by:
     key: usas_updates_targets
   changed_when: false
+
+# The cluster inventory (usas_pve) lists VMs that mustn't be updated (stopped, locked, a template or a
+# container, Windows, opted out by tag, no address) with the reason; they are reported, never contacted.
+- name: Leave alone a VM the cluster inventory says to skip
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': usas_pve_skip_status | default('skipped'),
+      'reason': usas_pve_skip_reason | usas_clean_text(200)}) }}
+  when: usas_pve_skip_reason is defined
+
+- name: End here for a VM the cluster inventory skips
+  ansible.builtin.meta: end_host
+  when: usas_pve_skip_reason is defined
 
 - name: Check the update settings
   ansible.builtin.assert:
@@ -65,17 +83,35 @@
       - updates_health_urls | map(attribute='url', default='') | map('string') | reject('match', updates_url_pattern) | list | length == 0
       - >-
         [updates_refresh_max_age, updates_lock_wait, updates_task_timeout, updates_reboot_timeout,
-        updates_post_reboot_delay, updates_health_timeout, updates_max_fail_percentage]
-        | map('string') | reject('match', updates_seconds_pattern) | list | length == 0
+        updates_post_reboot_delay, updates_health_timeout, updates_max_fail_percentage, updates_snapshot_timeout,
+        updates_snapshot_storage_warn] | map('string') | reject('match', updates_seconds_pattern) | list | length == 0
       - updates_max_fail_percentage | int <= 100
+      - updates_snapshot_storage_warn | int <= 100
+      - updates_snapshot | string | lower in ['true', 'false']
+      - updates_snapshot_required | string | lower in ['true', 'false']
+      - updates_snapshot_keep | string is match(updates_snapshot_keep_pattern)
+      - updates_snapshot_max_age | string is match(updates_snapshot_age_pattern)
     fail_msg: >-
       updates_scope must be one of {{ updates_scope_values | join(', ') }}, updates_apt_upgrade one of
       {{ updates_apt_upgrade_values | join(', ') }}, updates_reboot one of {{ updates_reboot_values | join(', ') }}
       and updates_restart_services one of {{ updates_restart_values | join(', ') }}. updates_exclude_packages must be
       a list of package-name globs (letters, digits, + . - * ?), updates_health_services and
       updates_health_ignore_services lists of systemd unit names, updates_health_urls a list of {url, status} with
-      http(s) URLs, and the waits, timeouts and updates_max_fail_percentage whole numbers.
+      http(s) URLs, the waits, timeouts, updates_max_fail_percentage and updates_snapshot_storage_warn whole
+      numbers, updates_snapshot and updates_snapshot_required true or false, updates_snapshot_keep 0 to 10 and
+      updates_snapshot_max_age 1 to 365 (days).
     quiet: true
+
+- name: Check the Proxmox API settings for snapshots
+  ansible.builtin.assert:
+    that:
+      - pve_api_url is defined or pve_api_host | default('') | length > 0
+      - pve_api_token_id | default('') | length > 0
+    fail_msg: >-
+      updates_snapshot takes snapshots through the Proxmox API: set pve_api_host, pve_api_user, pve_api_token_id
+      and pve_api_token_secret (from the Vault) in the inventory, as for creating VMs.
+    quiet: true
+  when: updates_snapshot | bool
 
 - name: Check the update windows
   ansible.builtin.assert:
@@ -143,7 +179,7 @@
       or (vault_admin_password | default('') | string | length == 0)
       or (ansible_become_password | string) != (vault_admin_password | string)
     fail_msg: >-
-      {{ inventory_hostname }} isn't a server this project installed (it isn't in ubuntu_servers with a pve_vmid),
+      {{ inventory_hostname }} isn't a server this project installed (it isn't in servers with a pve_vmid),
       but its ansible_become_password is the Vault admin password: root on it could read it. Give its group its
       own sudo password in the Vault, use passwordless sudo there, or set updates_allow_shared_become_password:
       true for it.

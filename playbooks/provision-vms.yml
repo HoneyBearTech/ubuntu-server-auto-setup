@@ -1,7 +1,11 @@
 ---
-- name: Create Ubuntu VMs on Proxmox and install them unattended
-  hosts: ubuntu_servers
+- name: Create VMs on Proxmox and install them unattended
+  # servers; ubuntu_servers is its name before 0.7.0, still read until 1.0.
+  hosts: servers:ubuntu_servers
   gather_facts: false
   become: false
+  pre_tasks:
+    - name: Note old names the inventory still uses
+      ansible.builtin.import_tasks: tasks/deprecations.yml
   roles:
     - proxmox_vm

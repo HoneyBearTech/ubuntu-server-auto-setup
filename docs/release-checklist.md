@@ -316,7 +316,7 @@ checkout of the same commit (`make build-installer`, `make provision LIMIT=test-
 ## updates
 
 If the release touches `playbooks/updates.yml` or `roles/updates`. Use the test VM from above
-(`test-01`, installed by this run, so it is in `ubuntu_servers`) and, for a server this project didn't
+(`test-01`, installed by this run, so it is in `servers`) and, for a server this project didn't
 install, a disposable Ubuntu 24.04 VM made by hand with an `ops` user that has passwordless sudo and your
 key, added to `other_servers` (`legacy-01` at `192.0.2.20` below). Compare `legacy-01`'s host key with its
 console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it to `known_hosts`.
@@ -355,6 +355,16 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
   ARGS="-e updates_reboot=if_required"` installs it and holds the reboot, naming the package and the
   recovery steps; reboot from the console and follow "Recovery" in docs/security.md. If no such update is
   pending, note "not available" in the record.
+- [ ] **Snapshots.** Add `VM.Snapshot` to the token's role (docs/installing.md) and take an operator snapshot
+  of `test-01` first (`qm snapshot <vmid> mine`). On a VM with disks on LVM-thin or ZFS, a run with
+  `ARGS="-e updates_snapshot=true"` and an update pending takes `usas_upd_<date>_<time>` on the VM's current
+  node before installing (watch **Tasks** in the Proxmox UI), the report names it, and `mine` is still there
+  after a second run with an update pending (the older `usas_upd_` one is gone, `updates_snapshot_keep: 1`).
+  Migrate the VM to another node first, without changing `pve_node`, and the snapshot still goes to the node
+  it runs on. A VM with a raw disk on NFS or directory storage is `skipped` with "disks don't support
+  snapshots". Remove `VM.Snapshot` again (`pveum role modify UbuntuAutoSetup --privs <the list without it>`)
+  and a run fails the VM naming `VM.Snapshot`. Roll back once by hand following docs/updates.md
+  ("Rolling back"), then delete the snapshots you made.
 
 ## Web UI
 
@@ -383,6 +393,37 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
   *Not supported*. On Proxmox VE 9 without `VM.GuestAgent.Audit` on the token, the page says to add it;
   on Proxmox VE 8 it says `VM.Monitor` is optional. A run log keeps streaming while the VMs page
   refreshes.
+- [ ] **Running the baseline from the VMs page**, if the release touches the VMs page, the runner, host keys
+  or the baseline. Use a second disposable VM that this project didn't install, with Ubuntu 26.04 from the
+  cloud image or the installer, the QEMU guest agent running, a user `ubuntu` with passwordless sudo and the
+  web UI's public key in its `authorized_keys` (`test-06`, VM ID `9006`, address `192.0.2.15` below; made by hand in Proxmox). Never a server you need: the
+  real run changes its SSH, firewall and packages.
+  - [ ] On **VMs**, VM 9006 can be selected and shows its address from the guest agent. **Review the
+    plan** before pinning says to trust its host key first.
+  - [ ] **Scan the host key**; on the VM's console in Proxmox, `for f in /etc/ssh/ssh_host_*_key.pub; do
+    ssh-keygen -lf "$f"; done` lists the same fingerprints; pin them. **Test the login** as `ubuntu` works.
+  - [ ] **Review the plan** (Full baseline, extra firewall rule `8080/tcp`): the host is `vm-9006`, and the
+    warnings name the firewall's default deny and the key sync. **Run the check**: it passes, the results
+    table shows changes for `vm-9006`, and nothing changed on the VM (`ssh ubuntu@192.0.2.15 'command -v ufw
+    || echo none'` prints `none` on a VM without UFW).
+  - [ ] On the check run's page, **Run the baseline for real** without the box ticked is refused; with it,
+    the run passes. A second click is refused ("run already"). A new check run of the same plan reports no
+    changes in the results table.
+  - [ ] On the VM: `sudo ufw status` is active with `8080/tcp`; `hostnamectl --static` is unchanged; `sudo
+    -n true` still works (passwordless); `sudo grep -r "<the admin password>" /etc /home /var/log` finds
+    nothing; `authorized_keys` still has the web UI's key.
+  - [ ] Test-01 (installed by this project) selected on the VMs page starts from the key recorded at
+    provisioning (no scan needed), and its check run passes with its own address and user.
+  - [ ] **History → Download the audit log**: `hostkey.pin`, `hostkey.adopt`, `run.check`, `run.apply`,
+    `run.refused` and `run.finished` entries, with the VMs, addresses and fingerprints, and no secret.
+  - [ ] **Forget the host key** of VM 9006, then pin a wrong one by hand and try a check run: it fails with
+    `Host key verification failed`:
+
+    ```bash
+    docker exec usas-rc sh -c "ssh-keygen -q -t ed25519 -N '' -f /tmp/k && echo usas-<cluster>-9006 \$(cut -d' ' -f1,2 /tmp/k.pub) >> /data/ssh/known_hosts"
+    ```
+
+    Then forget it again on the VMs page.
 - [ ] The [screen-reader walk-through](accessibility.md#screen-reader-walk-through) with VoiceOver on
   macOS and with NVDA on Windows, on the image under test before its first-run setup (it starts with the
   first-run page). Add a row per screen reader to its results table in the release pull request, and an
@@ -437,6 +478,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   qm stop 9003; qm destroy 9003 --purge
   qm stop 9004; qm destroy 9004 --purge     # on hyve
   qm stop 9005; qm destroy 9005 --purge     # the encrypted test VM (its TPM state volume goes too)
+  qm stop 9006; qm destroy 9006 --purge     # the VM made by hand for the VMs page's runs
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03 \
     /var/tmp/ubuntu-server-auto-setup/seed-test-04

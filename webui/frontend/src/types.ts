@@ -14,6 +14,7 @@ export interface FieldMeta {
   variable: string;
   default: string | null;
   choices: string[] | null;
+  choice_labels?: Record<string, string>; // what to show for each choice, where it isn't the value itself
   saved?: boolean;
 }
 
@@ -128,10 +129,11 @@ export interface Playbook {
   extra: string[];
 }
 
-// Where build-installer puts the installer ISO: one row per (node, ISO storage) the servers need.
+// Where build-installer puts the installer ISOs: one row per (node, ISO storage, ISO) the servers need.
 export interface IsoPair {
   node: string;
   storage: string;
+  iso: string; // the installer ISO's file name
   shared: boolean;
   built_by: string; // the node that builds it
   servers: string[];
@@ -196,6 +198,7 @@ export interface ServersData {
   rows: Record<string, string>[];
   nodes: string[]; // the cluster's nodes, from the last connection test
   default_node: string;
+  default_os: string; // the Defaults page's OS, an OS catalog id
 }
 
 export interface Notice {

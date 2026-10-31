@@ -14,7 +14,7 @@ import atheris
 with atheris.instrument_imports():
     import roles
 
-PICK = roles.set_fact_expression("roles/installer_iso/tasks/main.yml", "installer_iso_sha256")
+PICK = roles.set_fact_expression("roles/installer_iso/tasks/iso.yml", "installer_iso_sha256")
 NAME_PATTERN = roles.role_vars("installer_iso")["installer_iso_name_pattern"]
 NAME_CHARS = "ubuntu-26.04.1-live-server-amd64.iso*[](){}+?|^$\\ \n"
 SUM_CHARS = "0123456789abcdef *\n"

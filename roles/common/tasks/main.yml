@@ -1,4 +1,15 @@
 ---
+# The family's settings, then the distribution's and the release's (vars/Debian.yml, vars/Ubuntu.yml, ...), each
+# overriding the one before. Like the other baseline roles, it goes by the server's facts, not by vm_os.
+- name: Load the settings for the server's OS
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/{{ item }}.yml"
+  loop:
+    - "{{ ansible_facts.os_family }}"
+    - "{{ ansible_facts.distribution }}"
+    - "{{ ansible_facts.distribution }}-{{ ansible_facts.distribution_major_version }}"
+  when: (role_path ~ '/vars/' ~ item ~ '.yml') is file
+
 - name: Check the admin user name and hostname
   ansible.builtin.assert:
     that:
@@ -58,9 +69,9 @@
 
 - name: Upgrade packages
   ansible.builtin.apt:
-    upgrade: "{{ apt_upgrade }}"
+    upgrade: "{{ pkg_upgrade }}"
     autoremove: true
-  when: apt_upgrade != 'no'
+  when: pkg_upgrade != 'no'
 
 - name: Install base packages
   ansible.builtin.apt:
@@ -188,17 +199,28 @@
     dest: /etc/apt/apt.conf.d/20auto-upgrades
     mode: "0644"
 
+# The same check as the updates playbook's, one per family (roles/updates/tasks/reboot_required/): Ubuntu's
+# /var/run/reboot-required, or on Debian a newer kernel in /boot than the one running.
+- name: Load the updates role's settings for the server's OS
+  ansible.builtin.include_role:
+    name: updates
+    tasks_from: os_vars
+    apply:
+      tags: [always]
+
 - name: Check whether a reboot is required
-  ansible.builtin.stat:
-    path: /var/run/reboot-required
-  register: common_reboot_required
+  ansible.builtin.include_role:
+    name: updates
+    tasks_from: reboot_required/{{ ansible_facts.os_family }}
+    apply:
+      tags: [always]
 
 - name: Reboot to finish upgrades
   ansible.builtin.reboot:
     reboot_timeout: 600
-  when: reboot_if_required | bool and common_reboot_required.stat.exists
+  when: reboot_if_required | bool and updates_reboot_status.required
 
 - name: Report a pending reboot
   ansible.builtin.debug:
     msg: "{{ inventory_hostname }} needs a reboot to finish upgrades (set reboot_if_required: true to do it automatically)."
-  when: not reboot_if_required | bool and common_reboot_required.stat.exists
+  when: not reboot_if_required | bool and updates_reboot_status.required

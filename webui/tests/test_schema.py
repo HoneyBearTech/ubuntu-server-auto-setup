@@ -78,13 +78,14 @@ def test_comments_parser():
     ("ssh_port", "2222", 2222),
     ("ssh_port", "", 22),
     ("pve_vlan", "", None),
-    ("ufw_ssh_limit", "on", True),
-    ("ufw_ssh_limit", None, False),
+    ("firewall_ssh_limit", "on", True),
+    ("firewall_ssh_limit", None, False),
     ("net_dns", "10.0.0.1, 1.1.1.1\n9.9.9.9", ["10.0.0.1", "1.1.1.1", "9.9.9.9"]),
     ("net_search", "example.lan\nsub.example.com", ["example.lan", "sub.example.com"]),
     ("fail2ban_bantime", "1h30m", "1h30m"),
     ("fail2ban_sshd_mode", "aggressive", "aggressive"),
-    ("ubuntu_point_release", "26.04.2", "26.04.2"),
+    ("vm_os", "ubuntu-24.04", "ubuntu-24.04"),
+    ("vm_os", "", "ubuntu-26.04"),
     ("ssh_allow_users", "sysadmin, deploy@10.0.0.*", ["sysadmin", "deploy@10.0.0.*"]),
     ("admin_password", " spaces kept ", " spaces kept "),
     ("unattended_upgrades_mail", "", ""),
@@ -93,7 +94,7 @@ def test_comments_parser():
     ("fail2ban_webhook_url", "https://gotify.example.com:8443/message?token=A.b-c", "https://gotify.example.com:8443/message?token=A.b-c"),
     ("mail_relay_password", 'p "w" # x', 'p "w" # x'),
     ("hardening_sysctl_enabled", "on", True),
-    ("ufw_allow", "443/tcp\n6000:6007/udp from 10.0.0.0/24", [
+    ("firewall_allow", "443/tcp\n6000:6007/udp from 10.0.0.0/24", [
         {"port": "443", "proto": "tcp"}, {"port": "6000:6007", "proto": "udp", "from": "10.0.0.0/24"}]),
 ])
 def test_valid_values(sch, name, raw, expected):
@@ -114,7 +115,8 @@ def test_valid_values(sch, name, raw, expected):
     ("fail2ban_ignoreip", "10.0.0.0/8 enabled", "format"),
     ("fail2ban_bantime", "1 hour", "format"),
     ("fail2ban_sshd_mode", "paranoid", "one of"),
-    ("ubuntu_point_release", "26.04.1/../x", "format"),
+    ("vm_os", "debian-13", "must be one of"),
+    ("vm_os", "ubuntu-26.04; x", "must be one of"),
     ("ssh_permit_root_login", "maybe", "one of"),
     ("admin_password", "two\nlines", "control characters"),
     ("unattended_upgrades_mail", "root", "format"),
@@ -126,10 +128,10 @@ def test_valid_values(sch, name, raw, expected):
     ("mail_relay_tls", "ssl", "one of"),
     ("timezone", "{{ lookup('pipe', 'id') }}", "format"),
     ("admin_extra_ssh_keys", "not a key", "format"),
-    ("ufw_allow", "443/sctp", "port must be"),
-    ("ufw_allow", "443/tcp to 10.0.0.1", "write a port"),
-    ("ufw_allow", "443 from 10.0.0.0/33", "from"),
-    ("ufw_allow", "7000:6000", "lower one first"),
+    ("firewall_allow", "443/sctp", "port must be"),
+    ("firewall_allow", "443/tcp to 10.0.0.1", "write a port"),
+    ("firewall_allow", "443 from 10.0.0.0/33", "from"),
+    ("firewall_allow", "7000:6000", "lower one first"),
 ])
 def test_invalid_values(sch, name, raw, message):
     with pytest.raises(Invalid, match=message):
@@ -144,7 +146,7 @@ def test_ufw_rule_round_trip():
 
 def test_display_values(sch):
     assert s.display_value(sch.by_name["net_dns"], ["1.1.1.1", "9.9.9.9"]) == "1.1.1.1\n9.9.9.9"
-    assert s.display_value(sch.by_name["ufw_allow"], [{"port": "80", "proto": "tcp"}]) == "80/tcp"
+    assert s.display_value(sch.by_name["firewall_allow"], [{"port": "80", "proto": "tcp"}]) == "80/tcp"
     assert s.display_value(sch.by_name["ssh_port"], None) == ""
     assert s.display_value(sch.by_name["pve_validate_certs"], True) == "true"
 

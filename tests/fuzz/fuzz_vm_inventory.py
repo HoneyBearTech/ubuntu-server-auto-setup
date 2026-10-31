@@ -39,7 +39,7 @@ SERVERS = [{"name": "web-00", "ansible_host": "10.0.0.10", "pve_vmid": 4000},
 SUPPORT = ("supported", "override", "unknown", "unsupported", "")
 STATUS = ("running", "stopped", "paused", "")
 # The values the web UI itself writes (no typed or reported text in them).
-OWN = {"ansible_ssh_common_args", "ansible_control_path", "ufw_allow", *vmplan.VAULT_VARS}
+OWN = {"ansible_ssh_common_args", "ansible_control_path", "firewall_allow", *vmplan.VAULT_VARS}
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="fuzz-vm-"))
 KEYS = sshkeys.Keys(from_env({"USAS_DATA_DIR": str(TMP), "USAS_PROJECT_DIR": str(TMP)}))
 
@@ -66,6 +66,10 @@ def maybe_ip(fdp):
     return ".".join(str(fdp.ConsumeIntInRange(0, 300)) for _ in range(4))
 
 
+def looks_typed(text):
+    return yaml.SafeDumper(None).resolve(yaml.ScalarNode, text, (True, False)) != "tag:yaml.org,2002:str"
+
+
 def check_strings(value, key=""):
     if isinstance(value, dict):
         for k, v in value.items():
@@ -75,7 +79,9 @@ def check_strings(value, key=""):
             check_strings(v, key)
     elif isinstance(value, str):
         assert "\n" not in value and "\r" not in value, (key, value)
-        if key not in OWN and value not in ("",):
+        # Text that would load as a number, boolean or null is written as a plain quoted string instead of
+        # !unsafe (store.py): it can't hold a template.
+        if key not in OWN and value not in ("",) and not looks_typed(value):
             assert isinstance(value, Typed), (key, value)
 
 
@@ -115,13 +121,13 @@ def one_input(data):
     if plan is not None:
         loaded = yaml.load(plan.inventory, Loader=Loader)  # noqa: S506 (a SafeLoader subclass)
         children = loaded["all"]["children"]
-        assert set(children) <= {"usas_vms", "ubuntu_servers"}
+        assert set(children) <= {"usas_vms", "servers"}
         planned = {t.name for t in plan.targets}
         found = {name for group in children.values() for name in group["hosts"]}
         assert found == planned, (found, planned)
         for target in plan.targets:
             if target.static:
-                assert target.name in {"web-00", "db-01"} and target.name in children["ubuntu_servers"]["hosts"]
+                assert target.name in {"web-00", "db-01"} and target.name in children["servers"]["hosts"]
                 continue
             assert target.name == f"vm-{target.vmid}"
             host = children["usas_vms"]["hosts"][target.name]

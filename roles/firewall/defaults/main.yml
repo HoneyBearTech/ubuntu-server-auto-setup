@@ -1,13 +1,23 @@
 ---
 ssh_port: 22
-ufw_default_incoming: deny
-ufw_default_outgoing: allow
-ufw_logging: low
-# Rate-limit SSH (ufw "limit": 6 connections in 30 s per source) instead of a plain allow.
-ufw_ssh_limit: true
+# The default policy for incoming connections, and how much the firewall logs.
+firewall_default_incoming: "{{ ufw_default_incoming }}"
+firewall_logging: "{{ ufw_logging }}"
+# Rate-limit SSH (UFW's "limit": 6 connections in 30 s per source) instead of a plain allow.
+firewall_ssh_limit: "{{ ufw_ssh_limit }}"
 # Where SSH is allowed from. "any", or a list of addresses/CIDRs.
-ufw_ssh_sources: [any]
+firewall_ssh_sources: "{{ ufw_ssh_sources }}"
 # Extra rules, e.g.
 #   - { port: "443", proto: tcp, comment: https }
 #   - { port: "5432", proto: tcp, from: 10.0.0.0/24, comment: postgres }
+firewall_allow: "{{ ufw_allow }}"
+# UFW only: the default policy for outgoing connections.
+ufw_default_outgoing: allow
+
+# The names before 0.7.0, still read until 1.0: a firewall_* setting above takes its value from these unless it's
+# set itself. Set the firewall_* names instead.
+ufw_default_incoming: deny
+ufw_logging: low
+ufw_ssh_limit: true
+ufw_ssh_sources: [any]
 ufw_allow: []

@@ -1,17 +1,27 @@
 ---
-# Ubuntu: update-notifier's /var/run/reboot-required, with the packages that asked in reboot-required.pkgs.
-# needrestart (when installed) adds the services still running old code.
+# Ubuntu: update-notifier's /var/run/reboot-required, with the packages that asked in reboot-required.pkgs. Debian
+# writes no such file, so there the newest kernel in /boot is compared with the one running
+# (updates_os_reboot_check). needrestart (when installed) adds the services still running old code. Sets
+# updates_reboot_status; the updates playbook adds it to its result, and the baseline (roles/common) reads it too.
 - name: Check for /var/run/reboot-required
   ansible.builtin.stat:
     path: /var/run/reboot-required
   register: updates_reboot_file
+  when: updates_os_reboot_check == 'file'
 
 - name: Read which packages want the reboot
   ansible.builtin.slurp:
     src: /var/run/reboot-required.pkgs
   register: updates_reboot_pkgs
   failed_when: false
-  when: updates_reboot_file.stat.exists
+  when: updates_reboot_file.stat.exists | default(false)
+
+- name: List the kernels installed in /boot
+  ansible.builtin.find:
+    paths: /boot
+    patterns: vmlinuz-*
+  register: updates_boot_kernels
+  when: updates_os_reboot_check == 'kernel'
 
 - name: Ask needrestart which services run old code
   ansible.builtin.command:
@@ -24,11 +34,24 @@
 
 - name: Note whether a reboot is needed
   ansible.builtin.set_fact:
-    usas_updates_result: >-
-      {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot | combine(reboot),
-      'restart_services': needrestart.services}) }}
+    updates_reboot_status:
+      required: "{{ updates_reboot_file.stat.exists | default(false) or needrestart.kernel_status in [2, 3]
+                    or (newest_kernel | length > 0 and newest_kernel != ansible_facts.kernel) }}"
+      packages: >-
+        {{ updates_reboot_pkgs.content | default('') | b64decode | usas_package_names(100)
+           + (['linux-image-' ~ newest_kernel] if newest_kernel | length > 0 and newest_kernel != ansible_facts.kernel
+              else []) }}
+      restart_services: "{{ needrestart.services }}"
   vars:
     needrestart: "{{ updates_needrestart.stdout | default('') | usas_needrestart }}"
-    reboot:
-      required: "{{ updates_reboot_file.stat.exists or needrestart.kernel_status in [2, 3] }}"
-      packages: "{{ updates_reboot_pkgs.content | default('') | b64decode | usas_package_names(100) }}"
+    newest_kernel: >-
+      {{ updates_boot_kernels.files | default([]) | map(attribute='path') | map('basename')
+         | map('regex_replace', '^vmlinuz-', '') | community.general.version_sort | last | default('') }}
+
+- name: Add it to the run's result
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'reboot': usas_updates_result.reboot
+      | combine({'required': updates_reboot_status.required, 'packages': updates_reboot_status.packages}),
+      'restart_services': updates_reboot_status.restart_services}) }}
+  when: usas_updates_result is defined

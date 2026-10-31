@@ -16,3 +16,8 @@ updates_os_reboot_packages: [linux-image-*, linux-modules-*, linux-generic*, lin
 # What automatic updates run as, and the locks apt and dpkg take.
 updates_os_busy_units: [apt-daily.service, apt-daily-upgrade.service]
 updates_os_locks: [/var/lib/dpkg/lock-frontend, /var/lib/dpkg/lock, /var/lib/apt/lists/lock, /var/cache/apt/archives/lock]
+# How a waiting reboot shows: Debian compares the newest kernel in /boot with the one running (Ubuntu.yml sets
+# file: update-notifier's /var/run/reboot-required).
+updates_os_reboot_check: kernel
+# Debian publishes security updates in Debian-Security (the codename-security suite).
+os_security_errata: true
