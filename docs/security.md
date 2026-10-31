@@ -252,6 +252,11 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - With `safe` (the default) apt never removes a package; an update that would need a package you excluded
   skips the server instead of upgrading that package. One failed server, or a failed health check, stops
   the servers not yet started.
+- With `updates_snapshot`, the only snapshots it ever deletes are its own: named `usas_upd_<date>_<time>`
+  **and** described "USAS updates run <run id>; ..." (both checked; fuzzed by `tests/fuzz/fuzz_update_plan.py`).
+  It takes them without the VM's memory, never rolls back (the token needs no `VM.Snapshot.Rollback`), and
+  keeps the snapshot of a VM whose health check failed. A VM that can't have the snapshot asked for isn't
+  updated unless `updates_snapshot_required: false`.
 
 ## Optional hardening and notifications
 
@@ -436,8 +441,10 @@ pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vm
   whose root is hostile can report anything, or report nothing. Updating a server also means trusting its
   package sources (its mirrors and keys), which the playbook doesn't change.
 - **Reboots and updates that go wrong.** An update can break an application in ways the health checks
-  don't see, and a server may not come back from a reboot. Snapshots (a later release) aren't backups,
-  and rolling back to one also undoes the security updates. On a VM whose disk unlocks with the TPM, a
+  don't see, and a server may not come back from a reboot. Snapshots (`updates_snapshot`) aren't backups:
+  they live on the VM's own storage, and one on thin storage grows with every write until it is deleted,
+  which can fill the pool (the report warns above 85 %). Rolling back to one loses everything written since,
+  the security updates included. On a VM whose disk unlocks with the TPM, a
   Secure Boot update means typing the passphrase at the console at the next boot; the playbook holds that
   reboot and says so.
 - **A VM you run the baseline on from the VMs page, and its owner.** The baseline changes SSH, the firewall,

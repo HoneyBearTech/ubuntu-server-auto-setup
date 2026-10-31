@@ -242,6 +242,11 @@ old name's value unless it's set itself, and each run says which old names the i
 | `updates_health_services`, `updates_health_ignore_services` | `[]` | Services that must run after the update, and globs of services whose stopping isn't a problem. |
 | `updates_health_urls` | `[]` | `[{url, status}]`, called from the control node with the certificate checked. |
 | `updates_health_timeout` | `300` | Seconds to wait for the server to finish starting. |
+| `updates_snapshot` | `false` | Take a Proxmox snapshot of each VM's disks before its update, on the node it runs on now (needs `VM.Snapshot`). |
+| `updates_snapshot_required` | `true` | Skip a VM that can't have one (no VM ID, locked, disks without snapshots) and fail one whose snapshot Proxmox refused or couldn't take; `false` updates them without. |
+| `updates_snapshot_keep`, `updates_snapshot_max_age` | `1`, `7` | How many of this playbook's snapshots a VM keeps after a healthy update (0 to 10), and their age in days (1 to 365) after which the next run deletes them. Only snapshots with the `usas_upd_` name and the playbook's description are deleted. |
+| `updates_snapshot_timeout` | `600` | Seconds Proxmox may take to take or delete a snapshot. |
+| `updates_snapshot_storage_warn` | `85` | Warn in the report when a storage that holds the VM's disks is more than this percent used. |
 | `updates_allow_unsupported` | `false` | Try a release outside `updates_supported_releases`, within a known family. |
 | `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
 | `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
@@ -363,8 +368,10 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `installed_by_usas`, `scope`, `apt_upgrade`, `window`, `pending` (each `name`, `current`, `candidate`,
 `suites`, `security`, `new`), `security_count`, `planned`, `upgraded` (each `name`, `from`, `to`), `held`,
 `excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
-`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot`, `pve` (`vmid`, `node`, `name`,
-`alias`), `started` and `finished`.
+`restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot` (`status`: `off`, `taken`,
+`removed` (taken, then deleted by `updates_snapshot_keep: 0`) or `none`; `name`, `node`, `reason` when there is
+none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `pve` (`vmid`, `node`,
+`name`, `alias`), `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
 
@@ -471,6 +478,7 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | System | From | Protocol and authentication | What for |
 | --- | --- | --- | --- |
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for a new server with `net_mode: dhcp`, check first that the token may ask its guest agent (`/access/permissions`); for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). A read whose connection drops (pveproxy restarting a worker) is retried up to 3 times, 5 seconds apart; any answer, an error included, is final. A VM creation whose connection drops is retried the same way, and the run carries on only with a VM of that ID that has the host's name and the description "Installed by ubuntu-server-auto-setup". |
+| Proxmox VE API, from the updates playbook (with `updates_snapshot`, or the cluster inventory) | control node | HTTPS, the same API token, certificate verified (`pve_validate_certs`) | `GET /cluster/resources?type=vm` (the VM's node and lock now), `GET /nodes/<node>/qemu/<vmid>/feature?feature=snapshot`, `GET .../config` (which storages hold its disks) and `GET /nodes/<node>/storage/<id>/status` (how full they are), with `VM.Audit` and `Datastore.Audit`; `GET`, `POST` (`snapname`, `description`, `vmstate=0`) and `DELETE .../qemu/<vmid>/snapshot[/<name>]` with `VM.Snapshot`, each followed by its task's status (`/nodes/<node>/tasks/<upid>/status`). Never rollback. The cluster inventory (`usas_pve`) reads `/cluster/resources`, VM configs and guest agents, as the VMs page does. |
 | Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |

@@ -1,0 +1,209 @@
+---
+# Before updating a VM on the cluster (updates_snapshot): a Proxmox snapshot of its disks, without its memory
+# (vmstate 0), on the node the VM runs on now. Looking needs VM.Audit (and Datastore.Audit for the storage
+# warning), taking and deleting snapshots VM.Snapshot; rolling back is left to a Proxmox admin (docs/updates.md,
+# "Snapshots"). This playbook's snapshots older than updates_snapshot_max_age days are deleted first; after a
+# healthy update, snapshot_prune.yml keeps the newest updates_snapshot_keep. A VM that can't have a snapshot is
+# skipped (updates_snapshot_required) or updated without one; an error from Proxmox fails the VM unless
+# updates_snapshot_required is false.
+- name: Prepare the Proxmox API calls
+  ansible.builtin.set_fact:
+    updates_pve:
+      url: >-
+        {{ pve_api_url | default('https://' ~ pve_api_host | default('') ~ ':' ~ pve_api_port | default(8006)
+        ~ '/api2/json') }}
+      headers:
+        Authorization: >-
+          PVEAPIToken={{ pve_api_user | default('') }}!{{ pve_api_token_id | default('') }}={{
+          pve_api_token_secret | default('') }}
+      vmid: "{{ usas_updates_result.pve.vmid | string }}"
+      node: ""
+  no_log: true
+
+- name: Take a snapshot of the VM
+  block:
+    - name: Refuse a server that has no VM ID
+      ansible.builtin.fail:
+        msg: it has no Proxmox VM ID (pve_vmid, or the cluster inventory's usas_pve_vmid)
+      when: updates_pve.vmid is not match('^[1-9][0-9]{2,8}\Z')
+
+    - name: Find the VM on the cluster
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/cluster/resources?type=vm"
+        headers: "{{ updates_pve.headers }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_vms
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Fail unless Proxmox listed the VMs
+      ansible.builtin.fail:
+        msg: "{{ updates_pve_vms | usas_pve_error('list the VMs on the cluster') }}"
+      when: updates_pve_vms.status | default(-1) != 200
+
+    - name: Note the node the VM runs on now
+      ansible.builtin.set_fact:
+        updates_pve: "{{ updates_pve | combine({'node': vm.node | default(''), 'lock': vm.lock | default('')}) }}"
+      vars:
+        vm: >-
+          {{ updates_pve_vms.json.data | selectattr('type', 'equalto', 'qemu')
+          | selectattr('vmid', 'equalto', updates_pve.vmid | int) | first | default({}) }}
+      no_log: true
+
+    - name: Refuse a VM that isn't on the cluster
+      ansible.builtin.fail:
+        msg: VM {{ updates_pve.vmid }} isn't on the cluster (a container or a VM that has gone)
+      when: updates_pve.node is not match('^[A-Za-z0-9][A-Za-z0-9.-]{0,62}\Z')
+
+    - name: Refuse a locked VM
+      ansible.builtin.fail:
+        msg: VM {{ updates_pve.vmid }} is locked ({{ updates_pve.lock | usas_clean_text(20) }})
+      when: updates_pve.lock | length > 0
+
+    # Proxmox decides from the VM's disks: raw files on directory, NFS or CIFS storage, thick LVM and passthrough
+    # disks can't have snapshots.
+    - name: Ask Proxmox whether the VM's disks support snapshots
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/nodes/{{ updates_pve.node }}/qemu/{{ updates_pve.vmid }}/feature?feature=snapshot"
+        headers: "{{ updates_pve.headers }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_feature
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Fail unless Proxmox answered
+      ansible.builtin.fail:
+        msg: "{{ updates_pve_feature | usas_pve_error('check the VM can have a snapshot') }}"
+      when: updates_pve_feature.status | default(-1) != 200
+
+    - name: Refuse a VM whose disks can't have snapshots
+      ansible.builtin.fail:
+        msg: Proxmox says VM {{ updates_pve.vmid }}'s disks don't support snapshots
+      when: updates_pve_feature.json.data.hasFeature | default(0) | string not in ['1', 'True', 'true']
+
+    - name: Read the VM's disks
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/nodes/{{ updates_pve.node }}/qemu/{{ updates_pve.vmid }}/config"
+        headers: "{{ updates_pve.headers }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_config
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    # A snapshot on thin storage (LVM-thin, ZFS, Ceph) grows with every write after it: a nearly full pool can
+    # stop every VM on it.
+    - name: Check how full the VM's storages are
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/nodes/{{ updates_pve.node }}/storage/{{ item }}/status"
+        headers: "{{ updates_pve.headers }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_storages
+      failed_when: false
+      loop: "{{ updates_pve_config.json.data | default({}) | usas_disk_storages }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Note a storage that is nearly full
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'snapshot': usas_updates_result.snapshot | combine({'warning':
+          'storage ' ~ full | join(', ') ~ ' is over ' ~ updates_snapshot_storage_warn ~ ' % used'})}) }}
+      vars:
+        full: "{{ updates_pve_storages.results | default([]) | usas_full_storages(updates_snapshot_storage_warn) }}"
+      when: full | length > 0
+
+    - name: Delete this playbook's snapshots that are too old
+      ansible.builtin.include_tasks: snapshot_prune.yml
+      vars:
+        updates_snapshot_prune_keep: ""
+
+    - name: Name the snapshot
+      ansible.builtin.set_fact:
+        updates_snapshot_name: "{{ now(utc=true).strftime('usas_upd_%Y%m%d_%H%M%S') }}"
+
+    - name: Take the snapshot
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/nodes/{{ updates_pve.node }}/qemu/{{ updates_pve.vmid }}/snapshot"
+        method: POST
+        headers: "{{ updates_pve.headers }}"
+        body_format: form-urlencoded
+        body:
+          snapname: "{{ updates_snapshot_name }}"
+          vmstate: 0
+          description: >-
+            USAS updates run {{ usas_updates_run.id }}; safe to delete after {{ '%Y-%m-%d'
+            | strftime(now(utc=true).timestamp() + (updates_snapshot_max_age | int) * 86400, utc=true) }}
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_snapshot
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Fail unless Proxmox started the snapshot
+      ansible.builtin.fail:
+        msg: "{{ updates_pve_snapshot | usas_pve_error('take a snapshot of VM ' ~ updates_pve.vmid, 'VM.Snapshot') }}"
+      when: updates_pve_snapshot.status | default(-1) != 200
+
+    - name: Wait for the snapshot
+      ansible.builtin.include_tasks: "{{ role_path | dirname }}/proxmox_vm/tasks/wait_task.yml"
+      vars:
+        pve_task: "{{ updates_pve_snapshot.json.data }}"
+        pve_task_what: take a snapshot of VM {{ updates_pve.vmid }}
+        pve_task_timeout: "{{ updates_snapshot_timeout }}"
+        pve_api_url: "{{ updates_pve.url }}"
+        pve_api_headers: "{{ updates_pve.headers }}"
+        pve_hide_secrets: true
+
+    - name: Note the snapshot
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'snapshot': usas_updates_result.snapshot | combine({'status': 'taken',
+          'name': updates_snapshot_name, 'node': updates_pve.node})}) }}
+
+  rescue:
+    - name: Note why the VM has no snapshot
+      ansible.builtin.set_fact:
+        updates_snapshot_refused: "{{ ansible_failed_task.name | default('') is match('Refuse ') }}"
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'snapshot': usas_updates_result.snapshot | combine({'status': 'none',
+          'reason': reason | usas_clean_text(300)})}) }}
+      vars:
+        reason: >-
+          {{ ansible_failed_result.msg | default('failed') if ansible_failed_task.name | default('') is match('(Refuse|Fail) ')
+          else ansible_failed_task.name | default('') ~ ': ' ~ ansible_failed_result.msg | default('failed') }}
+
+# Without the snapshot it asked for, a VM isn't updated: one that can't have one is skipped (not a failure), an
+# error from Proxmox (a missing privilege, a failed task) fails it.
+- name: Skip a VM that can't have the snapshot it needs
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'skipped', 'apply_started': false,
+      'reason': 'no snapshot: ' ~ usas_updates_result.snapshot.reason}) }}
+  when:
+    - usas_updates_result.snapshot.status == 'none'
+    - updates_snapshot_required | bool
+    - updates_snapshot_refused | default(false) | bool
+
+- name: End here for a VM without its snapshot
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status == 'skipped'
+
+- name: Fail a VM whose snapshot Proxmox couldn't take
+  ansible.builtin.fail:
+    msg: "No snapshot: {{ usas_updates_result.snapshot.reason }}"
+  when:
+    - usas_updates_result.snapshot.status == 'none'
+    - updates_snapshot_required | bool
