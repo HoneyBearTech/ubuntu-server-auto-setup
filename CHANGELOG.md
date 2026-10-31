@@ -160,7 +160,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   image comes unencrypted), and says so before anything is created.
 - `prepare-node.yml` also lets the node user write to each storage's Import folder, where Proxmox has made one
   (run it again after allowing Import content on a storage).
-
+- The OS catalog pins AlmaLinux 10's x86-64-v2 cloud image instead of the x86-64 (v3) one, so AlmaLinux 10 runs on
+  CPUs without AVX2 too (Intel Ivy Bridge and earlier). CentOS Stream 10 and Rocky Linux 10 publish only x86-64-v3
+  builds. `make catalog` keeps choosing the v2 build.
 - An inventory source that can't be read now stops a run instead of being skipped with a warning
   (`any_unparsed_is_failed` in `ansible.cfg`), so an unreachable cluster can't silently shrink an updates run.
 

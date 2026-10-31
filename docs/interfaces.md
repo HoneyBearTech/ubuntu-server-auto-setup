@@ -397,6 +397,8 @@ vendor publishes only SHA-512, as Debian does for cloud images), `file` (the nam
 Proxmox node; cloud images end in `.qcow2`, as Proxmox's Import content requires), `build` (the point release or
 the vendor's build serial) and `signed` (`true` when the vendor signs the checksum file the checksum came from and
 the script checked that signature; `false` for CentOS Stream and Debian's cloud images, which are HTTPS only).
+The 10 releases of the RHEL family need an x86-64-v3 CPU (AVX2, as on Intel Haswell or AMD Excavator and
+later), except AlmaLinux 10: the catalog pins AlmaLinux's x86-64-v2 build of it, which also runs on older CPUs.
 `build-installer.yml` downloads each image a server needs onto its node (the installer ISO into the ISO
 storage, a cloud image into the same storage's Import folder), checked against that checksum.
 
