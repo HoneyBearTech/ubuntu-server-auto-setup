@@ -1,4 +1,5 @@
-// The three settings pages built from the roles' variables: Proxmox, Defaults and Hardening.
+// The settings pages built from the roles' variables: Proxmox, Defaults and Hardening (and the Updates page's
+// settings, which reuse the form helpers below).
 
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
@@ -28,7 +29,7 @@ function submitter(event: FormEvent<HTMLFormElement>): HTMLElement | null {
 }
 
 // Posts a section's form. 422 with errors shows them by the fields; anything else goes to onReply.
-function useSectionForm(api: string, reload: () => void) {
+export function useSectionForm(api: string, reload: () => void) {
   const [errors, setErrors] = useState<Errors>({});
   const [status, setStatus] = useState<NoticeT | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +62,7 @@ function useSectionForm(api: string, reload: () => void) {
 
 // The answer to a form's post, above its buttons. The live region is always there (so screen readers
 // announce what appears in it) and takes no room while it is empty.
-function FormStatus({ status, children }: { status: NoticeT | null; children?: ReactNode }) {
+export function FormStatus({ status, children }: { status: NoticeT | null; children?: ReactNode }) {
   return (
     <div className="form-status" aria-live="polite">
       {status ? <Notice notice={status}>{children}</Notice> : null}
@@ -101,7 +102,15 @@ function ClusterFacts({ cluster }: { cluster: Cluster }) {
                 <dd>
                   <ul>
                     {storages.map((s) => (
-                      <li key={s}>{s}{cluster.import_storages?.includes(s) ? " (Import content too)" : ""}</li>
+                      <li key={s}>
+                        {s}
+                        {cluster.import_storages?.includes(s) ? (
+                          // Short, like the nodes' status badges: the card is narrow.
+                          <span className="badge badge-info">
+                            <span className="visually-hidden">allows </span>Import<span className="visually-hidden"> content</span>
+                          </span>
+                        ) : null}
+                      </li>
                     ))}
                   </ul>
                 </dd>

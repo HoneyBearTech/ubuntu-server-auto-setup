@@ -1,5 +1,5 @@
 // The VMs page: the cluster's VMs and containers, with their addresses and whether the playbooks support them,
-// and the baseline run against the ones selected (VmRun). It asks the server again every 30 seconds while the tab
+// and the baseline or updates run against the ones selected (VmRun). It asks the server again every 30 seconds while the tab
 // is visible (sooner while guest agents are still answering, later after an error), and a refresh never
 // reorders the rows, moves the focus or drops the selection: a new order comes only from the sort buttons.
 
@@ -355,7 +355,7 @@ export function Vms() {
       <p className="lead">
         Every VM and container on the cluster, with the address the playbooks would use and whether they support
         it. The list refreshes every 30 seconds while this page is open. Select running VMs to run the
-        baseline against them: first a check run, which changes nothing.
+        baseline against them, or to install their updates: first a check run, which changes nothing.
       </p>
       {error ? <Notice notice={{ kind: "error", message: `The last refresh failed: ${error}` }} /> : null}
       {data.notes.map((note) => <Notice key={note.message} notice={note} />)}

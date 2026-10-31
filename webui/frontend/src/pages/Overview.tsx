@@ -28,6 +28,9 @@ export function RunsTable({ runs, caption }: { runs: Run[]; caption: string }) {
               <td data-label="Playbook">
                 {run.action}
                 {run.kind === "vms" ? <span className="sub">{run.check ? "VMs page, check" : "VMs page"}</span> : null}
+                {run.kind === "updates" ? (
+                  <span className="sub">{run.check ? "VMs page, updates check" : "VMs page, updates"}</span>
+                ) : null}
               </td>
               <td data-label="Options" className="mono">{runOptions(run)}</td>
               <td data-label="Status"><StatusBadge status={run.status} returncode={run.returncode} /></td>

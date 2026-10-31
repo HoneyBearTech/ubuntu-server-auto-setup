@@ -38,6 +38,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     group: "Playbooks",
     items: [
       { href: "/vms", label: "VMs", icon: "vms" },
+      { href: "/updates", label: "Updates", icon: "refresh" },
       { href: "/run", label: "Run", icon: "play" },
       { href: "/runs", label: "History", icon: "history" },
     ],
@@ -54,7 +55,8 @@ export function Brand() {
       <Mark />
       <span className="brand-text">
         <span className="brand-name">usas</span>
-        <span className="brand-sub">Ubuntu Server Auto Setup</span>
+        {/* Two lines in the sidebar: "Auto-Setup" stays whole on the second. */}
+        <span className="brand-sub">Unattended Server <span className="nowrap">Auto-Setup</span></span>
       </span>
     </Link>
   );
@@ -97,7 +99,7 @@ export function Footer({ version, children }: { version: string; children?: Reac
   return (
     <footer>
       <p>
-        USAS web UI {version} · <a href={`${DOCS}/web-ui.md`}>Help</a> ·{" "}
+        USAS · Unattended Server Auto-Setup · web UI {version} · <a href={`${DOCS}/web-ui.md`}>Help</a> ·{" "}
         <a href={`${DOCS}/accessibility.md`}>Accessibility</a>
       </p>
       {children}

@@ -8,6 +8,7 @@ import { plural } from "../format";
 import type { HostResult, HostResults as Results, RunTarget } from "../types";
 import { Icon } from "./Icons";
 import type { IconName } from "./Icons";
+import { UpdateResults } from "./UpdateResults";
 
 export const HOSTS_POLL_MS = 3_000;
 
@@ -55,6 +56,8 @@ export function HostResults({ runId, initial, targets, running, check }: {
   const byName = new Map(targets.map((t) => [t.name, t]));
   const done = !running;
   return (
+    <>
+    {results?.updates ? <UpdateResults hosts={results.updates.hosts} check={check} /> : null}
     <section className="card" aria-labelledby="hosts-heading">
       <div className="card-body">
         <h2 id="hosts-heading">Results per host</h2>
@@ -117,5 +120,6 @@ export function HostResults({ runId, initial, targets, running, check }: {
         </table>
       </div>
     </section>
+    </>
   );
 }

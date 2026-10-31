@@ -65,6 +65,9 @@ describe("the router", () => {
     renderAt("/");
     await loaded();
     expect(document.title).toBe("Overview · USAS");
+    // The brand spells out the name; the footer too.
+    expect(screen.getAllByRole("link", { name: /^usas ?Unattended Server Auto-Setup$/ }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/USAS · Unattended Server Auto-Setup · web UI/)).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Main" });
     await userEvent.click(within(nav).getByText("Servers"));
     expect(window.location.pathname).toBe("/servers");

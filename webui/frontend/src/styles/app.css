@@ -214,7 +214,6 @@ footer.boot {
 .brand-sub {
   font: 600 0.625rem / 1.2 var(--font-mono);
   letter-spacing: 0.04em;
-  white-space: nowrap;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -1449,6 +1448,7 @@ pre.key {
 
 .facts li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);

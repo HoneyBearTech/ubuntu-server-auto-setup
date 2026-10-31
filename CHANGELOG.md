@@ -73,6 +73,20 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
   control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
   (B23).
+- **The Updates page and updates on a schedule** ([docs/web-ui.md](docs/web-ui.md#walking-through-it)):
+  `/updates` shows each server's newest updates result, the schedules and the updates playbook's settings
+  for every server. A passing updates check run's page offers **Schedule this plan**, with the password again:
+  the check, or the check and then the update (only if the check passed with no failed or unreachable server
+  and no package removals), on chosen weekdays, from a start time for 30 to 720 minutes, in a time zone. The
+  container's own scheduler runs them (`USAS_SCHEDULER`, on by default); `docker exec usas python -m usas_web
+  updates --schedule <id>` runs one from host cron or a systemd timer instead. Every step is in the audit log.
+- **Updates from the VMs page** ([docs/web-ui.md](docs/web-ui.md#walking-through-it)): choose **Updates**
+  for the selected VMs, then what to install (every update or security only), whether they may reboot, a
+  Proxmox snapshot (offered only when the API token has `VM.Snapshot` and the disks can have one) and whether
+  to ignore the update windows. A check run lists what each VM would install; its page shows each server's
+  packages, reboot, snapshot and wave, and offers the real run for 30 minutes with a confirmation that names
+  the VMs that may reboot. The audit log records the playbook, the choices and what each server ended as. The
+  Run page offers `updates-check` and `updates` for the inventory's servers.
 - **The updates playbook on Debian 12 and 13** ([docs/updates.md](docs/updates.md)): security updates from
   Debian-Security, and a waiting reboot found by comparing the newest kernel in `/boot` with the running one.
   The supported releases and their end-of-support dates now follow the OS catalog (Ubuntu's dates move to the
@@ -245,6 +259,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The updates playbook's health checks after a reboot could find SSH gone again for a moment (sshd or a port
+  forward still starting) and report the server as no longer answering. They now wait until a whole login works
+  again, for up to `updates_health_timeout`.
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
@@ -255,8 +272,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 ### Documentation
 
 - The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
-  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing Ubuntu Server LTS and
-  hardening Ubuntu, Debian and RHEL-family servers, with a supported-versions badge row.
+  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing and hardening Ubuntu, Debian
+  and RHEL-family servers, with a supported-versions badge row.
+- The banner, the web UI's sidebar and its footer spell USAS out as Unattended Server Auto-Setup; the README's
+  overview diagram starts from a cloud image or the Ubuntu installer ISO and ends with a firewall and automatic
+  updates; and the web UI screenshots are new, with the VMs page in the menu.
 
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left
