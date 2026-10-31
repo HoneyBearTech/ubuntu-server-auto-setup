@@ -123,7 +123,9 @@ for 30 minutes, with a confirmation that names the VMs that may reboot
 passwordless sudo, and gets none of the Vault's secrets; its Proxmox tags `usas-group-<name>` and its HA
 state reach the waves as with the cluster inventory. The **Run** page offers `updates-check` and `updates`
 for the servers in the inventory. Either way the report goes to the web UI's data folder
-(`/data/updates/reports`).
+(`/data/updates/reports`). A passing check run can become a **schedule**: the check, or the check and then the
+update, in a weekly window, with the password again; the **Updates** page lists the schedules, each server's
+newest result and these settings ([web-ui.md](web-ui.md#walking-through-it)).
 
 ## Every VM on the cluster
 

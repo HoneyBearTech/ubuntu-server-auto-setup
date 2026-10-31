@@ -2,6 +2,7 @@
 // (webui/tests/test_frontend_fixtures.py checks it still matches the fields schema.py builds).
 
 import type {
+  UpdatesData,
   AccountData, OverviewData, Run, RunPageData, SectionData, ServersData, SessionData, SshData, Vm, VmsData,
 } from "../src/types";
 import sections from "./fixtures/sections.json";
@@ -9,6 +10,7 @@ import sections from "./fixtures/sections.json";
 export const proxmox = sections.proxmox as unknown as SectionData;
 export const defaults = sections.defaults as unknown as SectionData;
 export const hardening = sections.hardening as unknown as SectionData;
+export const updates = sections.updates as unknown as UpdatesData;
 export const servers = sections.servers as unknown as ServersData;
 
 export const running: Run = {

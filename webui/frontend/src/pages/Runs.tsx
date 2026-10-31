@@ -10,6 +10,7 @@ import { duration, isoTime, plural, runOptions, when } from "../format";
 import { Link, useRouter } from "../router";
 import type { ApplyInfo, IsoPlan, Notice as NoticeT, Run, RunDetailData, RunPageData } from "../types";
 import { RunsTable } from "./Overview";
+import { ScheduleForm } from "./Updates";
 
 export function RunPage() {
   const page = useData<RunPageData>("/api/run");
@@ -334,6 +335,7 @@ export function RunDetail({ id }: { id: string }) {
         ) : null}
       </dl>
       {data.apply && !running ? <ApplyPart run={run} apply={data.apply} /> : null}
+      {data.apply?.possible && !running && run.kind === "updates" ? <ScheduleForm run={run} /> : null}
       {run.kind === "vms" || run.kind === "updates" || data.hosts ? (
         <HostResults runId={run.id} initial={data.hosts ?? null} targets={run.targets ?? []} running={running}
                      check={run.check} />

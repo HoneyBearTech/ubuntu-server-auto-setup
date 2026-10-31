@@ -128,6 +128,23 @@ def updates(ui: UI) -> None:
     check(again["run"]["status"] == "succeeded" and result.get("status") == "nothing",
           "a second check finds no security update left", result)
 
+    # That check becomes a schedule (with the password again), and the command line runs it now.
+    form = {"action": "create", "run_id": again["run"]["id"], "name": "Nightly", "kind": "check", "day-sun": "on",
+            "start": "03:00", "minutes": "60", "timezone": "Etc/UTC", "schedule_current": "wrong"}
+    status, data = ui.post("/updates/schedules", form)
+    check(status == 422 and "schedule_current" in data.get("errors", {}), "a schedule needs the password", data)
+    status, data = ui.post("/updates/schedules", {**form, "schedule_current": PASSWORD})
+    check(status == 200, "the schedule is saved", data)
+    status, page = ui.get("/updates")
+    [schedule] = page["schedules"]
+    out = subprocess.run(["docker", "exec", ARGS.app, "python", "-m", "usas_web", "updates",  # noqa: S603, S607
+                          "--schedule", schedule["id"]], capture_output=True, text=True, timeout=900, check=False)
+    check(out.returncode == 0 and "Check run" in out.stdout, "the command line runs the schedule",
+          (out.stdout, out.stderr[-2000:]))
+    status, page = ui.get("/updates")
+    check(page["schedules"][0]["last_run"] and page["hosts"].get("vm-4073", {}).get("result", {}).get("status")
+          == "nothing", "the Updates page shows the schedule's run and the VM's newest result", page)
+
 
 def plan(ui: UI, vmid: int, preset: str = "full", **extra: str) -> tuple[int, dict]:
     form = {"vmid": str(vmid), "preset": preset, f"vm-{vmid}-address": ARGS.address, f"vm-{vmid}-user": "ubuntu"}

@@ -1784,3 +1784,102 @@ def test_pins_forgotten_and_adopted_are_audited(ui, monkeypatch):
     assert forget["event"] == "hostkey.forget" and forget["fingerprints"] == adopt["fingerprints"]
     post(ui, "/logout")
     assert ui.get("/audit.jsonl", follow_redirects=False).status_code in (302, 303, 307)
+
+
+# --- Updates: the page, its settings and the schedules ---------------------------------------------------------
+
+
+def test_the_updates_page_and_its_settings(ui):
+    configure(ui)
+    data = get(ui, "/api/updates").json()
+    names = [f["name"] for f in data["fields"]]
+    assert names[:3] == ["updates_scope", "updates_apt_upgrade", "updates_kernel"] and "updates_serial" in names
+    assert data["values"]["updates_serial"] == "25%" and data["hosts"] == {} and data["schedules"] == []
+    assert data["days"][0] == "mon" and data["timezone"] == "Europe/Berlin" and data["minutes"] == [30, 720]
+    r = post(ui, "/updates", {"updates_scope": "all", "updates_serial": "{{ lookup('pipe','id') }}"})
+    assert r.status_code == 422 and "updates_serial" in r.json()["errors"]
+    r = post(ui, "/updates", {"updates_scope": "security", "updates_apt_upgrade": "safe", "updates_reboot": "never",
+                              "updates_serial": "2", "updates_notify": "always", "updates_kernel": "on"})
+    assert r.status_code == 200, r.text
+    saved = load_yaml(ui.app_state.settings.inventory_file.read_text())["all"]["vars"]
+    assert (saved["updates_scope"], saved["updates_serial"], saved["updates_notify"]) == ("security", "2", "always")
+    assert "updates_apt_upgrade" not in saved  # the role's default is left out
+
+
+def schedule_form(run_id, **kw):
+    start = time.strftime("%H:%M", time.gmtime(time.time() - 3600))
+    return {"action": "create", "run_id": run_id, "name": "Nightly", "kind": "apply", "start": start,
+            "minutes": "720", "timezone": "Etc/UTC", "schedule_current": PASSWORD,
+            **{f"day-{d}": "on" for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}, **kw}
+
+
+def updates_check(ui, monkeypatch):
+    pinned(ui, monkeypatch)
+    reviewed = post(ui, "/vms/plan", {**UPDATES_FORM, "updates-window": "on"}).json()
+    started = post(ui, "/vms/run", {"plan_id": reviewed["plan_id"], "mode": "check"}).json()["run"]
+    return finished(ui, started["id"])
+
+
+def test_a_schedule_is_made_from_a_passing_check_with_the_password(ui, monkeypatch):
+    check = updates_check(ui, monkeypatch)
+    r = post(ui, "/updates/schedules", schedule_form(check.id, schedule_current="wrong"))
+    assert r.status_code == 422 and "password is wrong" in r.json()["errors"]["schedule_current"]
+    r = post(ui, "/updates/schedules", schedule_form(check.id, timezone="Nowhere/Land", start="25:00"))
+    assert r.status_code == 422 and {"timezone", "start"} <= set(r.json()["errors"])
+    baseline = finished(ui, post(ui, "/run", {"playbook": "baseline", "check": "on"}).json()["run"]["id"])
+    r = post(ui, "/updates/schedules", schedule_form(baseline.id))
+    assert r.status_code == 422 and "updates check run" in r.json()["error"]
+    assert post(ui, "/updates/schedules", {"action": "rm"}).status_code == 403
+    r = post(ui, "/updates/schedules", schedule_form(check.id))
+    assert r.status_code == 200, r.text
+    [made] = get(ui, "/api/updates").json()["schedules"]
+    assert (made["name"], made["kind"], made["open"], made["made_from"]) == ("Nightly", "apply", True, check.id)
+    assert made["targets"] == [{"vmid": 101, "name": "vm-101", "address": "10.0.0.51"}]
+    # A schedule never ignores the update windows, whatever its check did.
+    assert "updates_ignore_window" not in made["options"] and made["next"] > time.time()
+    entry = ui.app_state.audit.entries()[0]
+    assert entry["event"] == "schedule.created" and entry["session"] and entry["check"] == check.id
+    assert ui.app_state.schedules.path.stat().st_mode & 0o777 == 0o600
+    check.finished -= m.CHECK_TTL + 1
+    ui.app_state.runner._save(check)
+    r = post(ui, "/updates/schedules", schedule_form(check.id))
+    assert r.status_code == 422 and "30 minutes" in r.json()["error"]
+    r = post(ui, "/updates/schedules", {"action": "delete", "id": made["id"]})
+    assert r.status_code == 200 and get(ui, "/api/updates").json()["schedules"] == []
+    assert post(ui, "/updates/schedules", {"action": "delete", "id": made["id"]}).status_code == 404
+    assert ui.app_state.audit.entries()[0]["event"] == "schedule.deleted"
+
+
+def test_a_scheduled_apply_checks_first_and_installs_only_when_nothing_surprises(ui, monkeypatch):
+    check = updates_check(ui, monkeypatch)
+    post(ui, "/updates/schedules", schedule_form(check.id))
+    sched, runner = ui.app_state.scheduler, ui.app_state.runner
+    [s] = ui.app_state.schedules.load()
+    # The check reports nothing (the fake playbook writes no results): no update follows.
+    run_id = sched.run(s, "manual")
+    first = finished(ui, run_id)
+    assert (first.kind, first.check, first.schedule, first.options["updates_ignore_window"]) == (
+        "updates", True, s.id, "false")
+    deadline = time.time() + 5
+    while "Not installed" not in ui.app_state.schedules.load()[0].last_outcome and time.time() < deadline:
+        time.sleep(0.05)
+    assert ui.app_state.schedules.load()[0].last_outcome == "Not installed: the check reported no server."
+    assert not [r for r in runner.history() if r.applied_from == first.id]
+    # A check whose servers are all fine is followed by the update with the same plan.
+    runner.settings.run_env["FAKE_DELAY"] = "1"
+    run_id = sched.run(ui.app_state.schedules.load()[0], "manual-2")
+    runner.path(run_id, ".hosts.json").write_text(json.dumps(
+        {"finished": True, "hosts": {}, "updates": {"hosts": {"vm-101": {"status": "pending"}}}}))
+    finished(ui, run_id)
+    deadline = time.time() + 10
+    while not [r for r in runner.history() if r.applied_from == run_id] and time.time() < deadline:
+        time.sleep(0.05)
+    [real] = [r for r in runner.history() if r.applied_from == run_id]
+    real = finished(ui, real.id)
+    assert (real.check, real.schedule, real.plan) == (False, s.id, runner.get(run_id).plan)
+    assert "--check" not in runner.log_path(real.id).read_text()
+    assert "schedule.apply" in [e["event"] for e in ui.app_state.audit.entries()][:4]
+    # A VM whose key isn't pinned any more refuses the whole run before anything is contacted.
+    ui.app_state.keys.forget("usas-pve-101")
+    assert sched.run(ui.app_state.schedules.load()[0], "manual-3") == ""
+    assert ui.app_state.schedules.load()[0].last_outcome.startswith("Refused: Trust VM 101")
