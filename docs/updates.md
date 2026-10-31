@@ -24,7 +24,8 @@ a generic fallback.
    `updates_refresh_max_age`, and asks apt what it would install. It also reads what the server's own
    automatic updates do and whether a reboot is already waiting. With `--check` the run stops here: this
    is the report-only mode.
-2. **Updates, a batch at a time** (`updates_serial`, 25 % of the servers by default). With
+2. **Updates, a wave at a time** ([Waves](#waves): at most `updates_serial` servers, 25 % by default, and
+   never two of an update group or too many on one Proxmox node together). With
    `updates_snapshot: true` it first takes a Proxmox snapshot of each VM ([Snapshots](#snapshots)). It installs the
    chosen updates in the background on the server, so a restarted sshd or a dropped connection doesn't
    stop them. It then reboots if `updates_reboot: if_required` and the server needs it, and checks the
@@ -143,6 +144,33 @@ can be just `plugin: usas_pve`, plus optional filters: `nodes`, `tags_any`, `tag
 - **A cluster that doesn't answer stops the run** rather than updating only part of it
   (`any_unparsed_is_failed` in `ansible.cfg`).
 
+## Waves
+
+Before updating, the run plans the waves (batches) the servers go in, on the control node and without
+connecting to them. In inventory order, each server goes into the first wave that has room for it:
+
+- **At most `updates_serial` servers** per wave: a number, or a percentage of the servers being updated
+  (`25%` by default, at least one).
+- **At most `updates_group_max_parallel` (1) servers of each update group.** Put servers that do the same
+  job (two web servers behind a load balancer, the members of a database cluster) in one group, and they are
+  never updated, or rebooted, at the same time. A server's groups are `updates_group` (a name or a list, per
+  host or group in the inventory) and, for a VM on the cluster, each Proxmox tag `usas-group-<name>`.
+- **At most `updates_node_max_parallel` (2) servers that may reboot** (`updates_reboot: if_required`) **on
+  each Proxmox node**, so that one node doesn't boot many VMs at once. The node is the one the VM runs on
+  now (with the [cluster inventory](#every-vm-on-the-cluster)), otherwise its `pve_node`; a server that isn't
+  on a cluster has no node limit.
+
+`0` turns off either limit. The run takes these three settings from the first server, so set them for all
+servers (`group_vars/all`, or `-e`). A wave starts once the one before has finished, and when a server fails,
+no later server starts (`updates_max_fail_percentage`). The report gives each server's wave ("wave 2 of 3"),
+its groups, and whether Proxmox HA manages the VM: HA may start a VM elsewhere if a node fails while it is
+rebooting. The playbook can't read the cluster's HA rules (that needs `Sys.Audit`, which the token doesn't
+have), so put VMs that HA keeps apart in one update group too. A check run (`--check`) plans the waves as
+well, so you can review them before an apply.
+
+Tags only order the waves. Anyone who can change a VM's tags on the cluster can delay its update to a later
+wave, but no tag changes how a server is reached, what is installed, or with which credentials.
+
 ## Snapshots
 
 With `updates_snapshot: true`, each VM gets a Proxmox snapshot of its disks just before its updates are
@@ -257,12 +285,14 @@ Each server's result in `<run id>.json` holds its status and reason, and the OS 
 lists the pending updates (name, versions, suites, whether each is a security update), the planned,
 upgraded, held, excluded and deferred (phased or kept back) packages, and the reboot: needed, done or held,
 and why. It ends with the services still running old code, the automatic-update line, the health
-result and the snapshot (taken, removed or none and why, any snapshots deleted, a storage warning). Package and service names come from the server, so they are checked against the role's patterns
+result, the snapshot (taken, removed or none and why, any snapshots deleted, a storage warning) and the
+wave (its number, the number of waves, the server's update groups and whether HA manages it). Package and service names come from the server, so they are checked against the role's patterns
 and stripped of control characters, and each list stops at 5,000 entries. A hostile server can still lie
 about its packages: the report says what the server claimed.
 
 ## Settings
 
 Every setting, with its default, is in `roles/updates/defaults/main.yml` and
-[interfaces.md](interfaces.md#inventory-variables). `updates_serial` is set with `-e` (it decides the
-batches before any server's variables are read).
+[interfaces.md](interfaces.md#inventory-variables). The wave settings (`updates_serial`,
+`updates_group_max_parallel`, `updates_node_max_parallel`) and the notification settings are read once per
+run, from the first server: set them for all servers.

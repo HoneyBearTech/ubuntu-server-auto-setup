@@ -58,10 +58,28 @@
           tags: [always]
       tags: [always]
 
-# The servers with something to do, a batch at a time (updates_serial, 25 % by default).
-- name: Update the servers
+# On the control node's facts only: the waves the servers with something to do are updated in, so that two
+# servers of an update group, or too many on one Proxmox node, aren't updated at the same time.
+- name: Plan the waves
   hosts: usas_updates_ready
-  serial: "{{ updates_serial | default('25%') }}"
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Plan the waves
+      ansible.builtin.include_role:
+        name: updates
+        tasks_from: plan
+        apply:
+          tags: [always]
+      tags: [always]
+
+# A wave at a time, in the order the plan lined the servers up.
+- name: Update the servers
+  hosts: usas_updates_waves
+  order: inventory
+  serial: >-
+    {{ groups['usas_updates_waves'] | default([]) | map('extract', hostvars, 'usas_update_waves') | first
+    | default([]) | map('length') | list }}
   gather_facts: false
   become: true
   ignore_unreachable: true

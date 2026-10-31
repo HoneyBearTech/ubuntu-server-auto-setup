@@ -54,6 +54,8 @@ FROM target AS updates
 COPY --from=test-repo /srv/usas-test-repo /srv/usas-test-repo
 COPY boot-id.service /etc/systemd/system/usas-boot-id.service
 COPY fragile.service /etc/systemd/system/usas-test-fragile.service
+# A container has no console: a getty that fails at boot would show up in the health check as a unit that
+# failed after the update.
 # hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends unattended-upgrades needrestart \
@@ -69,6 +71,7 @@ RUN apt-get update \
  && printf '[Timer]\nOnCalendar=\nOnCalendar=2099-01-01\nPersistent=false\nRandomizedDelaySec=0\n' \
       | tee /etc/systemd/system/apt-daily.timer.d/never.conf > /etc/systemd/system/apt-daily-upgrade.timer.d/never.conf \
  && systemctl enable usas-boot-id.service \
+ && systemctl mask getty@.service serial-getty@.service console-getty.service \
  && if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then \
       echo 'PerSourcePenalties no' > /etc/ssh/sshd_config.d/50-usas-test.conf; fi \
  && apt-get update
