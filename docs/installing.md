@@ -102,6 +102,27 @@ reserve an address for the server on your DHCP server (set `net_mac` so the MAC 
 VM exists) and put that address in `ansible_host`: then the agent isn't asked. Without either, provisioning
 stops with a message naming the missing privilege.
 
+**Snapshots before updates (optional).** The updates playbook's `updates_snapshot: true`
+([updates.md](updates.md#snapshots)) takes and deletes snapshots, which needs **`VM.Snapshot`**. The role above
+doesn't have it. Either add it to the role, for every VM the token can see:
+
+```sh
+pveum role modify UbuntuAutoSetup --privs VM.Snapshot --append 1
+```
+
+or, tighter, give it only on the VMs that should have snapshots, through a role of its own on a pool
+(`/pool/<pool>`) or on single VMs (`/vms/<vmid>`). With privilege separation, the user and the token both need
+it:
+
+```sh
+pveum role add UsasSnapshot --privs "VM.Snapshot"
+pveum acl modify /pool/prod --users ansible@pve --roles UsasSnapshot
+pveum acl modify /pool/prod --tokens 'ansible@pve!automation' --roles UsasSnapshot
+```
+
+Don't add `VM.Snapshot.Rollback`: rolling back stays a decision for a Proxmox admin. Without `VM.Snapshot`, a
+run with `updates_snapshot: true` fails each VM with "the API token's role needs VM.Snapshot".
+
 The token is created with **privilege separation** (`--privsep 1`): it gets only the permissions given to
 the token itself, and never more than its user has. `ansible@pve` has no password, so nobody can sign in to
 the web UI as it. The `token add` command prints the secret once: put it in the Vault (step 4) right away.

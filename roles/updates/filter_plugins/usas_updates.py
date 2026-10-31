@@ -417,7 +417,92 @@ def usas_window_text(window):
                            f"({window.get('timezone', 'UTC')})", 80)
 
 
-STATUSES = ("updated", "nothing", "pending", "busy", "skipped", "unsupported", "unreachable", "failed")
+# Snapshots this playbook takes before updating (tasks/snapshot.yml): the name holds the time it was taken (UTC),
+# the description starts with the marker. Clean-up deletes only snapshots that have both.
+SNAPSHOT_NAME = re.compile(r"^usas_upd_([0-9]{8})_([0-9]{6})\Z")
+SNAPSHOT_MARKER = re.compile(r"^USAS updates run [0-9]{8}T[0-9]{6}Z-[0-9a-f]{4};")
+STORAGE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,99}\Z")
+DISK_KEY = re.compile(r"^(ide|sata|scsi|virtio|efidisk|tpmstate)[0-9]{1,2}\Z")
+MAX_SNAPSHOTS = 1000
+
+
+def _snapshot_taken(entry):
+    """When one of this playbook's snapshots was taken (UTC), from a VM's snapshot list entry; None for any
+    other snapshot (another name, no marker, or not a real time)."""
+    if not isinstance(entry, dict):
+        return None
+    name, description = entry.get("name"), entry.get("description")
+    match = SNAPSHOT_NAME.match(name) if isinstance(name, str) else None
+    if not match or not isinstance(description, str) or not SNAPSHOT_MARKER.match(description):
+        return None
+    try:
+        return datetime.datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S").replace(tzinfo=datetime.UTC)
+    except ValueError:
+        return None
+
+
+def usas_snapshot_cleanup(snapshots, keep=None, max_days=7, now=None):
+    """The names of this playbook's snapshots to delete from a VM's snapshot list (GET .../snapshot): those taken
+    more than max_days ago and, when keep is a number, all but the newest keep. Snapshots without both the
+    name pattern and the description marker (the operator's, "current") are never named."""
+    ours = []
+    for entry in (snapshots if isinstance(snapshots, list) else [])[:MAX_SNAPSHOTS]:
+        taken = _snapshot_taken(entry)
+        if taken is not None and entry["name"] not in (name for name, _ in ours):
+            ours.append((entry["name"], taken))
+    ours.sort(key=lambda item: item[1], reverse=True)
+    oldest = _now(now) - datetime.timedelta(days=min(max(int(max_days), 0), 3650))
+    kept = len(ours) if keep in (None, "") else max(int(keep), 0)
+    return [name for index, (name, taken) in enumerate(ours) if index >= kept or taken < oldest]
+
+
+def usas_disk_storages(config):
+    """The storages that hold a VM's disks, from its config (GET .../config): "local-lvm" from
+    "scsi0: local-lvm:vm-100-disk-0,size=32G". Passthrough disks (/dev/...), CD drives and unused disks are left
+    out."""
+    found = []
+    for key, value in (config.items() if isinstance(config, dict) else []):
+        if not DISK_KEY.match(str(key)) or not isinstance(value, str) or "media=cdrom" in value:
+            continue
+        volume = value.split(",", 1)[0]
+        storage = volume.split(":", 1)[0]
+        if ":" in volume and STORAGE.match(storage) and storage not in found:
+            found.append(storage)
+    return sorted(found)[:16]
+
+
+def usas_full_storages(results, percent=85):
+    """The storages more than percent used, from the results of a loop of GET /nodes/{node}/storage/{id}/status
+    over the storage names."""
+    full = []
+    for result in results if isinstance(results, list) else []:
+        if not isinstance(result, dict) or result.get("status") != 200 or not isinstance(result.get("item"), str):
+            continue
+        data = (result.get("json") or {}).get("data") if isinstance(result.get("json"), dict) else None
+        try:
+            used, total = float(data["used"]), float(data["total"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if total > 0 and used * 100 > total * int(percent) and STORAGE.match(result["item"]):
+            full.append(result["item"])
+    return full
+
+
+def usas_pve_error(result, what, privilege="VM.Audit"):
+    """Why a Proxmox API call (a uri result) failed, for the report: a refusal (403) names the privilege the
+    token's role needs; no answer says so."""
+    result = result if isinstance(result, dict) else {}
+    message = usas_clean_text(result.get("msg"), 200)
+    reason = message.split("HTTP Error ", 1)[1].split(": ", 1)[-1] if "HTTP Error " in message else message
+    status = result.get("status", -1)
+    if status == 403:
+        return f"Proxmox refused to {what}: the API token's role needs {privilege} ({reason})"
+    if status in (-1, None):
+        return f"couldn't reach the Proxmox API to {what}: {message}"
+    return f"Proxmox couldn't {what} (HTTP {usas_clean_text(status, 5)}: {reason})"
+
+
+STATUSES =("updated", "nothing", "pending", "busy", "skipped", "unsupported", "unreachable", "failed")
 
 
 def usas_finish_results(results, mode="apply"):
@@ -468,6 +553,14 @@ def usas_updates_summary(results):
         health = (r.get("health") or {}).get("status")
         if health and health != "skipped":
             parts.append(f"health {health}")
+        snapshot = r.get("snapshot") if isinstance(r.get("snapshot"), dict) else {}
+        if snapshot.get("status") == "taken":
+            parts.append("snapshot " + usas_clean_text(snapshot.get("name"), 40)
+                         + (" kept" if status in ("failed", "unreachable") else ""))
+        elif snapshot.get("status") == "none" and status != "skipped":
+            parts.append("no snapshot: " + usas_clean_text(snapshot.get("reason"), 120))
+        if snapshot.get("warning"):
+            parts.append(usas_clean_text(snapshot.get("warning"), 120))
         if r.get("reason"):
             parts.append(usas_clean_text(r.get("reason"), 160))
         lines.append(f"{usas_clean_text(r.get('host'), 64)}: " + "; ".join(parts))
@@ -528,6 +621,10 @@ class FilterModule:
             "usas_window_problems": usas_window_problems,
             "usas_in_window": usas_in_window,
             "usas_window_text": usas_window_text,
+            "usas_snapshot_cleanup": usas_snapshot_cleanup,
+            "usas_disk_storages": usas_disk_storages,
+            "usas_full_storages": usas_full_storages,
+            "usas_pve_error": usas_pve_error,
             "usas_finish_results": usas_finish_results,
             "usas_updates_summary": usas_updates_summary,
             "usas_notify_due": usas_notify_due,

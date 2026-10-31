@@ -41,6 +41,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   and guest-agent answers from the cluster now shape the updates run's inventory; names and groups are fixed,
   values are never templated, and an address from a guest is used only with its pinned key (assurance case
   B20).
+- **Snapshots before updates** (`updates_snapshot: true`, off by default;
+  [docs/updates.md](docs/updates.md#snapshots)): each VM gets a Proxmox snapshot of its disks just before its
+  update, on the node it runs on now. VMs whose disks can't have one, locked VMs and servers without a VM ID
+  are skipped (or, with `updates_snapshot_required: false`, updated without). Old snapshots are cleaned up
+  (`updates_snapshot_keep: 1`, `updates_snapshot_max_age: 7` days), only ever the playbook's own: the
+  `usas_upd_` name and its description marker. An unhealthy VM keeps its snapshot; the report warns about a
+  storage over 85 % used; [docs/updates.md](docs/updates.md#rolling-back) is the rollback runbook. Needs
+  `VM.Snapshot` on the token's role, never `VM.Snapshot.Rollback`
+  ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
+  control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
+  (B23).
 
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and

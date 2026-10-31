@@ -8,7 +8,7 @@
   vars:
     started: >-
       {{ groups['usas_updates_ready'] | map('extract', hostvars, 'usas_updates_result')
-      | selectattr('apply_started', 'defined') | list }}
+      | selectattr('apply_started', 'defined') | selectattr('apply_started') | list }}
     failed: "{{ started | selectattr('status', 'in', ['failed', 'unreachable']) | list | length }}"
     too_many: "{{ (failed | int) > 0 and (failed | int) * 100 > (updates_max_fail_percentage | int) * (started | length) }}"
     window_closed: "{{ not updates_ignore_window | bool and not updates_window | usas_in_window }}"
@@ -26,6 +26,10 @@
     - name: Mark the server as started
       ansible.builtin.set_fact:
         usas_updates_result: "{{ usas_updates_result | combine({'status': 'applying', 'apply_started': true}) }}"
+
+    - name: Take a snapshot of the VM first
+      ansible.builtin.include_tasks: snapshot.yml
+      when: updates_snapshot | bool and usas_updates_result.planned | length > 0
 
     - name: Note which services run before the update
       ansible.builtin.service_facts:
@@ -110,6 +114,13 @@
         usas_updates_result: >-
           {{ usas_updates_result | combine({'status': 'updated' if usas_updates_result.upgraded
           or usas_updates_result.reboot.done else 'nothing', 'finished': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}) }}
+
+    # Healthy: the snapshots this playbook took before are no longer needed, beyond the newest few.
+    - name: Keep only the newest snapshots
+      ansible.builtin.include_tasks: snapshot_prune.yml
+      vars:
+        updates_snapshot_prune_keep: "{{ updates_snapshot_keep }}"
+      when: usas_updates_result.snapshot.status == 'taken'
 
   rescue:
     - name: Note the failure
