@@ -25,3 +25,7 @@ fail2ban_sender: fail2ban@example.com
 # A listener verify-hardening.yml starts in the container.
 fail2ban_webhook_url: http://127.0.0.1:8099/usas-test?token=abc-123&priority=4
 fail2ban_webhook_format: json
+
+# Names (one that doesn't resolve), IPv4 and IPv6 addresses, and a pool.
+time_sync_servers: [ntp1.example.com, 192.0.2.123, "2001:db8::123"]
+time_sync_pools: [pool.example.net]

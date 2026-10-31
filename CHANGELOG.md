@@ -35,11 +35,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Time sources (NTP)**, off by default ([docs/interfaces.md](docs/interfaces.md),
+  [docs/security.md](docs/security.md#optional-hardening-and-notifications)): `time_sync_servers` and
+  `time_sync_pools` replace the OS's own time sources in the time service the server runs, chrony (Ubuntu
+  26.04, the RHEL family) or systemd-timesyncd (Ubuntu 22.04 and 24.04, Debian), installed if missing. Both
+  empty (the default) leaves the OS's time sync untouched; emptying them again brings its sources back. Also on
+  the web UI's Defaults page. **New outbound dependency** when set: the servers' clocks follow your NTP servers
+  over plain NTP (assurance case B25).
 - **Docker-published ports can obey the firewall** (`firewall_docker_enabled`, off by default; Ubuntu and
   Debian): rules in Docker's `DOCKER-USER` chain, kept in UFW's `after.rules` and `after6.rules`, drop new
   connections to published container ports unless their source is in `firewall_docker_sources` or the port is
   in `firewall_docker_allow`. Skipped with a message on servers without Docker; refused on the RHEL family. On
-  the web UI's Hardening page too. A firewall change: trust boundary B25 in the
+  the web UI's Hardening page too. A firewall change: trust boundary B26 in the
   [assurance case](docs/assurance-case.md) ([interfaces](docs/interfaces.md), [security](docs/security.md)).
 - **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
   copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and

@@ -1,0 +1,43 @@
+---
+# The OS's own time sync stays as it is until time_sync_servers or time_sync_pools is set. Then the sources go to
+# the time service the server runs (chrony when it's installed, otherwise the OS's default) in place of the OS's
+# own sources; emptying both lists again brings those back.
+- name: List the installed packages
+  ansible.builtin.package_facts:
+  when: time_sync_servers | length + time_sync_pools | length > 0
+
+# Installing systemd-timesyncd or chrony would remove another NTP service (they conflict).
+- name: Check for another NTP service
+  ansible.builtin.assert:
+    that: common_time_sync_other_services | select('in', ansible_facts.packages) | list | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ common_time_sync_other_services | select('in', ansible_facts.packages)
+      | join(', ') }}, which the role doesn't configure: remove it to let time_sync_servers and time_sync_pools
+      set up {{ common_os_time_sync_package }}, or leave both lists empty.
+    quiet: true
+  when: time_sync_servers | length + time_sync_pools | length > 0
+
+- name: Choose the time service
+  ansible.builtin.set_fact:
+    common_time_sync_service: >-
+      {{ 'none' if time_sync_servers | length + time_sync_pools | length == 0
+      else 'chrony' if 'chrony' in ansible_facts.packages else common_os_time_sync_package }}
+
+- name: Install the time service
+  ansible.builtin.package:
+    name: "{{ common_time_sync_service }}"
+    state: present
+  register: common_time_sync_package
+  when: common_time_sync_service != 'none'
+
+- name: Set the time sources for systemd-timesyncd
+  ansible.builtin.import_tasks: time_sync/timesyncd.yml
+  when: common_time_sync_service == 'systemd-timesyncd'
+
+- name: Set the time sources for chrony
+  ansible.builtin.import_tasks: time_sync/chrony.yml
+  when: common_time_sync_service == 'chrony'
+
+- name: Bring back the OS's own time sources
+  ansible.builtin.import_tasks: time_sync/off.yml
+  when: common_time_sync_service == 'none'

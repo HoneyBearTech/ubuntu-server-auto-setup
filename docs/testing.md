@@ -117,11 +117,13 @@ run; your own `~/.ssh` is never touched. The steps:
 9. **Optional hardening and notifications**, all turned on with `tests/hardening-vars.yml`: a run, a rerun
    that must change nothing, then `tests/verify-hardening.yml`: the `sysctl` drop-in holds exactly the
    expected keys and the kernel has their values, the audit rules and the immutable flag are in place,
-   AppArmor is enabled, apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
+   AppArmor is enabled, the time service would use exactly the configured time sources
+   (`tests/verify-time-sync.yml`: the sources in chrony's configuration and sources folders on Ubuntu 26.04), apt reads the mail settings, msmtp's files are root-only and `msmtp --pretend`
    reads the relay settings, the relay password reached its file unchanged (quotes, a backslash and `#`
    included), and Fail2Ban has both actions. A ban of a documentation address must reach a webhook
    listener in the container with the right message. A check run must report no changes, values that could
-   inject settings must be refused, and turning everything off must remove the files again. In a container
+   inject settings must be refused, and turning everything off must remove the files again (and bring the
+   OS's own time sources back). In a container
    auditd can't run and AppArmor's policy is the host's, so those two live checks are skipped with the
    reason in the log (the [pre-release checklist](release-checklist.md) covers them on a real VM).
    Kernel-wide `sysctl` keys would change the Docker host's own kernel, so outside CI (`CI=true`) the test
@@ -203,10 +205,14 @@ container name and ports, so only one of the two runs at a time. The steps: chec
 changes nothing; a first run, a second that changes nothing, and the checks; check mode again; the
 unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and then gone (Debian: a kernel in
 `/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`; the RHEL family: nothing right after a
-restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay
-and passwordless sudo on and off again; `firewall_docker_enabled` without Docker (no rules, and a message; on the
-RHEL family, refused before firewalld changes); and at least 80% task coverage of `common`, `firewall`, `ssh_hardening`
-and `fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
+restart, then `glibc` installed again); SSH moved to port 2222 and checked there; notifications, the mail relay,
+passwordless sudo and the time source settings of `tests/hardening-vars.yml` on, a rerun that changes nothing,
+the time service's sources checked (`tests/verify-time-sync.yml`: systemd-timesyncd's merged settings, or the
+sources in chrony's configuration on the RHEL family), then all off again with the OS's time sources back; on
+Ubuntu and Debian, the time sources on, a rerun and off again once more with chrony installed in place of
+systemd-timesyncd; `firewall_docker_enabled` without Docker (no rules, and a message; on the RHEL family,
+refused before firewalld changes); and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and
+`fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
 `docker.yml` is left out on the RHEL family).
 
 ## Secure Boot and disk encryption in a VM
@@ -279,7 +285,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_os_catalog.py` | `tools/update_os_catalog.py`: the directory-listing and checksum-file parsers (vendor input), and the catalog file's reader and validation | only plain file names (not `.` or `..`, no path) and hex checksums of the right length come out of a listing or checksum file, exactly as they appear; any catalog text fails with the script's own error or reads as entries with only HTTPS URLs on the vendors' hosts, plain file names and sha256/sha512 checksums, which write back to the same text |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
-| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the firewall's Docker port checks and `docker-user.rules.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; for values the role's asserts accept, the DOCKER-USER rules are exactly one line per source and allowed port and protocol, for the right IP version, each value one plain word |
+| `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the time servers' assert and `chrony.sources.j2` and `timesyncd.conf.j2`, the firewall's Docker port checks and `docker-user.rules.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; every accepted time server or pool is one chrony directive with only `iburst` added, and the timesyncd drop-in has only `[Time]` and one `NTP=` line with exactly the given names |
 | `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
 | `fuzz_update_plan.py` | `roles/updates/filter_plugins/usas_updates.py`: the wave planner and update groups, the storages read from a VM's config and the nearly full ones, the explanation of a failed API call; the role's wave and snapshot patterns | every server with a plain name is planned exactly once and nothing else is; no wave is empty, larger than `updates_serial`, or over the group or node limit; a server is in a later wave only when no earlier one had room for it; groups are plain lower-case names from `updates_group` and `usas-group-` tags only; the clean-up names only snapshots with both the `usas_upd_` name (a real time) and the description marker, never the operator's or `current`, each once, and exactly the ones older than the age limit or beyond the number to keep (worked out independently); storage names are plain; explanations are clean |

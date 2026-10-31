@@ -83,7 +83,7 @@ DEFAULTS = {
     "admin_extra_ssh_keys": "", "authorize_ui_key": "on", "admin_user": "sysadmin",
     "admin_password": "admin pass {{ x }}", "timezone": "Europe/Berlin", "net_gateway": "10.0.0.1",
     "net_prefix": "24", "net_dns": "10.0.0.1, 1.1.1.1", "net_search": "example.lan",
-    "autoinstall_storage_layout": "lvm",
+    "time_sync_servers": "ntp1.example.lan, 192.0.2.123", "autoinstall_storage_layout": "lvm",
 }
 HARDENING = {
     "ssh_port": "22", "ssh_allow_users": "", "ssh_permit_root_login": "no", "admin_sudo_nopasswd": "on",

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Fuzz target: the optional hardening and notification files built from inventory values: the sysctl
-drop-in, unattended-upgrades' mail settings, msmtp's configuration and the firewall's DOCKER-USER rules.
+drop-in, unattended-upgrades' mail settings, msmtp's configuration, the time sources for chrony and
+systemd-timesyncd, and the firewall's DOCKER-USER rules.
 
 Property: for any values the hardening, common and firewall roles accept, each setting appears exactly once with
 exactly the given value, and nothing else is added (a value can't inject another sysctl key, apt option, msmtp
-command, or iptables rule or option).
+command, chrony directive or option, timesyncd setting, or iptables rule or option).
 """
 
 import sys
@@ -18,6 +19,9 @@ SYSCTL = roles.template("hardening", "sysctl.conf.j2")
 SYSCTL_SETTINGS = roles.set_fact_expression("roles/hardening/tasks/sysctl.yml", "hardening_sysctl_settings")
 APT = roles.template("common", "52unattended-upgrades-local.j2")
 MSMTP = roles.template("common", "msmtprc.j2")
+CHRONY = roles.template("common", "chrony.sources.j2")
+TIMESYNCD = roles.template("common", "timesyncd.conf.j2")
+TIME_SERVERS = roles.assert_conditions("roles/common/tasks/main.yml", "Check the time servers")
 DOCKER_USER = roles.template("firewall", "docker-user.rules.j2")
 DOCKER_TASKS = "roles/firewall/tasks/docker_checks.yml"
 DOCKER_SOURCES_OK = roles.assert_conditions(DOCKER_TASKS, "Check the Docker port sources")
@@ -30,6 +34,7 @@ VALUE_CHARS = "az09_.:/- \n=#|"
 EMAIL_CHARS = "az09._+-@ \n\"';{}"
 HOST_CHARS = "az09.:- \n\"#"
 USER_CHARS = "az09._@+=- \n\"#"
+TIME_CHARS = "az09.:-[] \n\t#%;"
 NET_CHARS = "09af:./ \n-j#"
 PORT_CHARS = "0159: \n-j"
 
@@ -209,9 +214,43 @@ def docker_user(fdp):
             assert all(not v.startswith("-") and set(v) <= set("0123456789abcdefABCDEF:./tcpu") for v in values), line
 
 
+def time_server(fdp):
+    """Host names, IPv4 and IPv6 addresses, sometimes with characters the role must refuse, or not a string."""
+    kind = fdp.ConsumeIntInRange(0, 5)
+    if kind == 0:
+        return roles.from_alphabet(fdp, TIME_CHARS, 30)
+    if kind == 1:
+        return fdp.ConsumeIntInRange(0, 1000)
+    if kind == 2:
+        return roles.ipv4(fdp)
+    if kind == 3:
+        return ":".join(roles.from_alphabet(fdp, "09af", 4) for _ in range(fdp.ConsumeIntInRange(2, 8)))
+    return ".".join(roles.hostname(fdp) for _ in range(fdp.ConsumeIntInRange(1, 3)))
+
+
+def time_sources(fdp):
+    def entries():
+        if fdp.ConsumeIntInRange(0, 9) == 0:  # a single value where a list belongs
+            return time_server(fdp)
+        return [time_server(fdp) for _ in range(fdp.ConsumeIntInRange(0, 4))]
+
+    values = {"time_sync_servers": entries(), "time_sync_pools": entries(),
+              "common_time_server_pattern": COMMON["common_time_server_pattern"], "ansible_managed": "managed"}
+    if not roles.accepted(TIME_SERVERS, values):
+        return
+    servers, pools = values["time_sync_servers"], values["time_sync_pools"]
+    for name in servers + pools:
+        assert roles.matches(COMMON["common_time_server_pattern"], name), name
+    directives = [line.split(" ") for line in CHRONY.render(values).splitlines() if line and not line.startswith("#")]
+    assert directives == [["server", s, "iburst"] for s in servers] + [["pool", p, "iburst"] for p in pools], directives
+    lines = [line for line in TIMESYNCD.render(values).splitlines() if line and not line.startswith("#")]
+    assert lines == ["[Time]", "NTP=" + " ".join(servers + pools)], lines
+    assert lines[1].split("=", 1)[1].split() == servers + pools, lines
+
+
 def one_input(data):
     fdp = atheris.FuzzedDataProvider(data)
-    fdp.PickValueInList([sysctl, apt, msmtp, docker_user])(fdp)
+    fdp.PickValueInList([sysctl, apt, msmtp, time_sources, docker_user])(fdp)
 
 
 def main():

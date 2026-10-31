@@ -19,6 +19,17 @@ server_hostname: "{{ inventory_hostname_short }}"
 server_domain: ""            # adds "<ip> <host>.<domain> <host>" to /etc/hosts when set
 timezone: Etc/UTC
 
+# --- Time sync (NTP) ---
+# The sources go to the time service the server runs: chrony when it's installed (Ubuntu 26.04, the RHEL family),
+# otherwise systemd-timesyncd (Ubuntu 22.04 and 24.04, Debian), which is installed when missing. Emptying both
+# lists again brings the OS's own sources back. Servers that DHCP announces may still be used as well.
+
+# NTP servers the clock is set from, in place of the OS's own: host names or IP addresses. Empty, with no pools
+# either, leaves the OS's own time sync as it is.
+time_sync_servers: []
+# NTP pools: names that resolve to several servers. systemd-timesyncd, which has no pools, uses them as servers.
+time_sync_pools: []
+
 # How the first and later runs upgrade packages: dist, safe, full or "no" (apt's upgrade modes; "no" skips it).
 pkg_upgrade: "{{ apt_upgrade }}"
 apt_upgrade: dist            # the name before 0.7.0, still read until 1.0: set pkg_upgrade instead

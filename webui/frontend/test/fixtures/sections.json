@@ -262,6 +262,28 @@
     "choices": null
    },
    {
+    "name": "time_sync_servers",
+    "label": "Time servers (NTP)",
+    "kind": "list",
+    "help": "NTP servers the clock is set from, in place of the OS's own: host names or IP addresses. Empty, with no pools either, leaves the OS's own time sync as it is.",
+    "required": false,
+    "advanced": false,
+    "variable": "time_sync_servers",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "time_sync_pools",
+    "label": "Time server pools (NTP)",
+    "kind": "list",
+    "help": "NTP pools: names that resolve to several servers. systemd-timesyncd, which has no pools, uses them as servers.",
+    "required": false,
+    "advanced": true,
+    "variable": "time_sync_pools",
+    "default": null,
+    "choices": null
+   },
+   {
     "name": "vm_os",
     "label": "Default OS",
     "kind": "choice",
@@ -382,6 +404,8 @@
    "admin_user": "sysadmin",
    "admin_password": "",
    "timezone": "Europe/Berlin",
+   "time_sync_servers": "ntp1.example.lan\n192.0.2.123",
+   "time_sync_pools": "",
    "vm_os": "ubuntu-26.04",
    "net_gateway": "10.0.0.1",
    "net_prefix": "24",

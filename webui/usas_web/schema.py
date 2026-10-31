@@ -33,7 +33,8 @@ NOT_FORM_FORMATS = frozenset({
     "hardening_sysctl_key_pattern", "hardening_sysctl_value_pattern", "hardening_sysctl_file",
     "hardening_audit_rules_file", "hardening_audit_immutable_file", "hardening_container_types",
     "common_msmtp_password_file", "common_other_mtas", "fail2ban_webhook_action_file", "pve_iso_dir_pattern",
-    "pve_iso_dirs_file",
+    "pve_iso_dirs_file", "common_time_sync_other_services", "common_timesyncd_dropin", "common_chrony_sources_file",
+    "common_chrony_off_mark",
     # The Docker port rules' parts, checked by the role's own assert (the form parses firewall_docker_allow like
     # firewall_allow), and the files and services the role works with.
     "firewall_docker_port_pattern", "firewall_docker_protos", "firewall_docker_allow_keys", "firewall_docker_services",
@@ -241,6 +242,9 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
         S("admin_password", "Admin password", "secret", required=True, vault="vault_admin_password", default="",
           help="For the console and sudo; SSH stays key-only. Hashed (SHA-512) before it reaches the installer."),
         S("timezone", "Time zone", "text", "common", ui_pattern=TIMEZONE),
+        S("time_sync_servers", "Time servers (NTP)", "list", "common", pattern_var="common_time_server_pattern"),
+        S("time_sync_pools", "Time server pools (NTP)", "list", "common", pattern_var="common_time_server_pattern",
+          advanced=True),
         S("vm_os", "Default OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="ubuntu-26.04",
           help="For servers that don't choose their own on the Servers page."),
         S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern",
