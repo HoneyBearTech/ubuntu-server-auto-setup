@@ -114,7 +114,7 @@ else
 fi
 
 step "Rendering the role's seed"
-ssh-keygen -q -t ed25519 -N '' -C cloud-image-test -f "$W/id_ed25519"
+ssh-keygen -q -t ed25519 -N "" -C test@ubuntu-server-auto-setup -f "$W/id_ed25519"
 cp "$W/id_ed25519.pub" "$W/test.keys"
 mkdir -p "$W/seed"
 cat >"$W/render.yml" <<EOF
