@@ -35,6 +35,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
+  - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
+    install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts
+    it by label with `nofail`. A disk that holds anything is left as it is, and the run stops.
+  - Servers that share a `vm_spread_group` must have their VMs on different nodes: `provision-vms.yml` checks it
+    before creating anything, for every server in the inventory, where existing VMs run now.
+  - A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group gets the Proxmox tag
+    `usas-k8s-<cluster>-server` or `-agent` on its new VM. The first step towards Kubernetes clusters; installing
+    k3s comes later.
 - **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
   copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and
   `make updates` add the cluster's VMs, through a new inventory plugin (`usas_pve`) that reads the inventory's

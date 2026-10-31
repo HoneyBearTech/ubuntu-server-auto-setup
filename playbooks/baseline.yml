@@ -37,6 +37,10 @@
   roles:
     - role: common
       tags: [common]
+    # The VM's extra disks (vm_extra_disks): formatted while blank, mounted by label.
+    - role: data_disks
+      tags: [data_disks]
+      when: vm_extra_disks | default([]) | length > 0
     # The firewall goes before SSH hardening so a new SSH port is open before sshd moves to it.
     - role: firewall
       tags: [firewall]

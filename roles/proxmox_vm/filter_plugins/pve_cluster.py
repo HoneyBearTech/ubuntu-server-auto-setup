@@ -75,6 +75,42 @@ def pve_storage_problems(placements, node_storages):
     return bad
 
 
+def pve_spread_conflicts(hosts, vms):
+    """The spread groups that would have two VMs on one node: [{"group", "node", "hosts", "live"}], sorted.
+
+    hosts are {"host", "group", "node", "vmid"} (vm_spread_group, pve_node and pve_vmid); vms the cluster's VMs
+    from /cluster/resources?type=vm. A host whose VM exists counts on the node it runs on now (listed in "live"
+    when that isn't its pve_node), any other host on its pve_node. Hosts without a group or a node don't count.
+    """
+    running = {}
+    for vm in vms or []:
+        if isinstance(vm, dict) and _text(vm.get("vmid")):
+            running[_text(vm.get("vmid"))] = _text(vm.get("node"))
+    placed = {}
+    for h in hosts:
+        group, vmid, planned = _text(h.get("group")), _text(h.get("vmid")), _text(h.get("node"))
+        node = running.get(vmid, planned) if vmid else planned
+        if not group or not node:
+            continue
+        entry = placed.setdefault((group, node), {"hosts": [], "live": []})
+        entry["hosts"].append(_text(h.get("host")))
+        if vmid in running and node != planned:
+            entry["live"].append(f"{_text(h.get('host'))}'s VM {vmid}")
+    return [{"group": group, "node": node, "hosts": sorted(e["hosts"]), "live": sorted(e["live"])}
+            for (group, node), e in sorted(placed.items()) if len(e["hosts"]) > 1]
+
+
+def pve_extra_disks(disks):
+    """The VM's extra disks as configuration options: {"scsi1": ..., "scsi2": ...}, one new volume per disk of
+    vm_extra_disks (checked by roles/data_disks/tasks/check.yml), each with the serial usas-<label> the baseline
+    finds it by."""
+    found = {}
+    for index, disk in enumerate(disks, start=1):
+        found[f"scsi{index}"] = (f"{_text(disk.get('storage'))}:{_text(disk.get('size_gb'))},discard=on,iothread=1,"
+                                 f"ssd=1,serial=usas-{_text(disk.get('label'))}")
+    return found
+
+
 def pve_iso_builds(placements, node_storages, in_run):
     """Where each installer ISO is built, given every placement of the run.
 
@@ -160,5 +196,7 @@ class FilterModule:
             "pve_unknown_nodes": pve_unknown_nodes,
             "pve_storages_by_node": pve_storages_by_node,
             "pve_storage_problems": pve_storage_problems,
+            "pve_spread_conflicts": pve_spread_conflicts,
+            "pve_extra_disks": pve_extra_disks,
             "pve_iso_builds": pve_iso_builds,
         }

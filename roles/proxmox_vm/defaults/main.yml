@@ -25,6 +25,10 @@ pve_bridge: vmbr0              # bridge of the first network card, net0
 pve_vlan: ""                   # VLAN tag of net0 (1-4094), empty for none
 pve_vmid: ""                   # required, fixed per host so reruns can find the VM
 pve_tags: [ubuntu, ansible]
+# Hosts that share a vm_spread_group (any name, such as k8s-lab-servers) must have their VMs on different nodes,
+# so one node going down takes only one of them. Checked before anything is created, against where existing
+# VMs run now, for every host in the inventory with that group, not only those the run includes. Empty for none.
+vm_spread_group: ""
 
 # --- VM hardware ---
 vm_cores: 2
@@ -32,6 +36,14 @@ vm_sockets: 1
 vm_cpu_type: host
 vm_memory_mb: 2048
 vm_disk_gb: 32
+# More disks (scsi1, scsi2, ...), each a mapping with these keys (size_gb, label and mount are needed):
+#   size_gb (1-65536); storage (default pve_storage); label (the file system's label, lowercase letters, digits,
+#   '-' and '_', at most 12); mount (an absolute path); fs (ext4 or xfs, default ext4).
+# New VMs only: an existing VM isn't given disks. The baseline (data_disks role) formats each disk while it is
+# still blank, never one that already holds data, and mounts it by label with nofail. Example:
+#   vm_extra_disks:
+#     - { size_gb: 100, label: longhorn, mount: /var/lib/longhorn }
+vm_extra_disks: []
 # Pre-enroll Microsoft's Secure Boot keys in the EFI disk, so the firmware boots only signed code (Ubuntu's
 # shim, GRUB and kernel). New VMs only; set false for a VM that must boot unsigned kernels or modules.
 vm_secure_boot: true

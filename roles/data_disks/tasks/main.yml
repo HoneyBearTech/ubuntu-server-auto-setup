@@ -1,0 +1,83 @@
+---
+- name: Check the extra disks' settings
+  ansible.builtin.import_tasks: check.yml
+
+- name: Install the tools for the disks' file systems
+  ansible.builtin.package:
+    name: "{{ data_disks_list | map(attribute='fs') | unique | map('extract', data_disks_fs_packages) | list }}"
+    state: present
+  when: data_disks_list | length > 0
+
+# Each disk by its serial (usas-<label>, set by proxmox_vm), so a disk is never mistaken for another one
+# whatever order the kernel finds them in.
+- name: Find each extra disk by its serial
+  ansible.builtin.stat:
+    path: "{{ data_disks_by_id_dir }}/{{ data_disks_by_id_prefix }}usas-{{ item.label }}"
+    follow: true
+    get_checksum: false
+  register: data_disks_found
+  loop: "{{ data_disks_list }}"
+  loop_control:
+    label: "{{ item.label }}"
+
+- name: Fail if a disk isn't attached
+  vars:
+    data_disks_missing: "{{ data_disks_found.results | rejectattr('stat.exists') | map(attribute='item.label') | list }}"
+  ansible.builtin.assert:
+    that: data_disks_missing | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has no disk with the serial usas-{{ data_disks_missing | join(', usas-') }}
+      (looked for {{ data_disks_by_id_dir }}/{{ data_disks_by_id_prefix }}usas-...). provision-vms.yml adds
+      vm_extra_disks only when it creates the VM; for an existing VM, add the disk in Proxmox with that serial, or
+      remove it from vm_extra_disks.
+    quiet: true
+
+# blkid -p reads the disk itself, not a cache: exit 2 with no output means no file system and no partition table.
+- name: Look for a file system or partition table on each disk
+  ansible.builtin.command:
+    argv: [blkid, -p, -o, export, "{{ item.stat.lnk_source | default(item.stat.path) }}"]
+  register: data_disks_probe
+  changed_when: false
+  failed_when: data_disks_probe.rc not in [0, 2]
+  check_mode: false
+  loop: "{{ data_disks_found.results }}"
+  loop_control:
+    label: "{{ item.item.label }}"
+
+- name: Note what is on each disk
+  ansible.builtin.set_fact:
+    data_disks_states: "{{ data_disks_probe.results | default([]) | data_disks_state(data_disks_list) }}"
+
+# Only a blank disk is formatted. Anything else on it (another file system or label, partitions) may be data, so
+# the run stops before formatting any disk, naming what it found.
+- name: Fail if a disk holds something other than its own file system
+  vars:
+    data_disks_other: "{{ data_disks_states | selectattr('state', 'equalto', 'other') | list }}"
+  ansible.builtin.assert:
+    that: data_disks_other | length == 0
+    fail_msg: >-
+      {% for d in data_disks_other %}{{ inventory_hostname }}: the disk usas-{{ d.label }} ({{ d.device }}) holds
+      {{ d.found }}, not nothing or an {{ d.fs }} file system labelled {{ d.label }}, so it's left as it is.
+      {% endfor %}Wipe it by hand (wipefs -a) only if what's on it isn't needed, or give the entry another label.
+    quiet: true
+
+- name: Format each blank disk
+  community.general.filesystem:
+    dev: "{{ item.device }}"
+    fstype: "{{ item.fs }}"
+    opts: -L {{ item.label }}
+    force: false
+  loop: "{{ data_disks_states | selectattr('state', 'equalto', 'blank') | list }}"
+  loop_control:
+    label: "{{ item.label }}"
+
+- name: Mount each disk by its label
+  ansible.posix.mount:
+    path: "{{ item.mount }}"
+    src: LABEL={{ item.label }}
+    fstype: "{{ item.fs }}"
+    opts: "{{ data_disks_mount_options }}"
+    state: mounted
+  loop: "{{ data_disks_states }}"
+  loop_control:
+    label: "{{ item.label }} on {{ item.mount }}"
