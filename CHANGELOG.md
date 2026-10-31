@@ -185,6 +185,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
+- The updates tests sometimes saw the update phased at 0 % as one to install: apt ignores phasing without a
+  machine ID, which a test container that has only just booted may not have yet. The test image now gives apt a
+  fixed one (`APT::Machine-ID`).
 
 ### Documentation
 
