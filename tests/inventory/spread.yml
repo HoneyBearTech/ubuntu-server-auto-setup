@@ -1,0 +1,19 @@
+---
+# Added to tests/inventory/hosts.yml (a second -i) by one step of tests/run.sh. srv-01 joins srv-disks's spread
+# group lab, its pve_node pointing at the other node; but its VM 4061 runs on pve-test, with srv-disks's, which
+# the placement check must find even though the run doesn't include either of them. srv-hang is in two
+# Kubernetes clusters' groups at once.
+all:
+  children:
+    servers:
+      hosts:
+        srv-01:
+          vm_spread_group: lab
+          pve_node: pve-test-2
+      children:
+        k8s_lab_servers:
+          hosts:
+            srv-hang:
+        k8s_other_agents:
+          hosts:
+            srv-hang:

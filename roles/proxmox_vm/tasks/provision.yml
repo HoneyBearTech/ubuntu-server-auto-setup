@@ -132,7 +132,7 @@
         description: >-
           Installed by ubuntu-server-auto-setup ({{ (os_catalog_selected.name ~ ' ' ~ os_catalog_selected.version
           ~ ' cloud image ' ~ os_catalog_selected.image.build) if provision_cloud else 'Ubuntu ' ~ os_catalog_point_release }})
-        tags: "{{ pve_tags }}"
+        tags: "{{ provision_tags }}"
         ostype: l26
         machine: q35
         bios: ovmf
@@ -278,7 +278,9 @@
       become: false
       no_log: "{{ pve_hide_secrets }}"
 
-    - name: Boot from disk only, without the {{ 'seed ISO' if provision_cloud else 'installer and seed ISOs' }}
+    # The extra disks (vm_extra_disks) are added only now, empty, so the installer never sees them and can't put
+    # the system on one. Their serial, usas-<label>, is how the baseline finds each one.
+    - name: Boot from disk only, with any extra disks, without the {{ 'seed ISO' if provision_cloud else 'installer and seed ISOs' }}
       ansible.builtin.uri:
         url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/config"
         method: PUT
@@ -286,9 +288,9 @@
         validate_certs: "{{ pve_validate_certs }}"
         timeout: "{{ pve_api_timeout | int }}"
         body_format: form-urlencoded
-        body:
-          delete: "{{ 'ide2' if provision_cloud else 'ide2,ide3' }}"
-          boot: order=scsi0
+        body: >-
+          {{ {'delete': 'ide2' if provision_cloud else 'ide2,ide3', 'boot': 'order=scsi0'}
+             | combine(data_disks_list | pve_extra_disks) }}
       delegate_to: localhost
       become: false
       no_log: "{{ pve_hide_secrets }}"

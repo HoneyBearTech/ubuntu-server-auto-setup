@@ -1,0 +1,32 @@
+---
+# After tests/run.sh provisions srv-disks (VM 4071): its two extra disks were added only after the install, each a
+# new volume with its serial, and the VM was tagged as an agent of the Kubernetes cluster lab.
+- name: Verify the extra disks and the tags, through the API
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the mock API's state
+      ansible.builtin.uri:
+        url: https://127.0.0.1:8006/mock/state
+        validate_certs: false
+      register: verify_api
+
+    - name: Check the create call and the config update after the install
+      vars:
+        vm: "{{ verify_api.json.data.vms['4071'] }}"
+        create: "{{ verify_api.json.data.requests | selectattr('method', 'equalto', 'POST')
+                    | selectattr('path', 'equalto', '/nodes/pve-test/qemu') | map(attribute='form')
+                    | selectattr('vmid', 'equalto', '4071') | list }}"
+      ansible.builtin.assert:
+        that:
+          - create | length == 1
+          # The installer sees the system disk only.
+          - create[0] | dict2items | map(attribute='key') | select('match', '^scsi[0-9]+$') | list == ['scsi0']
+          - create[0].tags == 'ubuntu,ansible,usas-k8s-lab-agent'
+          # Added with the installer's CD-ROMs taken out, in one update.
+          - vm.config_updates | length == 1
+          - vm.config_updates[0].delete == 'ide2,ide3'
+          - vm.config_updates[0].scsi1 == 'local-lvm:8,discard=on,iothread=1,ssd=1,serial=usas-data'
+          - vm.config_updates[0].scsi2 == 'synology-nfs:4,discard=on,iothread=1,ssd=1,serial=usas-app-logs'
+          - "'scsi3' not in vm.config_updates[0]"
+          - vm.installed and vm.starts == 2

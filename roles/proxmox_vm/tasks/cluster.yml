@@ -1,8 +1,9 @@
 ---
 # Checks every host's placement against the cluster at once, before anything is created: its node must be one
-# of the cluster's nodes, and its ISO storage must allow ISO images (and Import content, for a cloud image) and be
-# active on that node. pve_placements
-# is the play's list of {host, node, ssh_host, storage} (see filter_plugins/pve_cluster.py). One API endpoint,
+# of the cluster's nodes, its ISO storage must allow ISO images (and Import content, for a cloud image) and be
+# active on that node, and no two hosts of one vm_spread_group may be on one node. pve_placements
+# is the play's list of {host, node, ssh_host, storage} (see filter_plugins/pve_cluster.py), pve_spread_candidates
+# the hosts whose vm_spread_group counts and pve_vms the cluster's VMs. One API endpoint,
 # any member of the cluster, answers for all of its nodes. Leaves pve_node_storages for the ISO plan.
 - name: Check the hosts' nodes and ISO storages against the cluster
   run_once: true
@@ -72,3 +73,34 @@
           (Datacenter → Storage → Content: ISO image{{ ' and Import' if pve_bad_storages | selectattr('cloud_image') | list
           else '' }}, and Nodes).
         quiet: true
+
+    # Hosts sharing a vm_spread_group (a Kubernetes cluster's servers, say) must not share a node, or one node
+    # going down takes several of them. An existing VM counts where it runs now (it may have been migrated), any
+    # other host where pve_node puts it. Only when VMs are created: the ISO plan passes no pve_spread_candidates.
+    - name: Check the spread groups
+      when: pve_spread_candidates is defined
+      block:
+        - name: Start the list of hosts in a spread group
+          ansible.builtin.set_fact:
+            pve_spread_hosts: []
+
+        - name: Collect the hosts that are in a spread group
+          ansible.builtin.set_fact:
+            pve_spread_hosts: >-
+              {{ pve_spread_hosts + [{'host': item, 'group': hostvars[item].vm_spread_group | string,
+                 'node': hostvars[item].pve_node | default('') | string,
+                 'vmid': hostvars[item].pve_vmid | default('') | string}] }}
+          loop: "{{ pve_spread_candidates }}"
+          when: hostvars[item].vm_spread_group | default('') | string | length > 0
+
+        - name: Check that no spread group has two VMs on one node
+          vars:
+            pve_spread_bad: "{{ pve_spread_hosts | pve_spread_conflicts(pve_vms.json.data) }}"
+          ansible.builtin.assert:
+            that: pve_spread_bad | length == 0
+            fail_msg: >-
+              {% for b in pve_spread_bad %}vm_spread_group {{ b.group }} puts {{ b.hosts | join(' and ') }} on node
+              {{ b.node }}{{ ' (' ~ b.live | join(', ') ~ ' running there now)' if b.live else '' }}.
+              {% endfor %}The VMs of one spread group must be on different nodes: change pve_node, or migrate the VM
+              in Proxmox.
+            quiet: true

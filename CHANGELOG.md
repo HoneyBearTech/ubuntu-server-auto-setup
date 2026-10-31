@@ -35,6 +35,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
+  - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
+    install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts
+    it by label with `nofail`. A disk that holds anything is left as it is, and the run stops.
+  - Servers that share a `vm_spread_group` must have their VMs on different nodes: `provision-vms.yml` checks it
+    before creating anything, for every server in the inventory, where existing VMs run now.
+  - A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group gets the Proxmox tag
+    `usas-k8s-<cluster>-server` or `-agent` on its new VM. The first step towards Kubernetes clusters; installing
+    k3s comes later.
 - **Time sources (NTP)**, off by default ([docs/interfaces.md](docs/interfaces.md),
   [docs/security.md](docs/security.md#optional-hardening-and-notifications)): `time_sync_servers` and
   `time_sync_pools` replace the OS's own time sources in the time service the server runs, chrony (Ubuntu
