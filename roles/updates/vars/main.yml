@@ -30,11 +30,14 @@ updates_group_pattern: '^[a-z0-9][a-z0-9_.-]{0,62}\Z'
 # At most this many packages are kept per host in a report.
 updates_max_entries: 5000
 
-# Releases the playbook updates, with the end of their standard support (later: the OS catalog). A release past
-# its end still gets updates, with a warning in the report.
+# Releases the playbook updates, with the end of their support: the OS catalog's apt-family releases and dates
+# (roles/os_catalog/vars/catalog.yml; a test keeps them the same). A release past its end still gets updates,
+# with a warning in the report.
 updates_supported_releases:
-  - {distribution: Ubuntu, version: "22.04", eol: "2027-04-30"}
-  - {distribution: Ubuntu, version: "24.04", eol: "2029-04-30"}
-  - {distribution: Ubuntu, version: "26.04", eol: "2031-04-30"}
+  - {distribution: Ubuntu, version: "22.04", eol: "2027-06-01"}
+  - {distribution: Ubuntu, version: "24.04", eol: "2029-05-31"}
+  - {distribution: Ubuntu, version: "26.04", eol: "2031-05-29"}
+  - {distribution: Debian, version: "12", eol: "2028-06-30"}
+  - {distribution: Debian, version: "13", eol: "2030-06-30"}
 # The families the role has task files for (tasks/*/<os_family>.yml).
 updates_families: [Debian]

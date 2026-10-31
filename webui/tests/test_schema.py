@@ -224,3 +224,11 @@ def test_network_cards_display(sch):
     assert parse_value(nic_field(sch), "vmbr1 dhcp, vmbr2 none") == [{"mode": "dhcp", "bridge": "vmbr1"},
                                                                        {"mode": "none", "bridge": "vmbr2"}]
     assert set(sch.roles.var("provision_nic_modes")) == {"static", "dhcp", "none"}
+
+
+def test_the_updates_playbook_supports_the_catalogs_apt_releases():
+    """roles/updates/vars/main.yml lists the OS catalog's Ubuntu and Debian releases, with the same end of support."""
+    catalog = yaml.safe_load((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]
+    supported = yaml.safe_load((REPO / "roles/updates/vars/main.yml").read_text())["updates_supported_releases"]
+    apt = sorted((e["name"], str(e["version"]), str(e["eol"])) for e in catalog if e["family"] in ("ubuntu", "debian"))
+    assert sorted((r["distribution"], r["version"], r["eol"]) for r in supported) == apt

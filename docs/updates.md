@@ -11,9 +11,18 @@ make updates LIMIT=web-01               # install on one server
 make updates ARGS="-e updates_scope=security"
 ```
 
-The playbook supports Ubuntu 22.04, 24.04 and 26.04. Debian and the RHEL family follow with the multi-OS
-work. A server on another system or release is skipped with the reason (`unsupported`), never updated with
-a generic fallback.
+The playbook supports the apt-family releases of the OS catalog: Ubuntu 22.04, 24.04 and 26.04, and Debian
+12 and 13, with the catalog's end-of-support dates (a server past it still gets updates, with a warning). The
+RHEL family follows. A server on another system or release is skipped with the reason (`unsupported`), never
+updated with a generic fallback.
+
+On Debian:
+- **Security updates** are those from Debian-Security (the `<codename>-security` suite), the same rule as
+  Ubuntu's `-security` pockets; point-release updates count as regular updates.
+- **A waiting reboot** shows differently: Debian writes no `/var/run/reboot-required`, so the newest kernel in
+  `/boot` is compared with the one running, and needrestart (when installed) adds a kernel or services still
+  running old code. The report names the kernel (`linux-image-<version>`).
+- **Phased updates** are Ubuntu's; Debian has none.
 
 ## What a run does
 

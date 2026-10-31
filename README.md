@@ -228,7 +228,7 @@ You need:
 | `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
 | `make updates-check` | Report the package updates each server would get, changing nothing. |
 | `make updates` | Install the package updates, with health checks; reboots only with `updates_reboot: if_required` ([docs/updates.md](docs/updates.md)). |
-| `make test-updates` | Run the updates playbook's integration tests (needs Docker; `OS=ubuntu-24.04` picks the release). |
+| `make test-updates` | Run the updates playbook's integration tests (needs Docker; `OS=debian-12` or `OS=ubuntu-24.04` picks the release). |
 
 Two variables apply to every target: `LIMIT=<host or group>` narrows the run (`--limit`), and
 `ARGS="..."` passes anything else to `ansible-playbook`, for example `ARGS="--ask-vault-pass"`,

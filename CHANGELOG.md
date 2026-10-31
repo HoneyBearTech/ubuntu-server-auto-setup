@@ -87,6 +87,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   packages, reboot, snapshot and wave, and offers the real run for 30 minutes with a confirmation that names
   the VMs that may reboot. The audit log records the playbook, the choices and what each server ended as. The
   Run page offers `updates-check` and `updates` for the inventory's servers.
+- **The updates playbook on Debian 12 and 13** ([docs/updates.md](docs/updates.md)): security updates from
+  Debian-Security, and a waiting reboot found by comparing the newest kernel in `/boot` with the running one.
+  The supported releases and their end-of-support dates now follow the OS catalog (Ubuntu's dates move to the
+  catalog's). The updates integration tests run on Debian 12 and 13 too.
 - **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
   the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
   update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags

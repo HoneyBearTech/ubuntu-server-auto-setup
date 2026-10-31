@@ -31,7 +31,7 @@ syntax: ## Syntax-check every playbook against the example inventory
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
 
-test-updates: ## Integration tests of the updates playbook (needs Docker; OS=ubuntu-24.04 picks the release)
+test-updates: ## Integration tests of the updates playbook (needs Docker; OS=debian-12 or ubuntu-24.04 picks the release)
 	tests/updates.sh
 
 test-baseline: ## The baseline on one OS (needs Docker; OS=debian-12 picks the release, debian-13 by default)
