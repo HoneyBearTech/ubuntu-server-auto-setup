@@ -10,9 +10,11 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Updates tests | the updates playbook against two servers with updates waiting in a signed test repository, on Ubuntu 22.04, 24.04 and 26.04: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=ubuntu-24.04` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
+| Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`), a move to port 2222, and the baseline roles' task coverage | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
 | Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
+| VMs page integration | the image, the mock Proxmox API and an Ubuntu 26.04 systemd container standing in for a VM the project didn't create: host-key pinning, a check run, the real run after a confirmation, a second check run that changes nothing, a guest claiming another VM's address refused, the audit log, and no secret on the VM | `make webui-vms` (needs Docker) | every pull request (not a required check) |
 | Fuzzing | the code that turns inventory values into files and commands, and the OS catalog tool's parsers, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | OS catalog tool | `tools/update_os_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
 | OS catalog check | every image the catalog pins, against the real vendors: the signature on the checksum file (pinned keys), the checksum, and that the image can still be downloaded; newer builds are listed | `make catalog-check` | pull requests that change the catalog, the script or its keys; weekly, opening or updating an issue when a pin fails or a newer build is out (and closing it when the catalog checks out again) |
@@ -35,15 +37,16 @@ leaves the machine except the container image builds:
 The test keys, the mock's TLS certificate and `known_hosts` are created in a temporary directory for each
 run; your own `~/.ssh` is never touched. The steps:
 
-1. **build-installer** twice with `local` storage: the ISO is remastered on both nodes, each of which has
-   servers, it has the `autoinstall` kernel argument and a 3-second GRUB timeout, and the second run changes
-   nothing. With `--limit` leaving the second node out it is skipped, and said so; a node whose host key
+1. **build-installer** twice with `local` storage: each server's installer ISO is remastered on its node,
+   26.04 on `pve-test` and 24.04 on `pve-test-2` (whose `srv-two` has `vm_os: ubuntu-24.04`), each has the
+   `autoinstall` kernel argument and a 3-second GRUB timeout, and the second run changes nothing. With `--limit` leaving the second node out it is skipped, and said so; a node whose host key
    isn't trusted is named before any node builds; servers naming nodes the cluster doesn't have are refused
-   in one error, by both playbooks, before anything is created. With the shared `synology-nfs` storage the
+   in one error, by both playbooks, before anything is created (they're in `ubuntu_servers`, the group's name
+   before 0.7.0, which is read and said so). With the shared `synology-nfs` storage the
    ISO is built once, by `pve-test` only (only it has that run's work directory), and a storage a node
    doesn't have is refused. With the real catalog, whose checksum the stand-in ISO doesn't have, the
-   download is refused with what to do, and the copy in storage is kept. With an empty catalog and
-   `ubuntu_point_release` set, the ISO is checked against the signed `SHA256SUMS` instead (and a second
+   download is refused with what to do, and the copy in storage is kept. With a catalog that pins another point
+   release and `ubuntu_point_release` set, the ISO is checked against the signed `SHA256SUMS` instead (and a second
    run changes nothing); then it must refuse a `SHA256SUMS` whose checksum was swapped (bad signature), one
    with no `SHA256SUMS.gpg`, one signed by a key other than the pinned one, and a malformed fingerprint.
 2. **provision-vms** for `srv-01`: the VM is created with the expected hardware (an EFI disk with Secure
@@ -52,7 +55,11 @@ run; your own `~/.ssh` is never touched. The steps:
    `vm_secure_boot: false`, skips the existing VM and changes nothing on it. The mock stores `efidisk0` and
    `tpmstate0` the way Proxmox does and refuses what Proxmox would (keys on a 2 MB EFI disk, an EFI disk
    without OVMF, an unknown TPM version). `srv-two` is created through `/nodes/pve-test-2/...`, with its seed
-   ISO on that node; a new VM on a node whose host key isn't trusted isn't created.
+   ISO on that node and the 24.04 installer; a new VM on a node whose host key isn't trusted isn't created.
+   OS settings are refused before anything is created: a `vm_os` the catalog doesn't have, an image without
+   its family, Debian with `autoinstall`, `cloud_image` (not available yet), an `ubuntu_release` that disagrees
+   with `vm_os`, and malformed values. `tests/verify-aliases.yml` sets every name renamed in 0.7.0 under its
+   old name and checks the new names hold the values, and that the run lists the old names.
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
    Then the networks: `srv-dhcp` (`net_mode: dhcp`) is provisioned with the address its guest agent reports
@@ -122,7 +129,7 @@ from Docker's one address, so the script pauses between some steps.
 
 `tests/updates.sh` runs `playbooks/updates.yml` against two containers built from
 `tests/images/ubuntu-target` (stage `updates`, for the release in `OS`): `upd-usas` stands in for a server
-this project installed (`ubuntu_servers`, sudo with a password), `upd-other` for one it didn't
+this project installed (`servers`, sudo with a password), `upd-other` for one it didn't
 (`other_servers`, its own user, passwordless sudo), on `127.0.0.1:2341` and `2342`. The image replaces
 Ubuntu's archive with a repository built at image build time (`test-repo.sh`): small packages with newer
 versions in a `test-updates` and a `test-security` suite, a held one, one phased at 0 %, one whose update
@@ -144,9 +151,31 @@ a service the update breaks fails its server's health check and keeps the other 
 stand-in relay (`tests/notify_sink.py`: SMTP with STARTTLS and a certificate the run trusts through
 `SSL_CERT_FILE`, sign-in checked) and a stand-in webhook, only when something changed, while a relay whose
 certificate isn't trusted fails the run and neither the relay password nor the webhook's token appears in
-the output. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
+the output; and the cluster inventory against `tests/mock_pve.py --fixture-updates` (a cluster of two nodes
+with a VM for each case): `upd-usas` keeps its name and gains its live node, a VM outside the inventory is
+`vm-<vmid>` and updated through its pinned alias, one whose address leads to the other container is refused
+by its pin, an excluded VM is absent, the VMs to leave alone (container, template, stopped, locked, Windows,
+no address, tag `usas-no-updates`) are reported without being contacted, and a cluster file with a bad
+filter stops the run. Snapshots run against the same mock: a VM whose disks can't have one is skipped, a
+refusal for lack of `VM.Snapshot` fails it with that name, a healthy update takes one on the node the VM runs on
+now (`vmstate` 0) and deletes only the playbook's own old snapshot, never the operator's two (one named like
+the playbook's), the storage warning appears, `updates_snapshot_required: false` updates a VM without one, an
+unhealthy VM keeps its snapshot, and the API token never appears in the output. Each container gets host keys of its own for this. Each checks the run's JSON report. Last, at least 80% of the updates role's tasks must have run. With `USAS_LOG_DIR` set, a failed run
 keeps each play's log, the reports and each container's failed units and recent warnings there; CI
 uploads them as an artifact for 7 days. It takes about 6 minutes per release.
+
+## The baseline tests
+
+`tests/baseline.sh` runs only the baseline, against one container built from `tests/images/ubuntu-target`
+for the release `OS` names (`debian-12`, `debian-13`, or an Ubuntu LTS release; `debian-13` by default). A
+Debian container stands in for a VM installed from Debian's cloud image: classic `sudo`, `sshd` from
+`ssh.service` with no socket activation, and the admin user with the sudoers file the cloud-init seed writes.
+It uses `tests/inventory/hosts.yml` and `tests/verify-baseline.yml` as `tests/run.sh` does, and the same
+container name and ports, so only one of the two runs at a time. The steps: check mode on the fresh server
+changes nothing; a first run, a second that changes nothing, and the checks; check mode again; the
+unattended-upgrades origins (no ESM on Debian); a waiting reboot reported and then gone (Debian: a kernel in
+`/boot` newer than the one running; Ubuntu: `/var/run/reboot-required`); SSH moved to port 2222 and checked
+there; and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and `fail2ban`.
 
 ## Secure Boot and disk encryption in a VM
 
@@ -214,11 +243,14 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_ssh_keys.py` | the authorized-keys expression in `proxmox_vm`, `common` and `proxmox_node_user` | all three roles agree; every entry is one trimmed line of the input that starts with a key type |
 | `fuzz_node_user.py` | `pve_ssh_user_pattern`, and the expression in `os_catalog` that reads the ISO folder from the file `prepare-node.yml` writes | the user pattern accepts exactly what `common_username_pattern` does; the folder taken is the storage's entry, an absolute path without control characters, or nothing |
 | `fuzz_checksums.py` | the checksum expression in `installer_iso` | the result is empty or a checksum from a line naming exactly the ISO |
+| `fuzz_os_settings.py` | `os_catalog_id_pattern`, `vm_os_image_url_pattern` and `vm_os_image_sha256_pattern` in `roles/os_catalog/vars/main.yml`, against the catalog's ids | every catalog id passes; an id that passes is a plain lowercase name, which with a SHA-256 that passes makes a file name Proxmox's Import content accepts; a URL that passes is HTTPS with a host, no user, query, fragment, spaces or control characters, and names a disk image |
 | `fuzz_os_catalog.py` | `tools/update_os_catalog.py`: the directory-listing and checksum-file parsers (vendor input), and the catalog file's reader and validation | only plain file names (not `.` or `..`, no path) and hex checksums of the right length come out of a listing or checksum file, exactly as they appear; any catalog text fails with the script's own error or reads as entries with only HTTPS URLs on the vendors' hosts, plain file names and sha256/sha512 checksums, which write back to the same text |
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
-| `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each node-local storage is built by its node when in the run, each shared storage exactly once by a node that uses it, nothing else; an accepted node name is safe in an API path |
+| `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value |
+| `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |
+| `fuzz_update_plan.py` | `roles/updates/filter_plugins/usas_updates.py`: the snapshot clean-up, the storages read from a VM's config and the nearly full ones, the explanation of a failed API call; the role's snapshot patterns | the clean-up names only snapshots with both the `usas_upd_` name (a real time) and the description marker, never the operator's or `current`, each once, and exactly the ones older than the age limit or beyond the number to keep (worked out independently); storage names are plain; explanations are clean |
 | `fuzz_status_token.py` | `parse_bearer` and `TOKEN_PATTERN` in `webui/usas_web/status.py` (the status API's `Authorization` header) | any header gives nothing or a well-formed token taken from it (the prefix and 43 URL-safe characters, nothing before or after, no line break); a well-formed header in any case and with blanks around the token always gives it back; only the token a digest was made from matches it |
 | `fuzz_vm_inventory.py` | `webui/usas_web/vmplan.py` (the VMs page's run plans and their inventory), `inventory_names`, `parse_limit` and `parse_tags` in `webui/usas_web/runner.py`, and `vm_alias`, `ALIAS` and `Keys.pins` in `webui/usas_web/sshkeys.py` | any listing and settings give a plan or a refusal, nothing else; a plan's inventory loads back to exactly the hosts planned (servers by name, other VMs as `vm-<vmid>` in `usas_vms`), with every typed or reported value `!unsafe` and no line break; a VM outside the inventory gets none of the Vault's secrets, passwordless sudo, a usable IPv4 address and its pinned alias; the plan's limit and tags pass the runner's own checks unchanged; aliases always match `ALIAS`, and any `known_hosts` text yields only aliases |
 
@@ -287,6 +319,18 @@ challenge for `localhost` that needs user verification. Finally it checks that t
 volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
+**The VMs page's runs** (`tests/webui-vms.sh`, `make webui-vms`) start the image, the mock (with
+`--vm-target`: VM 4071's guest agent reports a systemd container's address, and VM 4072 claims the same one)
+and that container, which has only its own user `ubuntu` with passwordless sudo, on a private network with
+names of their own (`usas-vms-*`), so it can run next to `make test`. `tests/webui_vms.py` pins VM 4071's
+host key after checking the scanned fingerprints against the container's own `ssh-keygen -lf`, refuses a
+plan before that and a real run before a passing check, runs the full baseline in check mode (nothing
+installed), then for real after the confirmation (the firewall is on with the VM's own rule, the host name
+and the user's password are unchanged, sudo stays passwordless, the UI's key stays), refuses a second real
+run of the same check, finds nothing to change in a second check run, and gets a refused connection for VM
+4072, whose pinned key isn't the container's. The audit log must name each step, and no secret of the UI may
+reach the VM, the run files or the audit log.
+
 ### The browser tests
 
 `tests/webui-browser.sh` (`make webui-browser`) runs the app in a real browser with
@@ -326,7 +370,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2347 and 2349 for `make test-updates`). The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install

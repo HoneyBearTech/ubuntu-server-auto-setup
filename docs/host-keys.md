@@ -10,7 +10,9 @@ trusting whatever answers the first time (trust on first use).
 
 New VMs are a different case: provisioning trusts the key a new VM offers when it first boots (see
 [security.md](security.md#what-it-does-not-protect-against)). This page is about the Proxmox nodes, which
-exist before the playbooks run and which you can read from a console.
+exist before the playbooks run and which you can read from a console, and about VMs you didn't create that
+the updates playbook updates ([section 4](#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory)) or the web UI's
+VMs page runs the baseline on ([section 5](#5-vms-you-didnt-create-the-vms-page)) (both use the same pins).
 
 The examples use a node named `pve-1` at `192.0.2.10`, with the API reached as `pve-1.example.lan`. Use
 your own node names and addresses.
@@ -196,11 +198,77 @@ The first field must be the node's SSH address exactly as the **SSH key** page h
 and never read-only: provisioning adds each new VM's key to it, and the UI replaces the whole file when you
 trust or forget a key.
 
+## 4. VMs you didn't create (the updates playbook's cluster inventory)
+
+With the cluster inventory ([updates.md](updates.md#every-vm-on-the-cluster)), a VM that isn't in your
+static inventory is reached at whatever address its guest agent reports. So its host key is pinned under a
+name made from the cluster and its VM ID, `usas-<cluster>-<vmid>` (`usas-homelab-4093`), not under the
+address: every connection passes that name as `HostKeyAlias`. A guest that reports another VM's address
+gets a host-key mismatch instead of your sudo password. The cluster's name is the one Proxmox reports
+(Datacenter → Summary), or `pve` when the token may not read it, or `cluster:` in the plugin's file. The
+run's report shows each VM's alias. There is no trust on first use: a VM with no pin is reported
+`unreachable` ("its SSH host key isn't trusted as usas-…") until you pin it.
+
+1. On the VM's console in Proxmox (VM → Console), logged in as any user:
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+
+2. On the control node, scan the address the report (or `ansible-inventory --host vm-<vmid>`) gives for it,
+   store the result under the alias, and compare:
+
+   ```bash
+   ssh-keyscan -t ed25519 192.0.2.40 | sed 's/^192\.0\.2\.40 /usas-homelab-4093 /' > vm-4093.known_hosts
+   ssh-keygen -lf vm-4093.known_hosts
+   ```
+
+   For a port other than 22, use `ssh-keyscan -p <port>`; the alias replaces `[address]:port` as the first
+   field.
+3. If the two fingerprints match, append `vm-4093.known_hosts` to the `known_hosts` file your runs use (the
+   one `ansible_ssh_common_args` names, `~/.ssh/known_hosts` by default; in the web UI's container
+   `/data/ssh/known_hosts`).
+
+Servers in your static inventory keep the entry provisioning made for their address (or the one you made as
+in step 1), since their address comes from you, not from the guest.
+
+## 5. VMs you didn't create (the VMs page)
+
+The VMs page runs the baseline on VMs of the cluster, including ones this project didn't install. Their
+host keys are pinned by **cluster and VM ID**, not by address: the `known_hosts` entry is named
+`usas-<cluster>-<vmid>` (the cluster's name from the last connection test, lowercased, or `pve` when it
+isn't known), and every connection to that VM passes it as `HostKeyAlias`. A guest agent that reports
+another VM's address then only gets `Host key verification failed`. There is no trust on first use:
+
+1. On the VMs page, tick the VM. In its part below the table, choose the address and port, then **Scan the
+   host key**.
+2. On the VM's console in Proxmox (**the VM → Console**), logged in as any user:
+
+   ```sh
+   for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done
+   ```
+
+3. If every fingerprint the page shows is in that list, tick **The fingerprints match what … shows** and
+   **Pin these keys**. If any differs, another machine answered: don't pin.
+
+A server on the Servers page (one this project installed) starts from the key recorded when it was
+installed: the first plan for it copies the address entry to its alias, and the audit log says so.
+
+The entry is the same as in [section 4](#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory), so a VM pinned on the VMs page is pinned for the updates playbook's cluster inventory too, and the other way round.
+
+**Forget the host key** on the VMs page removes the entry (for a VM that was reinstalled: pin the new key
+after comparing it). Pinned keys are part of a plan: pinning again after a check run means checking again
+before the real run.
+
 ## When a key or certificate changes
 
-- `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` from SSH: stop. Check on the node's console whether it
+- `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` from SSH, or `Host key verification failed` in a VMs
+  page run: stop. Check on the node's console whether it
   was reinstalled or its keys regenerated, and compare the new fingerprint. Only then remove the old entry
   (`ssh-keygen -R 192.0.2.10`, or **Forget the host key** in the web UI) and pin the new one.
+- `isn't trusted as usas-<cluster>-<vmid>` in an updates report: a VM found on the cluster whose key isn't
+  pinned yet, or whose key no longer matches its pin. Pin it as in section 4, after checking on its console
+  why it changed.
 - `No ED25519 host key is known for <address>` for a server this project installed: a run stopped after the
   install but before it trusted the new VM's key (for example a server with `net_mode: dhcp` whose address
   couldn't be read), and later runs skip the VM because it exists. Either delete the VM (`qm destroy <vmid>

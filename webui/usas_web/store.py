@@ -30,7 +30,11 @@ OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "vm_disk_passphrase": "vault_disk_passphrase"}
 SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics")
 # Host variables that hold text the user typed (written as !unsafe).
-SERVER_TEXT_VARS = ("pve_node",)
+SERVER_TEXT_VARS = ("pve_node", "vm_os")
+# Names an inventory written before 0.7.0 may hold, and the fields they now fill (the playbooks read both until 1.0).
+OLD_NAMES = {"ufw_ssh_limit": "firewall_ssh_limit", "ufw_ssh_sources": "firewall_ssh_sources"}
+# The servers' group, and its name before 0.7.0: an older inventory is read from it and written back as servers.
+SERVER_GROUPS = ("servers", "ubuntu_servers")
 
 
 class Unsafe(str):
@@ -213,11 +217,20 @@ class Store:
         top = inventory.get("all", {}) or {}
         all_vars = top.get("vars", {}) or {}
         children = top.get("children", {}) or {}
+        for old, new in OLD_NAMES.items():
+            if old in all_vars and new not in all_vars:
+                all_vars[new] = all_vars[old]
         for name in self.schema.by_name:
             if name in all_vars and not self.schema.by_name[name].vault:
                 config.values[name] = all_vars[name]
-        if "webui_ufw_allow" in all_vars or isinstance(config.values.get("ufw_allow"), str):
-            config.values["ufw_allow"] = all_vars.get("webui_ufw_allow", [])
+        # The rules for every server are kept apart from each server's own (see save), under either name.
+        for kept, combined in (("webui_firewall_allow", "firewall_allow"), ("webui_ufw_allow", "ufw_allow")):
+            if kept in all_vars or isinstance(all_vars.get(combined), str):
+                config.values["firewall_allow"] = all_vars.get(kept, [])
+                break
+        else:
+            if isinstance(all_vars.get("ufw_allow"), list) and "firewall_allow" not in all_vars:
+                config.values["firewall_allow"] = all_vars["ufw_allow"]
         keys = list(config.values.get("admin_extra_ssh_keys") or [])
         ui_key = self.ui_public_key()
         config.authorize_ui_key = bool(all_vars.get("webui_authorize_ui_key", True))
@@ -227,14 +240,17 @@ class Store:
         nodes = ((children.get("proxmox_nodes") or {}).get("hosts") or {})
         for name, node in nodes.items():
             config.node_addresses[str(name)] = str((node or {}).get("ansible_host", ""))
-        hosts = ((children.get("ubuntu_servers") or {}).get("hosts") or {})
+        hosts: dict[str, Any] = {}
+        for group in SERVER_GROUPS:
+            for name, host in ((children.get(group) or {}).get("hosts") or {}).items():
+                hosts.setdefault(name, host)
         for name, host in hosts.items():
             host = host or {}
             server = {"name": str(name), "ansible_host": str(host.get("ansible_host", ""))}
             for var in SERVER_HOST_VARS + SERVER_TEXT_VARS:
                 if var in host:
                     server[var] = host[var]
-            server["ufw_ports"] = host.get("webui_ufw_allow_host", [])
+            server["firewall_ports"] = host.get("webui_firewall_allow_host", host.get("webui_ufw_allow_host", []))
             config.servers.append(server)
         return config
 
@@ -246,7 +262,7 @@ class Store:
             if f.vault or name not in config.values:
                 continue
             value = config.values[name]
-            if name in ("ufw_allow", "admin_extra_ssh_keys"):
+            if name in ("firewall_allow", "admin_extra_ssh_keys"):
                 continue
             # Values equal to the role default are left out, so a new release's default applies; admin_user is
             # always written because the inventory's ansible_user refers to it.
@@ -276,12 +292,12 @@ class Store:
         all_vars["provision_known_hosts_file"] = str(s.known_hosts)
         all_vars["ssh_known_hosts_file"] = str(s.known_hosts)
 
-        # Firewall rules for every server plus each server's own: a host's ufw_allow would replace the
+        # Firewall rules for every server plus each server's own: a host's firewall_allow would replace the
         # group's, so the inventory combines them per host.
-        common_rules = list(config.values.get("ufw_allow") or [])
-        if common_rules or any(srv.get("ufw_ports") for srv in config.servers):
-            all_vars["webui_ufw_allow"] = _mark(common_rules)
-            all_vars["ufw_allow"] = "{{ webui_ufw_allow + (webui_ufw_allow_host | default([])) }}"
+        common_rules = list(config.values.get("firewall_allow") or [])
+        if common_rules or any(srv.get("firewall_ports") for srv in config.servers):
+            all_vars["webui_firewall_allow"] = _mark(common_rules)
+            all_vars["firewall_allow"] = "{{ webui_firewall_allow + (webui_firewall_allow_host | default([])) }}"
 
         hosts: dict[str, Any] = {}
         for srv in config.servers:
@@ -296,8 +312,8 @@ class Store:
             # An extra card with the default route replaces the group's gateway on net0.
             if any(nic.get("gateway") for nic in srv.get("vm_extra_nics") or []):
                 host["net_gateway"] = ""
-            if srv.get("ufw_ports"):
-                host["webui_ufw_allow_host"] = _mark(list(srv["ufw_ports"]))
+            if srv.get("firewall_ports"):
+                host["webui_firewall_allow_host"] = _mark(list(srv["firewall_ports"]))
             hosts[str(srv["name"])] = host  # a host name (checked against the roles' pattern)
 
         children: dict[str, Any] = {}
@@ -308,7 +324,7 @@ class Store:
                  for name, address in sorted(config.node_addresses.items()) if address}
         if nodes:
             children["proxmox_nodes"] = {"hosts": nodes}
-        children["ubuntu_servers"] = {
+        children["servers"] = {
             "vars": {
                 "ansible_user": "{{ admin_user }}",
                 # Sudo needs it once the first baseline run removes passwordless sudo (the default).
@@ -331,7 +347,7 @@ class Store:
     def host_names(self) -> set[str]:
         """Every host and group name, for checking --limit."""
         config = self.load()
-        names = {"all", "ubuntu_servers", "proxmox_nodes", "ungrouped"}
+        names = {"all", "servers", "proxmox_nodes", "ungrouped"}
         names.update(s["name"] for s in config.servers)
         names.update(name for name, address in config.node_addresses.items() if address)
         return names

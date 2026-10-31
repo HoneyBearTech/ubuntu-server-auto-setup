@@ -1,0 +1,27 @@
+---
+# The variables renamed in 0.7.0 keep working under their old names until 1.0: tests/run.sh sets every old name
+# (with -e) and this checks what the new names hold, with the roles' own defaults.
+- name: Check that the old variable names still set the new ones
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Note old names the inventory still uses
+      ansible.builtin.import_tasks: ../playbooks/tasks/deprecations.yml
+
+    - name: Load the roles' defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/{{ item }}/defaults/main.yml"
+      loop: [firewall, common, os_catalog]
+
+    - name: Check what the new names hold
+      ansible.builtin.assert:
+        that:
+          - "firewall_allow == [{'port': '8443', 'proto': 'tcp'}]"
+          - firewall_ssh_sources == ['10.0.0.0/8']
+          - not firewall_ssh_limit | bool
+          - firewall_default_incoming == 'reject'
+          - firewall_logging == 'medium'
+          - pkg_upgrade == 'safe'
+          - vm_os == 'ubuntu-24.04'
+          - ubuntu_release == '24.04'

@@ -9,11 +9,20 @@
   failed_when: false
   check_mode: false
 
+# A host key that isn't pinned (or doesn't match) says how to pin it: a VM found on the cluster is pinned by
+# its alias, usas-<cluster>-<vmid>, after comparing the key on its console (docs/host-keys.md).
 - name: Report a server that can't be reached
   ansible.builtin.set_fact:
     usas_updates_result: >-
-      {{ usas_updates_result | combine({'status': 'unreachable',
-      'reason': (updates_python.msg | default('no answer') | usas_clean_text(200))}) }}
+      {{ usas_updates_result | combine({'status': 'unreachable', 'reason': key_reason if key_problem
+      else (updates_python.msg | default('no answer') | usas_clean_text(200))}) }}
+  vars:
+    key_problem: "{{ updates_python.msg | default('') is search(key_messages) }}"
+    key_messages: Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No [A-Z0-9]+ host key is known
+    key_name: "{{ usas_pve_alias | default(ansible_host | default(inventory_hostname)) }}"
+    key_reason: >-
+      its SSH host key isn't trusted as {{ key_name }} (missing or different in known_hosts): compare it with the
+      server's console and pin it (docs/host-keys.md)
   when: updates_python is unreachable
 
 # Ansible's modules need Python; this playbook doesn't install it on a server as a side effect.

@@ -12,12 +12,12 @@
     # SSH rules go in before the firewall is enabled, so the current session survives.
     - name: Allow SSH
       community.general.ufw:
-        rule: "{{ 'limit' if ufw_ssh_limit | bool else 'allow' }}"
+        rule: "{{ 'limit' if firewall_ssh_limit | bool else 'allow' }}"
         port: "{{ ssh_port | string }}"
         proto: tcp
         from_ip: "{{ item }}"
         comment: ssh
-      loop: "{{ ufw_ssh_sources }}"
+      loop: "{{ firewall_ssh_sources }}"
 
     - name: Add extra allow rules
       community.general.ufw:
@@ -26,13 +26,13 @@
         proto: "{{ item.proto | default('tcp') }}"
         from_ip: "{{ item.from | default('any') }}"
         comment: "{{ item.comment | default(omit) }}"
-      loop: "{{ ufw_allow }}"
+      loop: "{{ firewall_allow }}"
       loop_control:
         label: "{{ item.port }}/{{ item.proto | default('tcp') }} from {{ item.from | default('any') }}"
 
     - name: Set the default incoming policy
       community.general.ufw:
-        default: "{{ ufw_default_incoming }}"
+        default: "{{ firewall_default_incoming }}"
         direction: incoming
 
     - name: Set the default outgoing policy
@@ -42,7 +42,7 @@
 
     - name: Set UFW logging
       community.general.ufw:
-        logging: "{{ ufw_logging }}"
+        logging: "{{ firewall_logging }}"
 
     - name: Enable UFW
       community.general.ufw:

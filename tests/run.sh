@@ -17,10 +17,11 @@ export TASK_COVERAGE_FILE="$TEST_TMP/coverage.txt"
 export ANSIBLE_FORCE_COLOR=0
 # The node's stand-in SHA256SUMS is signed with a test key made when its image is built; signing.yml (written
 # below) points the installer role at that key instead of Ubuntu's. catalog.yml (also written below) is the real
-# OS catalog with the stand-in ISO pinned as Ubuntu 26.04's installer.
+# OS catalog with the stand-in ISOs pinned as Ubuntu 26.04's and 24.04's installers.
 INV=(-i tests/inventory/hosts.yml -e "@$TEST_TMP/signing.yml" -e "@$TEST_TMP/catalog.yml")
-# For the steps that check an ISO the catalog doesn't pin against the signed SHA256SUMS: an empty catalog.
-UNPINNED=(-e '{"os_catalog": []}' -e ubuntu_point_release=26.04.1)
+# For the steps that check an ISO the catalog doesn't pin against the signed SHA256SUMS: a catalog that pins
+# 26.04.9 instead (written below), and pve-test only, whose own release is 26.04.
+UNPINNED=(--limit pve-test -e "@$TEST_TMP/catalog-unpinned.yml" -e ubuntu_point_release=26.04.1)
 PVE=usas-test-pve
 PVE2=usas-test-pve2
 SRV=usas-test-srv
@@ -85,6 +86,7 @@ play_fails() {
 play_says() {
   local expect="$1"; shift
   local log; log="$(mktemp "$TEST_TMP/play.XXXXXX")"
+  last_log="$log"
   if ! ansible-playbook "${INV[@]}" "$@" >"$log" 2>&1; then
     cat "$log"
     echo "ERROR: ansible-playbook $* failed" >&2
@@ -187,25 +189,32 @@ printf '{"ansible_ssh_common_args": "-o UserKnownHostsFile=%s/known_hosts.one -o
 docker cp "$PVE":/srv/test-signing/keyring.gpg "$TEST_TMP/signing-keyring.gpg"
 printf 'installer_signing_keyring: %s\ninstaller_signing_fingerprint: %s\n' "$TEST_TMP/signing-keyring.gpg" \
   "$(docker exec "$PVE" cat /srv/test-signing/fingerprint)" >"$TEST_TMP/signing.yml"
-python3 - "$(docker exec "$PVE" sha256sum /srv/ubuntu/ubuntu-26.04.1-live-server-amd64.iso)" "$TEST_TMP/catalog.yml" <<'PY'
+docker exec "$PVE" sh -c 'cd /srv/ubuntu && sha256sum ubuntu-*-live-server-amd64.iso' >"$TEST_TMP/stand-in.sums"
+python3 - "$TEST_TMP" <<'PY'
 import sys, yaml
 catalog = yaml.safe_load(open("roles/os_catalog/vars/catalog.yml"))
-iso = next(e for e in catalog["os_catalog"] if e["id"] == "ubuntu-26.04")["methods"]["autoinstall"]
-digest, path = sys.argv[1].split()
-name = path.rsplit("/", 1)[1]
-iso.update(url=f"https://releases.ubuntu.com/26.04/{name}", checksum=f"sha256:{digest}", file=name, build="26.04.1")
-yaml.safe_dump(catalog, open(sys.argv[2], "w"))
+entries = {e["id"]: e for e in catalog["os_catalog"]}
+for line in open(f"{sys.argv[1]}/stand-in.sums"):
+    digest, name = line.split()
+    point = name.split("-")[1]
+    release = ".".join(point.split(".")[:2])
+    entries[f"ubuntu-{release}"]["methods"]["autoinstall"].update(
+        url=f"https://releases.ubuntu.com/{release}/{name}", checksum=f"sha256:{digest}", file=name, build=point)
+yaml.safe_dump(catalog, open(f"{sys.argv[1]}/catalog.yml", "w"))
+entries["ubuntu-26.04"]["methods"]["autoinstall"].update(file="ubuntu-26.04.9-live-server-amd64.iso", build="26.04.9")
+yaml.safe_dump(catalog, open(f"{sys.argv[1]}/catalog-unpinned.yml", "w"))
 PY
 
-step "build-installer: local ISO storage, so the ISO is remastered on each node its servers use"
-play_says 'local on pve-test-2: built by pve-test-2' playbooks/build-installer.yml
+step "build-installer: local ISO storage, so each server's ISO is remastered on its node (26.04 and 24.04)"
+play_says 'local on pve-test-2: built by pve-test-2 (ubuntu-24.04.5-live-server-amd64.iso)' playbooks/build-installer.yml
+grep -q 'local on pve-test: built by pve-test (ubuntu-26.04.1-live-server-amd64.iso)' "$last_log"
 play --idempotent playbooks/build-installer.yml
 play tests/verify-installer.yml
 
 step "build-installer: --limit leaves a node out, and that node is skipped (and said so), not built"
-docker exec "$PVE2" rm -f /var/lib/vz/template/iso/ubuntu-26.04.1-live-server-amd64-autoinstall.iso
+docker exec "$PVE2" rm -f /var/lib/vz/template/iso/ubuntu-24.04.5-live-server-amd64-autoinstall.iso
 play_says 'local on pve-test-2: skipped, --limit leaves its node out' playbooks/build-installer.yml --limit srv-two
-[ "$(docker exec "$PVE2" ls /var/lib/vz/template/iso)" = ubuntu-26.04.1-live-server-amd64.iso ] \
+[ "$(docker exec "$PVE2" ls /var/lib/vz/template/iso)" = ubuntu-24.04.5-live-server-amd64.iso ] \
   || { echo "ERROR: a node outside --limit was built" >&2; exit 1; }
 play_says 'local on pve-test-2: built by pve-test-2' playbooks/build-installer.yml --limit srv-two,pve-test-2
 play tests/verify-installer.yml
@@ -219,6 +228,8 @@ step "Nodes the cluster doesn't have are refused for every host at once, with th
 BAD_NODES="pve_node isn't a node in this cluster for 2 host(s): srv-case ('PVE-Test', did you mean pve-test); \
 srv-gone ('pve-gone'). Its nodes are pve-test, pve-test-2 (node names are case-sensitive)"
 play_fails "$BAD_NODES" playbooks/build-installer.yml -i tests/inventory/bad-nodes.yml
+# Those two are in ubuntu_servers, the group's old name: read, and said so.
+grep -q 'DEPRECATED (still read until 1.0): The group ubuntu_servers is now called servers' "$last_log"
 play_fails "$BAD_NODES" playbooks/provision-vms.yml -i tests/inventory/bad-nodes.yml
 no_vms 4061 4062 4081 4083 4084 4099
 play_fails 'ubuntu_iso_name may contain only' playbooks/build-installer.yml -e 'ubuntu_iso_name=../../etc/evil.iso'
@@ -286,6 +297,32 @@ play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-
   -e 'admin_user="x; touch /pwned"'
 play_fails 'admin_user must be a lowercase Linux user name' playbooks/provision-vms.yml --limit srv-01 \
   -e '{"admin_user": "sysadmin\n"}'
+
+step "provision-vms: an OS the catalog doesn't have, or that can't be installed that way, is refused before anything is created"
+play_fails "vm_os 'debian-99' isn't in the OS catalog. The catalog has ubuntu-22.04" playbooks/provision-vms.yml \
+  --limit srv-luks -e vm_os=debian-99
+play_fails "vm_os 'my-os-1' isn't in the OS catalog and vm_os_family isn't set" playbooks/provision-vms.yml \
+  --limit srv-luks -e vm_os=my-os-1 -e vm_install_method=cloud_image -e vm_os_image_url=https://example.com/my.qcow2 \
+  -e vm_os_image_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+play_fails "Debian 13 can't be installed with vm_install_method autoinstall" playbooks/provision-vms.yml \
+  --limit srv-luks -e vm_os=debian-13
+play_fails "installing from cloud images (vm_install_method cloud_image) isn't available yet" \
+  playbooks/provision-vms.yml --limit srv-luks -e vm_os=debian-13 -e vm_install_method=cloud_image
+play_fails "ubuntu_release 24.04 disagrees with vm_os ubuntu-26.04" playbooks/provision-vms.yml --limit srv-luks \
+  -e ubuntu_release=24.04 -e vm_os=ubuntu-26.04
+for bad in '-e vm_os=ubuntu-26.04;x' '-e vm_install_method=kickstart' '-e vm_os_family=arch' \
+    '-e vm_os_image_url=http://example.com/x.qcow2 -e vm_os_image_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
+    '-e vm_os_image_url=https://example.com/x.qcow2'; do
+  # shellcheck disable=SC2086 # each case is a list of -e arguments
+  play_fails 'vm_os must be an OS catalog id' playbooks/provision-vms.yml --limit srv-luks $bad
+done
+no_vms 4069
+
+step "The old variable names (before 0.7.0) still set the new ones, and the run says so"
+play_says 'ufw_allow is now firewall_allow' tests/verify-aliases.yml -e '{"ufw_allow": [{"port": "8443", "proto": "tcp"}],
+  "ufw_ssh_sources": ["10.0.0.0/8"], "ufw_ssh_limit": false, "ufw_default_incoming": "reject", "ufw_logging": "medium",
+  "apt_upgrade": "safe", "ubuntu_release": "24.04"}'
+grep -q 'apt_upgrade is now pkg_upgrade. ubuntu_release is now vm_os' "$last_log"
 
 step "provision-vms: an install that never finishes is cleaned up"
 play_fails 'seed ISO removed' playbooks/provision-vms.yml --limit srv-hang
@@ -361,7 +398,8 @@ EOF
 diff -u "$TEST_TMP/enroll.expected" "$TEST_TMP/enroll.out"
 
 step "ISO storage the cluster shares (NFS): built once, by one node, and the VMs' CD-ROMs use it"
-SHARED=(-e pve_iso_storage=synology-nfs -e installer_work_dir=/var/tmp/usas-shared)
+# Every server on 26.04 here, so one ISO is built.
+SHARED=(-e pve_iso_storage=synology-nfs -e installer_work_dir=/var/tmp/usas-shared -e vm_os=ubuntu-26.04)
 play_says 'synology-nfs on pve-test-2 (shared): built by pve-test' playbooks/build-installer.yml "${SHARED[@]}"
 play --idempotent playbooks/build-installer.yml "${SHARED[@]}"
 # Only the node that built it has the build's work directory.
@@ -431,9 +469,10 @@ docker exec "$PVE" chown usas-build:usas-build /var/tmp/ubuntu-server-auto-setup
 play_fails 'logs in to pve-test as root, but pve_ssh_user is usas-build' playbooks/build-installer.yml \
   -e pve_ssh_user=usas-build -e ansible_user=root
 play_fails 'pve_ssh_user must be a lowercase Linux user name' playbooks/build-installer.yml -e 'pve_ssh_user=x;id'
-play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e installer_iso_rebuild=true
-play --idempotent playbooks/build-installer.yml -e pve_ssh_user=usas-build
-play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs
+# Every server on 26.04 here, so each node rebuilds the same ISO as the user.
+play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e installer_iso_rebuild=true -e vm_os=ubuntu-26.04
+play --idempotent playbooks/build-installer.yml -e pve_ssh_user=usas-build -e vm_os=ubuntu-26.04
+play playbooks/build-installer.yml -e pve_ssh_user=usas-build -e pve_iso_storage=synology-nfs -e vm_os=ubuntu-26.04
 # If the export stops letting the user in, the build says so instead of "Permission denied".
 template_mode="$(docker exec "$PVE" stat -c %a /mnt/pve/synology-nfs/template)"
 docker exec "$PVE" chmod 0700 /mnt/pve/synology-nfs/template

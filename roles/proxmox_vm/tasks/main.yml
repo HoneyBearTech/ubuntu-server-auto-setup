@@ -17,6 +17,12 @@
       {{ inventory_hostname }}.
     quiet: true
 
+# Before anything is created: which OS, from which image, and how it's installed.
+- name: Find the server's OS in the OS catalog
+  ansible.builtin.include_role:
+    name: os_catalog
+    tasks_from: select
+
 # These values go into the installer's configuration and a shell command run as root during the install.
 - name: Check the formats of values the installer uses
   ansible.builtin.assert:

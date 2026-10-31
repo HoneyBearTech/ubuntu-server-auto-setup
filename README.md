@@ -85,7 +85,7 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    `autoinstall` kernel argument and a short timeout (without that argument the Ubuntu installer stops and
    asks before wiping disks). Both ISOs go into the node's ISO storage (`pve_iso_storage`, default `local`;
    the playbook asks Proxmox for its folder, so shared storage such as NFS works too).
-2. **`playbooks/provision-vms.yml`** handles every host in the group `ubuntu_servers` whose VM (by
+2. **`playbooks/provision-vms.yml`** handles every host in the group `servers` whose VM (by
    `pve_vmid`) doesn't exist yet. It fetches your public keys from `https://github.com/<github_user>.keys`,
    renders the installer's answers (hostname, static IP, the admin user with a SHA-512 hashed password from
    Ansible Vault, your SSH keys, password SSH off, `qemu-guest-agent`), builds a small per-host seed ISO
@@ -93,8 +93,8 @@ Three playbooks, run from your own machine (the "control node") or from the cont
    and starts it. When the installer has finished and powered the VM off, it detaches both ISOs, deletes
    the seed ISO (it holds the password hash), starts the VM and waits for SSH. VMs that already exist are
    skipped, so reruns are safe.
-3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 24.04 or 26.04
-   server, not only ones this project installed:
+3. **`playbooks/baseline.yml`** runs on the servers. It works on any existing Ubuntu 22.04, 24.04 or 26.04
+   or Debian 12 or 13 server, not only ones this project installed:
    - `apt` full upgrade, hostname and timezone;
    - the admin user, with its `authorized_keys` kept exactly in sync with your GitHub keys;
    - an SSH hardening drop-in: no root login, no passwords, and optionally a different port (which also
@@ -271,15 +271,16 @@ in more detail, and every role lists all of its variables, with defaults and com
 `ansible_host`; the group logs in as `pve_ssh_user` (`root` by default; see
 [docs/installing.md](docs/installing.md#6-optional-a-node-user-other-than-root) for a user without root's
 privileges). The ISO location is set by `pve_iso_storage` (default `local`); its
-folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The Ubuntu release is
-set by `ubuntu_release` (`26.04`) and `ubuntu_point_release` (empty: the one the OS catalog pins, now
-`26.04.1`); `installer_grub_timeout` (3
-seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
+folder on the node is asked from Proxmox (`pvesm path`) unless you set `pve_iso_dir`. The installer ISO's release
+follows each server's `vm_os` (a node builds one per release its servers use), and `ubuntu_point_release` (empty: the one the OS catalog pins, now `26.04.1`);
+`installer_grub_timeout` (3 seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 
-**New VMs** (group `ubuntu_servers`, used by `provision-vms.yml`)
+**New VMs** (group `servers`, used by `provision-vms.yml`; called `ubuntu_servers` before 0.7.0, which is
+still read until 1.0)
 
 | Variable | Default | What it is |
 | --- | --- | --- |
+| `vm_os` | `ubuntu-26.04` | The operating system, from the [OS catalog](docs/interfaces.md#the-os-catalog). This release installs Ubuntu 22.04, 24.04 and 26.04 LTS with the Ubuntu installer; Debian, CentOS Stream, Rocky Linux and AlmaLinux come with cloud-image installs next. |
 | `net_mode` | `static` | `static`, or `dhcp`: the address comes from your DHCP server and is read from the VM's guest agent. |
 | `ansible_host` | (required for `static`) | The server's static IP address; the installer configures it. |
 | `pve_vmid` | (required) | The Proxmox VM ID. Only IDs that don't exist anywhere in the cluster yet are created. |
@@ -295,17 +296,17 @@ seconds) and `installer_iso_rebuild` (`false`) control the remastered ISO.
 | `autoinstall_storage_layout` | `lvm` | The installer's disk layout: `lvm`, `direct` or `zfs`. |
 | `vm_install_timeout` | `3600` | Seconds to wait for the installer to finish. |
 
-**Baseline** (group `ubuntu_servers`, used by `baseline.yml`)
+**Baseline** (group `servers`, used by `baseline.yml`)
 
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `ssh_port` | `22` | The SSH port. Anything other than 22 switches sshd from `ssh.socket` to `ssh.service`; the firewall rule moves with it. |
 | `ssh_allow_users` | `[]` | If set, only these users may log in over SSH (it must include `admin_user`; the run refuses otherwise). |
-| `ufw_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
-| `ufw_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
+| `firewall_ssh_sources` | `[any]` | Where SSH is allowed from: `any`, or a list of addresses and networks. |
+| `firewall_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
 | `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
 | `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
-| `apt_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
+| `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
 | `reboot_if_required` | `false` | Reboot after upgrades when the server asks for it (otherwise the run reports it). |
 | `unattended_upgrades_auto_reboot` | `false` | Let unattended upgrades reboot the server, at `unattended_upgrades_reboot_time` (`04:00`). |
 | `hardening_sysctl_enabled`, `hardening_auditd_enabled`, `hardening_apparmor_enabled` | `false` | Optional extra hardening: kernel and network settings, audit rules, AppArmor kept on ([what each does](docs/security.md#optional-hardening-and-notifications)). |
@@ -351,7 +352,7 @@ Each release's notes list the exact ansible-core and collection versions its che
   classic sudo it also ships (`/usr/bin/sudo.ws`); give your own playbooks
   `ansible_become_exe: /usr/bin/sudo.ws` for 26.04 servers too.
 - **Put your own management network in `fail2ban_ignoreip`**, and double-check `ssh_port`,
-  `ufw_ssh_sources` and `ufw_allow` before the first baseline run on a server that's already in use.
+  `firewall_ssh_sources` and `firewall_allow` before the first baseline run on a server that's already in use.
 - **Seed files are temporary.** The seed ISO holds the password hash. Provisioning deletes it once the
   install finishes, and also when a run fails part-way. Only a run killed outright (Ctrl-C, lost control
   node) can leave `seed-<host>.iso` in the node's ISO storage; delete it by hand then. The baseline removes

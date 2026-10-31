@@ -10,6 +10,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Upgrading
 
+- **New names, old ones still read until 1.0** ([docs/upgrading.md](docs/upgrading.md#to-070-new-names)): the
+  group `ubuntu_servers` is now `servers`; `ufw_allow`, `ufw_ssh_sources`, `ufw_ssh_limit`,
+  `ufw_default_incoming` and `ufw_logging` are now `firewall_*`; `apt_upgrade` is now `pkg_upgrade`; and
+  `ubuntu_release` is now `vm_os` (`ubuntu-<release>`). Nothing has to change now: each run lists the old names
+  the inventory still uses. A new name set in the inventory wins over the old one.
+- The web UI reads an inventory written by an older version and saves it with the new names (`servers`,
+  `firewall_*`, `webui_firewall_*`) the next time any page is saved. Its "Ubuntu point release" field is gone:
+  the OS catalog pins the point release, and a value saved there before is dropped on that save.
 - The role `ubuntu_release` is now `os_catalog`. Only playbooks of your own that list `ubuntu_release` as a
   role or include it (`include_role: name: ubuntu_release`) need the new name; the inventory variables keep
   theirs.
@@ -21,6 +29,29 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   catalog pins: the pinned checksum decides.
 
 ### Added
+
+- **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
+  copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and
+  `make updates` add the cluster's VMs, through a new inventory plugin (`usas_pve`) that reads the inventory's
+  own API settings. Your servers keep their names and settings (matched by `pve_vmid`); other VMs are
+  `vm-<vmid>` in `usas_pve_vms`, reached with their host key pinned as `usas-<cluster>-<vmid>`
+  ([docs/host-keys.md](docs/host-keys.md#4-vms-you-didnt-create-the-updates-playbooks-cluster-inventory)).
+  Containers, templates, stopped or locked VMs, Windows and VMs tagged `usas-no-updates` are reported, never
+  contacted. Filters by node, tag, pool and name, and an exclude list. **New attack surface:** VM names, tags
+  and guest-agent answers from the cluster now shape the updates run's inventory; names and groups are fixed,
+  values are never templated, and an address from a guest is used only with its pinned key (assurance case
+  B20).
+- **Snapshots before updates** (`updates_snapshot: true`, off by default;
+  [docs/updates.md](docs/updates.md#snapshots)): each VM gets a Proxmox snapshot of its disks just before its
+  update, on the node it runs on now. VMs whose disks can't have one, locked VMs and servers without a VM ID
+  are skipped (or, with `updates_snapshot_required: false`, updated without). Old snapshots are cleaned up
+  (`updates_snapshot_keep: 1`, `updates_snapshot_max_age: 7` days), only ever the playbook's own: the
+  `usas_upd_` name and its description marker. An unhealthy VM keeps its snapshot; the report warns about a
+  storage over 85 % used; [docs/updates.md](docs/updates.md#rolling-back) is the rollback runbook. Needs
+  `VM.Snapshot` on the token's role, never `VM.Snapshot.Rollback`
+  ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
+  control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
+  (B23).
 
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
@@ -71,7 +102,28 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   host keys, check and real runs with their VMs, addresses and fingerprints, refusals, confirmed OS overrides
   and each run's outcome, with the session and client address; History offers it as a download.
 
+- **`vm_os`, a server's operating system**, from the OS catalog (default `ubuntu-26.04`), for all servers or
+  per server, with `vm_install_method` (`autoinstall`, the Ubuntu installer) and `vm_os_image_url`,
+  `vm_os_image_sha256` and `vm_os_family` for an image the catalog doesn't have. Servers can now run different
+  Ubuntu LTS releases (22.04, 24.04, 26.04) on one cluster: `build-installer.yml` builds each release's
+  installer on the nodes whose servers need it. Every server's OS settings are checked before anything is
+  created or downloaded; a release past its end of support installs with a warning. Debian, CentOS Stream,
+  Rocky Linux and AlmaLinux (`vm_install_method: cloud_image`) are refused until cloud-image installs land.
+
+- **The web UI chooses the OS**: a Default OS on the Defaults page and an OS column on the Servers page, each
+  a dropdown of the catalog's supported releases (`Ubuntu 24.04 (noble) · until 2029-05-31`); the Run page
+  shows each Ubuntu release's installer ISO and which node builds it.
+- **The baseline runs on Debian 12 and 13** (on servers you already have; installing Debian comes with
+  cloud-image installs): unattended-upgrades gets Debian's own origins (point releases and Debian-Security, no
+  ESM), and a waiting reboot is found by comparing the newest kernel in `/boot` with the one running, since
+  Debian writes no `/var/run/reboot-required`. The baseline and the updates playbook now share that check
+  (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
+  job runs it on each of those releases and on Debian 12 and 13 (`make test-baseline`).
+
 ### Changed
+
+- An inventory source that can't be read now stops a run instead of being skipped with a warning
+  (`any_unparsed_is_failed` in `ansible.cfg`), so an unreachable cluster can't silently shrink an updates run.
 
 - **The Ubuntu ISO is checked against the checksum the OS catalog pins**, which was taken from Ubuntu's
   signed `SHA256SUMS` when the catalog was built, instead of fetching and verifying `SHA256SUMS` on every
@@ -102,6 +154,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
+
+### Security
+
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
 
 ### Documentation
 

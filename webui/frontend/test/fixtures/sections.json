@@ -159,17 +159,6 @@
     "variable": "pve_ssh_user",
     "default": "root",
     "choices": null
-   },
-   {
-    "name": "ubuntu_point_release",
-    "label": "Ubuntu point release",
-    "kind": "text",
-    "help": "The installer ISO's version, such as 26.04.1. Empty means the point release the OS catalog pins, checked against the catalog's checksum. Any other point release is checked against Ubuntu's signed SHA256SUMS when it's downloaded.",
-    "required": false,
-    "advanced": true,
-    "variable": "ubuntu_point_release",
-    "default": null,
-    "choices": null
    }
   ],
   "values": {
@@ -186,8 +175,7 @@
    "pve_vlan": "",
    "pve_iso_storage": "local",
    "pve_api_timeout": "60",
-   "pve_ssh_user": "root",
-   "ubuntu_point_release": ""
+   "pve_ssh_user": "root"
   },
   "cluster": {
    "name": "olympus",
@@ -274,6 +262,26 @@
     "choices": null
    },
    {
+    "name": "vm_os",
+    "label": "Default OS",
+    "kind": "choice",
+    "help": "For servers that don't choose their own on the Servers page. The server's operating system, from the OS catalog: ubuntu-26.04, debian-13, rocky-10 and so on (docs/interfaces.md lists them all). For all servers, or per server.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_os",
+    "default": "ubuntu-26.04",
+    "choices": [
+     "ubuntu-22.04",
+     "ubuntu-24.04",
+     "ubuntu-26.04"
+    ],
+    "choice_labels": {
+     "ubuntu-22.04": "Ubuntu 22.04 (jammy) · until 2027-06-01",
+     "ubuntu-24.04": "Ubuntu 24.04 (noble) · until 2029-05-31",
+     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29"
+    }
+   },
+   {
     "name": "net_gateway",
     "label": "Gateway",
     "kind": "text",
@@ -321,7 +329,7 @@
     "name": "autoinstall_storage_layout",
     "label": "Disk layout",
     "kind": "choice",
-    "help": "Lvm, direct or zfs.",
+    "help": "For the Ubuntu installer; cloud images come with their own layout. Lvm, direct or zfs.",
     "required": false,
     "advanced": false,
     "variable": "autoinstall_storage_layout",
@@ -374,6 +382,7 @@
    "admin_user": "sysadmin",
    "admin_password": "",
    "timezone": "Europe/Berlin",
+   "vm_os": "ubuntu-26.04",
    "net_gateway": "10.0.0.1",
    "net_prefix": "24",
    "net_dns": "10.0.0.1\n1.1.1.1",
@@ -445,35 +454,35 @@
     "choices": null
    },
    {
-    "name": "ufw_ssh_limit",
+    "name": "firewall_ssh_limit",
     "label": "Rate-limit SSH in the firewall",
     "kind": "bool",
-    "help": "Rate-limit SSH (ufw \"limit\": 6 connections in 30 s per source) instead of a plain allow.",
+    "help": "Rate-limit SSH (UFW's \"limit\": 6 connections in 30 s per source) instead of a plain allow.",
     "required": false,
     "advanced": false,
-    "variable": "ufw_ssh_limit",
+    "variable": "firewall_ssh_limit",
     "default": "true",
     "choices": null
    },
    {
-    "name": "ufw_ssh_sources",
+    "name": "firewall_ssh_sources",
     "label": "SSH allowed from",
     "kind": "list",
     "help": "\"any\", or addresses and networks (CIDR), one per line. Where SSH is allowed from. \"any\", or a list of addresses/CIDRs.",
     "required": false,
     "advanced": false,
-    "variable": "ufw_ssh_sources",
+    "variable": "firewall_ssh_sources",
     "default": "any",
     "choices": null
    },
    {
-    "name": "ufw_allow",
+    "name": "firewall_allow",
     "label": "Extra firewall rules (all servers)",
     "kind": "list",
     "help": "One rule per line: port or range, optional /tcp or /udp, optional \"from\" a network. Example: 443/tcp or 5432/tcp from 10.0.0.0/24. Extra rules, e.g.",
     "required": false,
     "advanced": false,
-    "variable": "ufw_allow",
+    "variable": "firewall_allow",
     "default": null,
     "choices": null
    },
@@ -776,9 +785,9 @@
    "ssh_allow_users": "",
    "ssh_permit_root_login": "no",
    "admin_sudo_nopasswd": true,
-   "ufw_ssh_limit": true,
-   "ufw_ssh_sources": "any",
-   "ufw_allow": "",
+   "firewall_ssh_limit": true,
+   "firewall_ssh_sources": "any",
+   "firewall_allow": "",
    "fail2ban_ignoreip": "10.0.0.0/24",
    "fail2ban_maxretry": "5",
    "fail2ban_findtime": "10m",
@@ -878,6 +887,26 @@
     "choices": null
    },
    {
+    "name": "vm_os",
+    "label": "OS",
+    "kind": "choice",
+    "help": "Empty uses the default OS on the Defaults page. The server's operating system, from the OS catalog: ubuntu-26.04, debian-13, rocky-10 and so on (docs/interfaces.md lists them all). For all servers, or per server.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_os",
+    "default": null,
+    "choices": [
+     "ubuntu-22.04",
+     "ubuntu-24.04",
+     "ubuntu-26.04"
+    ],
+    "choice_labels": {
+     "ubuntu-22.04": "Ubuntu 22.04 (jammy) · until 2027-06-01",
+     "ubuntu-24.04": "Ubuntu 24.04 (noble) · until 2029-05-31",
+     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29"
+    }
+   },
+   {
     "name": "vm_cores",
     "label": "Cores",
     "kind": "int",
@@ -922,13 +951,13 @@
     "choices": null
    },
    {
-    "name": "ufw_ports",
+    "name": "firewall_ports",
     "label": "Extra firewall rules",
     "kind": "list",
     "help": "Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24.",
     "required": false,
     "advanced": false,
-    "variable": "ufw_ports",
+    "variable": "firewall_ports",
     "default": null,
     "choices": null
    }
@@ -941,11 +970,12 @@
     "net_mac": "",
     "pve_vmid": "4061",
     "pve_node": "",
+    "vm_os": "",
     "vm_cores": "",
     "vm_memory_mb": "",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
-    "ufw_ports": "443/tcp"
+    "firewall_ports": "443/tcp"
    },
    {
     "name": "db-01",
@@ -954,11 +984,12 @@
     "net_mac": "",
     "pve_vmid": "4070",
     "pve_node": "ares",
+    "vm_os": "",
     "vm_cores": "",
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
-    "ufw_ports": ""
+    "firewall_ports": ""
    }
   ],
   "nodes": [
@@ -966,6 +997,7 @@
    "hephaestus",
    "hermes"
   ],
-  "default_node": "hephaestus"
+  "default_node": "hephaestus",
+  "default_os": "ubuntu-26.04"
  }
 }

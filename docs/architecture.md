@@ -40,7 +40,7 @@ design is in the [assurance case](assurance-case.md); the interfaces it uses are
 | `ssh_hardening` | The sshd drop-in, the optional port change and the switch from `ssh.socket`. | `roles/ssh_hardening/` |
 | `fail2ban` | The `sshd` jail, and optional ban notifications by mail or webhook. | `roles/fail2ban/` |
 | `hardening` | Optional, each part off by default: kernel and network `sysctl` settings, auditd rules, AppArmor kept on. | `roles/hardening/` |
-| `updates` | For `playbooks/updates.yml` only: lists and installs package updates on existing servers, reboots them when asked, checks their health and writes the report; never configures a server. One task file per OS family and step (`tasks/pending/`, `apply/`, `reboot_required/`, `auto_updates/`), with the parsing in a filter plugin. | `roles/updates/` |
+| `updates` | For `playbooks/updates.yml` only: lists and installs package updates on existing servers, reboots them when asked, checks their health and writes the report; never configures a server. One task file per OS family and step (`tasks/pending/`, `apply/`, `reboot_required/`, `auto_updates/`), with the parsing in a filter plugin. With `updates_snapshot`, a Proxmox snapshot before each VM's update and the clean-up of its own old ones (`tasks/snapshot*.yml`), waiting for Proxmox's tasks with `proxmox_vm`'s `tasks/wait_task.yml`. | `roles/updates/` |
 | `Makefile` | Short commands for the playbooks (`make site`, `make provision`, ...), with `LIMIT=` and `ARGS=`. | `Makefile` |
 | Web UI | Forms for the inventory and the Vault, the SSH key and host keys, and runs of the playbooks with a live log. | `webui/usas_web/` |
 | Container image | ansible-core, the collections, the playbooks, roles and shared plugin code, and the web UI. | `Dockerfile`, `docker-compose.yml`, `start.ps1` |
@@ -88,7 +88,7 @@ recorded, because `pvesm` runs for root only.
    (BIOS and UEFI). Without the `autoinstall` argument, Ubuntu's installer stops and asks before it wipes a
    disk, even when it has an autoinstall configuration.
 
-### 2. The VM (`provision-vms.yml`, on `ubuntu_servers`, from the control node)
+### 2. The VM (`provision-vms.yml`, on `servers`, from the control node)
 
 For each host, after checking that the required variables are set, and for all hosts at once that each
 node is in the cluster and each ISO storage allows ISO images on its node:
@@ -116,15 +116,15 @@ node is in the cluster and each ISO storage allows ISO images on its node:
    key (scanned once, trust on first use), and wait until Ansible can log in as the admin user (cloud-init
    finishes creating the user and keys on first boot).
 
-### 3. The baseline (`baseline.yml`, on `ubuntu_servers`, as the admin user with sudo)
+### 3. The baseline (`baseline.yml`, on `servers`, as the admin user with sudo)
 
 1. If `ssh_port` isn't 22, probe it; connect on whichever of `ssh_port` and 22 answers, so the same
    inventory works before and after the port change.
-2. `common`: wait for cloud-init, run the upgrade (`apt_upgrade`), install base packages, set the hostname,
+2. `common`: wait for cloud-init, run the upgrade (`pkg_upgrade`), install base packages, set the hostname,
    `/etc/hosts` and timezone, create or update the admin user (the password only when the user is
    created), set passwordless sudo (or remove it), install the GitHub keys (exclusive by default, refusing
    to write an empty list), configure unattended upgrades, and reboot or report a pending reboot.
-3. `firewall`: allow (rate-limit) SSH on `ssh_port` from `ufw_ssh_sources` and add `ufw_allow` rules
+3. `firewall`: allow (rate-limit) SSH on `ssh_port` from `firewall_ssh_sources` and add `firewall_allow` rules
    **before** enabling UFW, so the running session survives; then set the default policies and enable it.
 4. `ssh_hardening`: refuse to continue if `ssh_allow_users` would lock out the admin user; install
    `/etc/ssh/sshd_config.d/00-hardening.conf` (validated with `sshd -t`), and for a custom port enable
@@ -166,9 +166,11 @@ baseline.
 | `store.py` | Reads and writes `inventory/hosts.yml` (every typed value tagged `!unsafe`, so Ansible never templates it, except text that would load as a number, boolean or null, which is written as a plain quoted string) and the Vault-encrypted `vault.yml`, atomically, mode `0600`. | `webui/usas_web/store.py` |
 | `auth.py` | The password (argon2id), the first-run setup code, in-memory sessions, CSRF tokens, throttling of failed sign-ins. | `webui/usas_web/auth.py` |
 | `passkeys.py` | Passkeys (WebAuthn, through py_webauthn): the options for the browser, single-use challenges tied to the session, checking registrations and sign-ins (origin, RP ID, user verification, signature counter), `passkeys.json` and "Require a passkey". | `webui/usas_web/passkeys.py` |
-| `runner.py` | Runs `ansible-playbook` with an argument list, one run at a time, writes the output (with the Vault's values masked) and the run's details to `runs/`. | `webui/usas_web/runner.py` |
+| `runner.py` | Runs `ansible-playbook` with an argument list, one run at a time (a thread lock and `runs/.lock` across processes), writes the output (with the Vault's values masked) and the run's details to `runs/`; a run may bring a second inventory, `--tags` from an allowlist per playbook and extra variables from an allowlist. `callback_plugins/usas_summary.py` writes each host's result to `runs/<id>.hosts.json`. | `webui/usas_web/runner.py` |
+| `usas_pve` (inventory plugin) | For the updates playbook: every VM of the cluster, merged with the static inventory by `pve_vmid`, others as `vm-<vmid>` pinned by host key alias, those to leave alone in `usas_pve_skipped`; shares the parser below. | `plugins/inventory/usas_pve.py` |
 | `vms.py` | The VMs page's parsing of what Proxmox and the guest agents report. The code lives in `plugins/module_utils/usas_vms.py`, shared with the playbooks' own plugins so the page can't drift from them; `vms.py` loads it from the project. | `plugins/module_utils/usas_vms.py`, `webui/usas_web/vms.py` |
-| `sshkeys.py`, `remote.py` | The UI's key pair, scanning and trusting the node's host key, the cluster CA; the Proxmox connection test and the GitHub keys preview. | `webui/usas_web/` |
+| `sshkeys.py`, `remote.py` | The UI's key pair, scanning and trusting the node's host key, VMs' host keys pinned per cluster and VM ID (`usas-<cluster>-<vmid>`, `HostKeyAlias`), the cluster CA; the Proxmox connection test, the GitHub keys preview, and the VMs page's listing (`VmLister`). | `webui/usas_web/` |
+| `vmplan.py`, `audit.py` | The VMs page's runs: which VMs, as which inventory hosts (a server's own, or `vm-<vmid>` in `usas_vms` with none of the Vault's secrets), the run's inventory, the warnings for the review and the plan's digest for the check-first gate (pure, fuzzed); the audit log `/data/audit.jsonl`. | `webui/usas_web/` |
 | `main.py`, `templates/app.html` | The JSON API behind every page and form (the same field names and checks the forms always had), the HTML shell every page URL answers with, the guard middleware (allowed hosts, sessions, Origin checks, the CSRF header, security headers), the live log as server-sent events. | `webui/usas_web/` |
 | The app | The pages in the browser: React and TypeScript, built by Vite into `static/app` (one script, one stylesheet, the fonts; names carry a hash of their contents). Design tokens in `src/styles/tokens.css`; a small router over the History API; the log viewer reads the server-sent events. It only shows what the server answers: every check is the server's. | `webui/frontend/` |
 
@@ -202,8 +204,10 @@ Release builds are multi-architecture (`linux/amd64`, `linux/arm64`).
   are hidden from the output (`pve_hide_secrets`, `no_log`).
 - **No inbound network exposure during install.** The installer reads its configuration from a local
   CD-ROM image, not from a network datasource.
-- **Works on servers it didn't install.** The baseline only assumes Ubuntu 24.04 or 26.04 and an account
-  that can `sudo`.
+- **Works on servers it didn't install.** The baseline only assumes Ubuntu 22.04, 24.04 or 26.04 or Debian 12
+  or 13, and an account that can `sudo`. It goes by the server's facts (distribution and release), not by
+  `vm_os`: each role loads its settings for the OS family, then the distribution, then the release
+  (`vars/Debian.yml`, `vars/Ubuntu.yml`, ...), each overriding the one before.
 
 ## Technology
 

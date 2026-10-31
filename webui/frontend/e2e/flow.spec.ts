@@ -101,7 +101,7 @@ test("set up, connect, pick the node and run a playbook by keyboard", async ({ p
     await post(page, "/defaults", { action: "save", ...defaults });
     await post(page, "/servers", {
       server_count: "1", "servers-0-name": "srv-01", "servers-0-ansible_host": "10.10.10.61",
-      "servers-0-pve_vmid": "4061", "servers-0-ufw_ports": "443/tcp",
+      "servers-0-pve_vmid": "4061", "servers-0-firewall_ports": "443/tcp",
     });
   });
 

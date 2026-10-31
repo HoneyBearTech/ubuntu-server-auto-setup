@@ -1,9 +1,13 @@
 ---
 - name: Apply the server baseline
-  hosts: ubuntu_servers:usas_vms
+  # servers; ubuntu_servers is its name before 0.7.0, still read until 1.0. usas_vms: VMs a web UI run picked.
+  hosts: servers:ubuntu_servers:usas_vms
   become: true
   gather_facts: false
   pre_tasks:
+    - name: Note old names the inventory still uses
+      ansible.builtin.import_tasks: tasks/deprecations.yml
+
     # A server whose address comes from DHCP (net_mode: dhcp) and isn't in the inventory as ansible_host is
     # found through its VM's guest agent, unless provisioning already did that in this run.
     - name: Find the address DHCP gave the server

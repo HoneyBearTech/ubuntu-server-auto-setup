@@ -1,0 +1,40 @@
+---
+# Deletes this playbook's snapshots of the VM (snapshot.yml found updates_pve): those older than
+# updates_snapshot_max_age days and, unless updates_snapshot_prune_keep is "", all but the newest that many.
+# Only snapshots with both the usas_upd_ name and the description marker are ever deleted
+# (usas_snapshot_cleanup); the operator's own are left alone. A problem here is a warning in the report: the
+# update itself isn't affected.
+- name: Clean up this playbook's snapshots
+  block:
+    - name: List the VM's snapshots
+      ansible.builtin.uri:
+        url: "{{ updates_pve.url }}/nodes/{{ updates_pve.node }}/qemu/{{ updates_pve.vmid }}/snapshot"
+        headers: "{{ updates_pve.headers }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        timeout: "{{ pve_api_timeout | default(60) | int }}"
+      register: updates_pve_snapshots
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Fail unless Proxmox listed the snapshots
+      ansible.builtin.fail:
+        msg: "{{ updates_pve_snapshots | usas_pve_error('list the snapshots of VM ' ~ updates_pve.vmid) }}"
+      when: updates_pve_snapshots.status | default(-1) != 200
+
+    - name: Delete the snapshots
+      ansible.builtin.include_tasks: snapshot_delete.yml
+      loop: >-
+        {{ updates_pve_snapshots.json.data | usas_snapshot_cleanup(updates_snapshot_prune_keep,
+        updates_snapshot_max_age) }}
+      loop_control:
+        loop_var: updates_snapshot_old
+
+  rescue:
+    - name: Note why the snapshots weren't cleaned up
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'snapshot': usas_updates_result.snapshot | combine({'warning':
+          ([usas_updates_result.snapshot.warning, 'clean-up: ' ~ (ansible_failed_result.msg | default('failed'))]
+          | select | join('; ')) | usas_clean_text(300)})}) }}

@@ -1,0 +1,11 @@
+---
+# The family's settings, then the distribution's and the release's, each overriding the one before. The baseline
+# (roles/common) loads them too, before it asks reboot_required/<family>.yml whether the server waits for a reboot.
+- name: Load the settings for the server's OS
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/{{ item }}.yml"
+  loop:
+    - "{{ ansible_facts.os_family }}"
+    - "{{ ansible_facts.distribution }}"
+    - "{{ ansible_facts.distribution }}-{{ ansible_facts.distribution_major_version }}"
+  when: (role_path ~ '/vars/' ~ item ~ '.yml') is file

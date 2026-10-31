@@ -6,7 +6,7 @@
 > disk.
 >
 > **The baseline changes SSH and firewall settings, and can lock you out** if `ssh_port`, `admin_user`,
-> `github_user`, `ufw_allow` or `fail2ban_ignoreip` are wrong. Run against one host first with
+> `github_user`, `firewall_allow` or `fail2ban_ignoreip` are wrong. Run against one host first with
 > `LIMIT=<host>`, try `ARGS="--check --diff"` first, and keep the Proxmox console open.
 
 ## Getting started

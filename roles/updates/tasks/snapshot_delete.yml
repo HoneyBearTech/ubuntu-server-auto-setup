@@ -1,0 +1,41 @@
+---
+# One of this playbook's snapshots (updates_snapshot_old, chosen by snapshot_prune.yml), deleted and noted.
+- name: Delete the snapshot {{ updates_snapshot_old }}
+  ansible.builtin.uri:
+    url: >-
+      {{ updates_pve.url }}/nodes/{{ updates_pve.node }}/qemu/{{ updates_pve.vmid }}/snapshot/{{
+      updates_snapshot_old | urlencode }}
+    method: DELETE
+    headers: "{{ updates_pve.headers }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    timeout: "{{ pve_api_timeout | default(60) | int }}"
+  register: updates_pve_delete
+  failed_when: false
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Fail unless Proxmox started deleting it
+  ansible.builtin.fail:
+    msg: >-
+      {{ updates_pve_delete | usas_pve_error('delete snapshot ' ~ updates_snapshot_old ~ ' of VM '
+      ~ updates_pve.vmid, 'VM.Snapshot') }}
+  when: updates_pve_delete.status | default(-1) != 200
+
+- name: Wait for the snapshot to go
+  ansible.builtin.include_tasks: "{{ role_path | dirname }}/proxmox_vm/tasks/wait_task.yml"
+  vars:
+    pve_task: "{{ updates_pve_delete.json.data }}"
+    pve_task_what: delete snapshot {{ updates_snapshot_old }} of VM {{ updates_pve.vmid }}
+    pve_task_timeout: "{{ updates_snapshot_timeout }}"
+    pve_api_url: "{{ updates_pve.url }}"
+    pve_api_headers: "{{ updates_pve.headers }}"
+    pve_hide_secrets: true
+
+- name: Note the deleted snapshot
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'snapshot': usas_updates_result.snapshot | combine({'deleted':
+      usas_updates_result.snapshot.deleted + [updates_snapshot_old],
+      'status': 'removed' if updates_snapshot_old == usas_updates_result.snapshot.name
+      else usas_updates_result.snapshot.status})}) }}

@@ -34,12 +34,15 @@ all:
         pve-2:
           ansible_host: 10.10.10.11
 
-    ubuntu_servers:
+    # The servers: new VMs to install, and servers you already have for the baseline. (Before 0.7.0 this group
+    # was ubuntu_servers, which the playbooks still read until 1.0.)
+    servers:
       vars:
         ansible_user: "{{ admin_user }}"
         # Sudo needs the admin password once the first baseline run has removed passwordless sudo.
         ansible_become_password: "{{ vault_admin_password }}"
         pve_node: pve-1        # the default; a server can set its own (see db-01)
+        vm_os: ubuntu-26.04    # the default: an id from the OS catalog (docs/interfaces.md); per server too
         pve_storage: local-lvm
         pve_bridge: vmbr0
         net_prefix: 24
@@ -54,13 +57,14 @@ all:
           vm_cores: 2
           vm_memory_mb: 4096
           vm_disk_gb: 32
-          ufw_allow:
+          firewall_allow:
             - { port: "80", proto: tcp, comment: http }
             - { port: "443", proto: tcp, comment: https }
         db-01:
           ansible_host: 10.10.10.62
           pve_vmid: 4062
           pve_node: pve-2      # created on the cluster's other node
+          vm_os: ubuntu-24.04  # installs Ubuntu 24.04 LTS
           vm_cores: 4
           vm_memory_mb: 8192
           vm_disk_gb: 64
@@ -68,7 +72,7 @@ all:
           # encryption"); the Vault passphrase stays the recovery key.
           # vm_disk_encryption: true
           # vm_disk_passphrase: "{{ vault_disk_passphrase }}"
-          ufw_allow:
+          firewall_allow:
             - { port: "5432", proto: tcp, from: 10.10.10.0/24, comment: postgres }
         # Address from DHCP: read from the VM's guest agent after the install (the token needs
         # VM.GuestAgent.Audit on Proxmox VE 9). A fixed MAC address lets you reserve the address on the
