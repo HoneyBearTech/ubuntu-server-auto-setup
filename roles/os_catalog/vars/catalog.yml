@@ -160,8 +160,8 @@ os_catalog:
     eol: "2035-05-31"
     methods:
       cloud_image:
-        url: "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64.qcow2"
-        checksum: "sha256:cbee4726fc0f5a60694bb4f289003cc221e715dfbacebcce76b54daf386d8eca"
-        file: "AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64.qcow2"
+        url: "https://repo.almalinux.org/almalinux/10/cloud/x86_64_v2/images/AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64_v2.qcow2"
+        checksum: "sha256:bf441cb90a56ee08ec8a3c38d920996e217e79cfdf6e33561afd3408bed5a337"
+        file: "AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64_v2.qcow2"
         build: "10.2-20261012.0"
         signed: true
