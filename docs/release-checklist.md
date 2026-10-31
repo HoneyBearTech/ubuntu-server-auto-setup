@@ -99,6 +99,17 @@ be tagged; replace them with yours.
   qm guest cmd 9002 network-get-interfaces | grep -i -A8 '<net_mac>'   # its ipv4 address
   ```
 
+- [ ] **An extra disk and a spread group**, if the release touches provisioning or the baseline: `test-01` with
+  `vm_extra_disks: [{size_gb: 4, label: data, mount: /srv/data}]` and `vm_spread_group: test`. After
+  `provision-vms.yml` the VM has `scsi1` with `serial=usas-data`, and after `site.yml` the disk is ext4 with
+  that label, mounted with `nofail`, and still mounted after a reboot; a second run changes nothing. A second
+  server with `vm_spread_group: test` and the same `pve_node` is refused before anything is created:
+
+  ```bash
+  qm config 9001 | grep -E '^scsi1:'          # ...,serial=usas-data,size=4G
+  ssh sysadmin@192.0.2.10 'findmnt -o SOURCE,FSTYPE,LABEL,OPTIONS /srv/data; ls -l /dev/disk/by-id | grep usas-data'
+  ```
+
 - [ ] **An extra network card on a VLAN**, if the release touches networking: `test-01` with
   `vm_extra_nics: [{bridge: <bridge>, vlan: <tag>, mode: static, address: <address>, prefix: <prefix>}]` on a
   VLAN the bridge carries (`bridge-vlan-aware yes`). The VM has `net1` with that tag, and in the VM the card

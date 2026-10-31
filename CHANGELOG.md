@@ -35,6 +35,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
+  - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
+    install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts
+    it by label with `nofail`. A disk that holds anything is left as it is, and the run stops.
+  - Servers that share a `vm_spread_group` must have their VMs on different nodes: `provision-vms.yml` checks it
+    before creating anything, for every server in the inventory, where existing VMs run now.
+  - A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group gets the Proxmox tag
+    `usas-k8s-<cluster>-server` or `-agent` on its new VM. The first step towards Kubernetes clusters; installing
+    k3s comes later.
 - **Time sources (NTP)**, off by default ([docs/interfaces.md](docs/interfaces.md),
   [docs/security.md](docs/security.md#optional-hardening-and-notifications)): `time_sync_servers` and
   `time_sync_pools` replace the OS's own time sources in the time service the server runs, chrony (Ubuntu
@@ -246,6 +255,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The updates playbook's health checks after a reboot could find SSH gone again for a moment (sshd or a port
+  forward still starting) and report the server as no longer answering. They now wait until a whole login works
+  again, for up to `updates_health_timeout`.
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
@@ -256,8 +268,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 ### Documentation
 
 - The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
-  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing Ubuntu Server LTS and
-  hardening Ubuntu, Debian and RHEL-family servers, with a supported-versions badge row.
+  USAS, Unattended Server Auto-Setup (the repository keeps its name), installing and hardening Ubuntu, Debian
+  and RHEL-family servers, with a supported-versions badge row.
+- The banner, the web UI's sidebar and its footer spell USAS out as Unattended Server Auto-Setup; the README's
+  overview diagram starts from a cloud image or the Ubuntu installer ISO and ends with a firewall and automatic
+  updates; and the web UI screenshots are new, with the VMs page in the menu.
 
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left

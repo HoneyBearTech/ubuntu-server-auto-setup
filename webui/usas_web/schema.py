@@ -60,6 +60,9 @@ NOT_FORM_FORMATS = frozenset({
     "updates_package_pattern", "updates_url_pattern", "updates_seconds_pattern", "updates_snapshot_name_pattern",
     "updates_snapshot_marker_pattern", "updates_group_pattern", "updates_max_entries", "updates_supported_releases",
     "updates_families",
+    # Spread groups and Kubernetes groups: no form fields yet, so set in the inventory (host_vars). The extra disks'
+    # formats are the data_disks role's, which has no form fields yet either.
+    "provision_spread_group_pattern", "provision_k8s_group_pattern",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).

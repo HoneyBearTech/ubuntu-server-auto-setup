@@ -102,7 +102,15 @@ function ClusterFacts({ cluster }: { cluster: Cluster }) {
                 <dd>
                   <ul>
                     {storages.map((s) => (
-                      <li key={s}>{s}{cluster.import_storages?.includes(s) ? " (Import content too)" : ""}</li>
+                      <li key={s}>
+                        {s}
+                        {cluster.import_storages?.includes(s) ? (
+                          // Short, like the nodes' status badges: the card is narrow.
+                          <span className="badge badge-info">
+                            <span className="visually-hidden">allows </span>Import<span className="visually-hidden"> content</span>
+                          </span>
+                        ) : null}
+                      </li>
                     ))}
                   </ul>
                 </dd>
