@@ -35,6 +35,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Added
 
+- **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
+  - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
+    install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts
+    it by label with `nofail`. A disk that holds anything is left as it is, and the run stops.
+  - Servers that share a `vm_spread_group` must have their VMs on different nodes: `provision-vms.yml` checks it
+    before creating anything, for every server in the inventory, where existing VMs run now.
+  - A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group gets the Proxmox tag
+    `usas-k8s-<cluster>-server` or `-agent` on its new VM. The first step towards Kubernetes clusters; installing
+    k3s comes later.
 - **Time sources (NTP)**, off by default ([docs/interfaces.md](docs/interfaces.md),
   [docs/security.md](docs/security.md#optional-hardening-and-notifications)): `time_sync_servers` and
   `time_sync_pools` replace the OS's own time sources in the time service the server runs, chrony (Ubuntu
@@ -132,6 +141,15 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Ubuntu LTS releases (22.04, 24.04, 26.04) on one cluster: `build-installer.yml` builds each release's
   installer on the nodes whose servers need it. Every server's OS settings are checked before anything is
   created or downloaded; a release past its end of support installs with a warning.
+
+- **The web UI installs from cloud images too** ([web-ui.md](docs/web-ui.md#walking-through-it)): an **Install method**
+  on the Defaults page and an Install method column on the Servers page (Ubuntu installer or Cloud image), and
+  every release in the OS catalog in the OS dropdowns. The pages refuse what the playbooks would refuse before
+  creating a VM: the Ubuntu installer for another system, a cloud image with disk encryption on, a cloud image
+  when the last connection test listed the ISO storage without Import content (the Proxmox page now marks the
+  storages that allow it), and Rocky Linux 10 or CentOS Stream 10 on a node whose CPU lacks x86-64-v3: the SSH
+  page's **Test the SSH login** now reads each node's CPU and shows it. The Run page's plan lists the cloud
+  images `build-installer` downloads.
 
 - **Installs from the vendors' cloud images** (`vm_install_method: cloud_image`), for every release in the OS
   catalog: Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux. `build-installer.yml` downloads each image

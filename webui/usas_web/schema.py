@@ -25,7 +25,10 @@ ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh
 # are still supported and that this release can install, with one of these methods.
 CATALOG = Path("roles/os_catalog/vars/catalog.yml")
 OS_CATALOG = "os_catalog"
-INSTALL_METHODS = ("autoinstall",)
+INSTALL_METHODS = ("autoinstall", "cloud_image")
+# What the forms show for each install method (roles/os_catalog/vars/main.yml os_catalog_install_methods).
+INSTALL_METHOD_VAR = "os_catalog_install_methods"
+INSTALL_METHOD_LABELS = {"autoinstall": "Ubuntu installer (autoinstall)", "cloud_image": "Cloud image"}
 
 # Names in roles/*/vars/main.yml that aren't the format of a form field: the sysctl set is a mapping the form
 # doesn't edit, the rest are file paths and package or platform lists.
@@ -46,7 +49,7 @@ NOT_FORM_FORMATS = frozenset({
     "provision_installer_config_copies",
     # A server's OS: checked by the roles (roles/os_catalog/tasks/select.yml); an image outside the catalog is
     # set in the inventory, not in the UI.
-    "os_catalog_id_pattern", "os_catalog_install_methods", "os_catalog_families", "vm_os_image_url_pattern",
+    "os_catalog_id_pattern", "os_catalog_families", "vm_os_image_url_pattern",
     "vm_os_image_sha256_pattern",
     # firewalld's zone on the RHEL family: fixed, not a setting.
     "firewall_os_zone",
@@ -56,6 +59,9 @@ NOT_FORM_FORMATS = frozenset({
     "pve_plan_server_group",
     # The installer ISO's file name: it follows each server's OS (vm_os), which the forms set.
     "installer_iso_name_pattern",
+    # Spread groups and Kubernetes groups: no form fields yet, so set in the inventory (host_vars). The extra disks'
+    # formats are the data_disks role's, which has no form fields yet either.
+    "provision_spread_group_pattern", "provision_k8s_group_pattern",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
@@ -247,6 +253,9 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           advanced=True),
         S("vm_os", "Default OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="ubuntu-26.04",
           help="For servers that don't choose their own on the Servers page."),
+        S("vm_install_method", "Install method", "choice", "os_catalog", choices_var=INSTALL_METHOD_VAR,
+          help="For servers that don't choose their own on the Servers page. A cloud image is imported as the VM's "
+               "disk; it comes with the vendor's own disk layout."),
         S("net_gateway", "Gateway", "text", "proxmox_vm", pattern_var="provision_ipv4_pattern",
           help="Needed for servers with a static address (unless an extra network card has the default route)."),
         S("net_prefix", "Network prefix length", "int", "proxmox_vm", minimum=PREFIX_RANGE[0],
@@ -341,6 +350,8 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
       help="The Proxmox node of this server's VM; empty uses the node on the Proxmox page."),
     S("vm_os", "OS", "choice", OS_CATALOG, choices_var=OS_CATALOG, default="",
       help="Empty uses the default OS on the Defaults page."),
+    S("vm_install_method", "Install method", "choice", choices_var=INSTALL_METHOD_VAR, default="",
+      help="Empty uses the install method on the Defaults page."),
     S("vm_cores", "Cores", "int", "proxmox_vm", minimum=1, maximum=512),
     S("vm_memory_mb", "Memory (MB)", "int", "proxmox_vm", minimum=512, maximum=16777216),
     S("vm_disk_gb", "Disk (GB)", "int", "proxmox_vm", minimum=8, maximum=131072),
@@ -358,9 +369,11 @@ class Schema:
         catalog = yaml.safe_load((project_dir / CATALOG).read_text(encoding="utf-8"))["os_catalog"]
         self.os_catalog = catalog
         self.os_choices = os_choices(catalog, datetime.date.today())
-        # Each release's installer ISO, for the Run page's plan.
-        self.installer_isos = {str(e["id"]): str(e["methods"]["autoinstall"]["file"])
-                               for e in catalog if "autoinstall" in e["methods"]}
+        # Each release's image file for each install method (the installer ISO, the cloud image), for the Run
+        # page's plan and the checks of the Servers page.
+        self.os_images = {str(e["id"]): {str(m): str(image["file"]) for m, image in e["methods"].items()}
+                          for e in catalog}
+        self.os_names = {str(e["id"]): f"{e['name']} {e['version']}" for e in catalog}
         self.sections = {name: [self._resolve(spec) for spec in specs] for name, specs in SECTIONS.items()}
         self.server_columns = [self._resolve(spec) for spec in SERVER_COLUMNS]
         self.by_name = {f.name: f for fields in self.sections.values() for f in fields}
@@ -378,8 +391,9 @@ class Schema:
         names = (spec.pattern_var,) if isinstance(spec.pattern_var, str) else (spec.pattern_var or ())
         patterns = tuple(self.roles.var(name) for name in names) or ((spec.ui_pattern,) if spec.ui_pattern else ())
         pattern = patterns[0] if patterns else None
-        labels = self.os_choices if spec.choices_var == OS_CATALOG else {}
-        if labels:
+        labels = (self.os_choices if spec.choices_var == OS_CATALOG
+                  else INSTALL_METHOD_LABELS if spec.choices_var == INSTALL_METHOD_VAR else {})
+        if spec.choices_var == OS_CATALOG:
             choices: tuple[str, ...] | None = tuple(labels)
         elif spec.choices_var:
             choices = tuple(str(c) for c in self.roles.var(spec.choices_var))

@@ -433,7 +433,8 @@ def test_proxmox_connection_test(ui, monkeypatch):
     data = r.json()
     assert r.status_code == 200 and "Connected to Proxmox VE 9.1.1." in data["message"]
     assert "Nodes: pve-1, pve-2" in data["message"] and "Nothing was saved yet" in data["message"]
-    assert data["test_result"] == {"version": "9.1.1", "cluster": "", "nodes": ["pve-1", "pve-2"], "iso_storages": []}
+    assert data["test_result"] == {"version": "9.1.1", "cluster": "", "nodes": ["pve-1", "pve-2"], "iso_storages": [],
+                                 "import_storages": None}
     assert seen == {"host": "pve.example.lan", "port": 8006, "token_id": "automation", "secret": TOKEN_SECRET,
                     "validate": True}
     assert TOKEN_SECRET not in r.text
@@ -664,19 +665,136 @@ def test_servers_os(ui):
     configure(ui)
     data = get(ui, "/api/servers").json()
     column = next(c for c in data["columns"] if c["name"] == "vm_os")
-    assert column["choices"] == ["ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"]
+    catalog = load_yaml((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]
+    assert column["choices"] == [e["id"] for e in catalog]  # all still supported
     assert column["choice_labels"]["ubuntu-24.04"].startswith("Ubuntu 24.04 (noble) · until ")
-    assert data["default_os"] == "ubuntu-26.04"
+    assert column["choice_labels"]["debian-13"].startswith("Debian 13 (trixie) · until ")
+    assert data["default_os"] == "ubuntu-26.04" and data["default_install_method"] == "autoinstall"
+    method = next(c for c in data["columns"] if c["name"] == "vm_install_method")
+    assert method["choices"] == ["autoinstall", "cloud_image"]
+    assert method["choice_labels"]["cloud_image"] == "Cloud image"
     row = {"server_count": "1", "servers-0-name": "app-01", "servers-0-ansible_host": "10.0.0.20",
            "servers-0-pve_vmid": "4100"}
-    r = post(ui, "/servers", {**row, "servers-0-vm_os": "debian-13"})
+    r = post(ui, "/servers", {**row, "servers-0-vm_os": "debian-11"})
     assert r.status_code == 422 and "OS must be one of: ubuntu-22.04" in r.json()["errors"]["servers-0-vm_os"]
+    # Debian has no installer ISO here: the default method, autoinstall, is refused as the role would.
+    r = post(ui, "/servers", {**row, "servers-0-vm_os": "debian-13"})
+    assert r.status_code == 422 and r.json()["errors"] == {"servers-0-vm_install_method": (
+        "Debian 13 can't be installed with the Ubuntu installer, which takes only Ubuntu: choose Cloud image.")}
+    assert post(ui, "/servers", {**row, "servers-0-vm_os": "debian-13",
+                                 "servers-0-vm_install_method": "cloud_image"}).status_code == 200
+    host = load_yaml(ui.app_state.settings.inventory_file.read_text())["all"]["children"]["servers"]["hosts"]["app-01"]
+    assert host["vm_os"] == "debian-13" and host["vm_install_method"] == "cloud_image"
+    assert get(ui, "/api/servers").json()["rows"][0]["vm_install_method"] == "cloud_image"
     assert post(ui, "/servers", {**row, "servers-0-vm_os": "ubuntu-24.04"}).status_code == 200
     assert get(ui, "/api/servers").json()["rows"][0]["vm_os"] == "ubuntu-24.04"
     post(ui, "/servers", row)
     assert "vm_os" not in ui.app_state.store.load().servers[0]
-    defaults = next(f for f in get(ui, "/api/defaults").json()["fields"] if f["name"] == "vm_os")
-    assert defaults["label"] == "Default OS" and defaults["default"] == "ubuntu-26.04"
+    defaults = {f["name"]: f for f in get(ui, "/api/defaults").json()["fields"]}
+    assert defaults["vm_os"]["label"] == "Default OS" and defaults["vm_os"]["default"] == "ubuntu-26.04"
+    assert defaults["vm_install_method"]["default"] == "autoinstall"
+
+
+def test_defaults_check_the_servers_that_use_them(ui):
+    configure(ui)  # web-00, with the default OS and install method
+    r = post(ui, "/defaults", {**DEFAULTS, "vm_os": "rocky-9"})
+    assert r.status_code == 422 and r.json()["errors"]["vm_install_method"].startswith(
+        "web-00: Rocky Linux 9 can't be installed with the Ubuntu installer")
+    cloud = {"vm_os": "rocky-9", "vm_install_method": "cloud_image"}
+    assert post(ui, "/defaults", {**DEFAULTS, **cloud}).status_code == 200
+    text = ui.app_state.settings.inventory_file.read_text()
+    assert "vm_os: !unsafe 'rocky-9'" in text and "vm_install_method: !unsafe 'cloud_image'" in text
+    # A cloud image comes unencrypted.
+    r = post(ui, "/defaults", {**ENCRYPTION, **cloud})
+    assert r.status_code == 422 and r.json()["errors"] == {"vm_disk_encryption": (
+        "web-00: Disk encryption (Defaults page) needs the Ubuntu installer: a cloud image comes unencrypted.")}
+    # A server with its own OS and method isn't the defaults' problem.
+    post(ui, "/servers", {"server_count": "1", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+                          "servers-0-pve_vmid": "4000", "servers-0-vm_os": "debian-13",
+                          "servers-0-vm_install_method": "cloud_image"})
+    assert post(ui, "/defaults", {**DEFAULTS, "vm_os": "rocky-9"}).status_code == 200
+
+
+def test_cloud_images_need_import_content(ui, monkeypatch):
+    configure(ui)
+    monkeypatch.setattr(m, "test_proxmox", lambda *a: PveResult(
+        version="9.1.1", nodes=["pve-1"], status={"pve-1": "online"},
+        iso_storages={"local": "dir", "nas": "nfs, shared"}, import_storages=["nas"]))
+    data = post(ui, "/proxmox", {"action": "test", **PROXMOX}).json()
+    assert "Import content, which cloud images need, is allowed on nas." in data["message"]
+    assert data["test_result"]["import_storages"] == ["nas"]
+    assert get(ui, "/api/proxmox").json()["cluster"]["import_storages"] == ["nas"]
+    row = {"server_count": "1", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+           "servers-0-pve_vmid": "4000", "servers-0-vm_os": "debian-13", "servers-0-vm_install_method": "cloud_image"}
+    r = post(ui, "/servers", row)  # the ISO storage is local
+    assert r.status_code == 422 and r.json()["errors"]["servers-0-vm_install_method"].startswith(
+        "local doesn't allow Import content, which cloud images need. Allow it in Proxmox (Datacenter → Storage → "
+        "local → Edit → Content: Import)")
+    assert post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "nas"}).status_code == 200
+    assert post(ui, "/servers", row).status_code == 200
+    r = post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_iso_storage": "local"})
+    assert r.status_code == 422 and "local doesn't allow Import content" in r.json()["errors"]["pve_iso_storage"]
+    # The Run page plans the image into the storage's Import folder.
+    plan = get(ui, "/api/run").json()["iso_plan"]
+    catalog = {e["id"]: e for e in load_yaml((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]}
+    assert [(p["node"], p["iso"], p["image"], p["servers"]) for p in plan["pairs"]] == [
+        ("pve-1", catalog["debian-13"]["methods"]["cloud_image"]["file"], True, ["web-00"])]
+    monkeypatch.setattr(m, "test_proxmox", lambda *a: PveResult(
+        version="9.1.1", nodes=["pve-1"], status={"pve-1": "online"}, iso_storages={"nas": "nfs, shared"},
+        import_storages=[]))
+    assert "None of them allows Import content" in post(ui, "/proxmox", {"action": "test", **PROXMOX}).json()["message"]
+
+
+def test_x86_64_v3_releases_need_the_node_s_cpu(ui, monkeypatch):
+    configure(ui)
+    post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.2"})
+    keys = ui.app_state.keys
+    monkeypatch.setattr(keys, "test_login", lambda host, user: "Logged in.")
+    monkeypatch.setattr(keys, "cpu", lambda host, user: ("Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz",
+                                                         {"fpu", "sse4_2", "avx", "aes"}))
+    message = post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
+    assert message == ("Logged in. Its CPU (Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz) lacks avx2, bmi2, fma, movbe: "
+                       "servers on pve-1 can't install CentOS Stream 10 or Rocky Linux 10, which need x86-64-v3.")
+    node = get(ui, "/api/ssh").json()["nodes"][0]
+    assert node["cpu"] == {"model": "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz",
+                           "missing": ["avx2", "bmi2", "fma", "movbe"]}
+    row = {"server_count": "1", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+           "servers-0-pve_vmid": "4000", "servers-0-vm_install_method": "cloud_image"}
+    r = post(ui, "/servers", {**row, "servers-0-vm_os": "rocky-10"})
+    assert r.status_code == 422 and r.json()["errors"] == {"servers-0-vm_os": (
+        "Rocky Linux 10 needs an x86-64-v3 CPU, and node pve-1's (Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz) lacks "
+        "avx2, bmi2, fma, movbe. Choose another node, or AlmaLinux 10, which runs on older CPUs.")}
+    assert post(ui, "/servers", {**row, "servers-0-vm_os": "alma-10"}).status_code == 200
+    r = post(ui, "/defaults", {**DEFAULTS, "vm_os": "centos-stream-10", "vm_install_method": "cloud_image"})
+    assert r.status_code == 200  # web-00 has its own OS
+    r = post(ui, "/servers", row)  # and now the default one
+    assert r.status_code == 422 and r.json()["errors"]["servers-0-vm_os"].startswith("CentOS Stream 10 needs")
+    assert post(ui, "/defaults", {**DEFAULTS, "vm_install_method": "cloud_image"}).status_code == 200
+    assert post(ui, "/servers", row).status_code == 200
+    r = post(ui, "/defaults", {**DEFAULTS, "vm_os": "centos-stream-10", "vm_install_method": "cloud_image"})
+    assert r.status_code == 422
+    assert r.json()["errors"]["vm_os"].startswith("web-00: CentOS Stream 10 needs an x86-64-v3")
+    # A newer node runs them.
+    monkeypatch.setattr(keys, "cpu", lambda host, user: ("", {"avx2", "bmi2", "fma", "movbe", "avx"}))
+    message = post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"]
+    assert message == "Logged in. Its CPU is x86-64-v3: it runs every release in the OS catalog."
+    assert post(ui, "/servers", {**row, "servers-0-vm_os": "rocky-10"}).status_code == 200
+
+
+def test_an_unreadable_cpu_is_left_to_the_playbooks(ui, monkeypatch):
+    configure(ui)
+    post(ui, "/ssh", {"action": "address", "node": "pve-1", "node_address": "10.0.0.2"})
+    keys = ui.app_state.keys
+    monkeypatch.setattr(keys, "test_login", lambda host, user: "Logged in.")
+
+    def fails(host, user):
+        raise KeyProblem("no")
+
+    monkeypatch.setattr(keys, "cpu", fails)
+    assert post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"] == "Logged in."
+    monkeypatch.setattr(keys, "cpu", lambda host, user: ("", set()))
+    assert post(ui, "/ssh", {"action": "test", "node": "pve-1"}).json()["message"] == "Logged in."
+    assert get(ui, "/api/ssh").json()["nodes"][0]["cpu"] is None
 
 
 def test_run_page_plans_each_release_s_iso(ui, monkeypatch):
@@ -895,7 +1013,7 @@ def test_node_host_key(ui, monkeypatch):
     assert data["pending"] == {"node": "pve-1",
                                "keys": [{"keytype": "ssh-ed25519", "fingerprint": offered[0].fingerprint}]}
     assert data["nodes"] == [{"name": "pve-1", "address": "10.0.0.2", "default": True, "in_use": True,
-                              "servers": [], "trusted": []}]
+                              "servers": [], "trusted": [], "cpu": None}]
     r = post(ui, "/ssh", {"action": "trust", "node": "pve-1"})
     assert r.status_code == 422 and "tick the box" in r.json()["error"] and r.json()["area"] == "hostkey"
     post(ui, "/ssh", {"action": "scan", "node": "pve-1"})

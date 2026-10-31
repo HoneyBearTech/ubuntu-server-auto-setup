@@ -90,6 +90,15 @@ all:
         #   vm_extra_nics:
         #     - { bridge: vmbr1, vlan: 20, mode: static, address: 10.20.0.64, prefix: 24, mtu: 9000 }
         #     - { bridge: vmbr1, vlan: 30, mode: dhcp }
+        # A second disk, formatted and mounted by the baseline; and three servers kept on different nodes.
+        # db-01:
+        #   ansible_host: 10.10.10.65
+        #   pve_vmid: 4065
+        #   vm_extra_disks:
+        #     - { size_gb: 100, label: pgdata, mount: /var/lib/postgresql }
+        # cp-1: { ansible_host: 10.10.10.71, pve_vmid: 4071, pve_node: pve-a, vm_spread_group: k8s-lab-servers }
+        # cp-2: { ansible_host: 10.10.10.72, pve_vmid: 4072, pve_node: pve-b, vm_spread_group: k8s-lab-servers }
+        # cp-3: { ansible_host: 10.10.10.73, pve_vmid: 4073, pve_node: pve-c, vm_spread_group: k8s-lab-servers }
 
     # Servers this project didn't install, for the updates playbook only (make updates-check, make updates);
     # the other playbooks never touch them. Each needs its own login and sudo: passwordless sudo, or its own

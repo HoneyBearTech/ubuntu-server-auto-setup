@@ -149,6 +149,38 @@
     that: provision_nics | map(attribute='mac') | unique | length == provision_nics | length
     fail_msg: "{{ inventory_hostname }}: net_mac and the mac of each card in vm_extra_nics must all differ."
     quiet: true
+
+# The disks' settings go into the VM's configuration as key=value options too. The baseline's data_disks role
+# checks them the same way before it formats one.
+- name: Check the extra disks
+  ansible.builtin.include_role:
+    name: data_disks
+    tasks_from: check
+
+# A cluster's VMs are tagged usas-k8s-<cluster>-<server|agent> by their k8s_<cluster>_servers or _agents group.
+- name: Check the spread group and the Kubernetes groups
+  vars:
+    provision_k8s_groups: "{{ group_names | select('match', provision_k8s_group_pattern) | list }}"
+  ansible.builtin.assert:
+    that:
+      - vm_spread_group is string
+      - vm_spread_group | length == 0 or vm_spread_group is match(provision_spread_group_pattern)
+      - provision_k8s_groups | length <= 1
+    fail_msg: >-
+      {{ inventory_hostname }}: vm_spread_group must be empty or a name of letters, digits, '.', '_' and '-' (at most
+      63), and a server may be in only one k8s_<cluster>_servers or _agents group, not
+      {{ provision_k8s_groups | join(' and ') }}.
+    quiet: true
+
+- name: Note the VM's tags
+  vars:
+    provision_k8s_group: "{{ group_names | select('match', provision_k8s_group_pattern) | first | default('') }}"
+    provision_k8s_match: "{{ provision_k8s_group | regex_search(provision_k8s_group_pattern, '\\1', '\\2') or [] }}"
+  ansible.builtin.set_fact:
+    provision_tags: >-
+      {{ pve_tags + (['usas-k8s-' ~ provision_k8s_match[0] ~ '-' ~ provision_k8s_match[1] | regex_replace('s$', '')]
+         if provision_k8s_match else []) }}
+
 # The TPM only releases the disk key while PCR 7 (Secure Boot state) matches, so encryption without Secure
 # Boot would bind it to nothing. Subiquity encrypts only the lvm layout, and a cloud image comes unencrypted.
 - name: Check the disk encryption settings
@@ -219,11 +251,13 @@
       storage: "{{ pve_iso_storage }}"
       cloud_image: "{{ os_catalog_selected.method == 'cloud_image' }}"
 
-# Every server of the run at once: one error lists every host whose node or ISO storage is wrong.
-- name: Check the servers' nodes and ISO storages against the cluster
+# Every server of the run at once: one error lists every host whose node or ISO storage is wrong, and every
+# spread group with two VMs on one node. A spread group counts every server in the inventory, not only the run's.
+- name: Check the servers' nodes, ISO storages and spread groups against the cluster
   ansible.builtin.import_tasks: cluster.yml
   vars:
     pve_placements: "{{ ansible_play_hosts | map('extract', hostvars, 'pve_placement') | list }}"
+    pve_spread_candidates: "{{ (pve_plan_server_group + ansible_play_hosts) | unique | sort }}"
 
 - name: Check whether the cluster already has VM {{ pve_vmid }}
   ansible.builtin.set_fact:
@@ -235,7 +269,8 @@
   ansible.builtin.debug:
     msg: >-
       VM {{ pve_vmid }} already exists{{ (' on node ' ~ pve_vm_node) if pve_vm_node != pve_node else '' }};
-      skipping install for {{ inventory_hostname }}.
+      skipping install for {{ inventory_hostname }}{{ ' (vm_extra_disks are added to new VMs only)' if data_disks_list
+      else '' }}.
   when: pve_vm_exists
 
 # Only the nodes that get a new VM need SSH (for the seed ISO).

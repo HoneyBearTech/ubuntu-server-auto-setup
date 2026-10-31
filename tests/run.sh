@@ -34,6 +34,9 @@ last_log=""
 cleanup() {
   status=$?
   if [ -n "$mock_pid" ]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
+  # The extra disks' loop devices are the Docker host's: detach the ones the disk step attached, if it stopped early.
+  docker exec "$SRV" sh -c 'umount /srv/data /var/log/app 2>/dev/null; for d in $(cat /srv/test-disks/loops 2>/dev/null); do
+    losetup -d "$d"; done' >/dev/null 2>&1 || true
   docker rm -f "$PVE" "$PVE2" "$SRV" >/dev/null 2>&1 || true
   docker volume rm "$NFS" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then
@@ -466,6 +469,35 @@ play playbooks/provision-vms.yml --limit srv-cloud
 play --idempotent playbooks/provision-vms.yml --limit srv-cloud
 play tests/verify-cloud-image.yml
 
+step "provision-vms: extra disks added after the install, and the tag of a Kubernetes agent"
+play playbooks/provision-vms.yml --limit srv-disks
+play --idempotent playbooks/provision-vms.yml --limit srv-disks
+play tests/verify-disks.yml
+
+step "provision-vms: two VMs of one spread group on one node are refused, counting hosts outside the run"
+# srv-01's VM runs on pve-test, with srv-disks's, though spread.yml moves srv-01's pve_node to pve-test-2.
+play_fails "vm_spread_group lab puts srv-01 and srv-disks on node pve-test (srv-01's VM 4061 running there now)" \
+  playbooks/provision-vms.yml -i tests/inventory/spread.yml --limit srv-dhcp
+no_vms 4063
+play_fails 'may be in only one k8s_<cluster>_servers or _agents group, not k8s_lab_servers and k8s_other_agents' \
+  playbooks/provision-vms.yml -i tests/inventory/spread.yml --limit srv-hang
+play_fails 'vm_spread_group must be empty or a name' playbooks/provision-vms.yml --limit srv-dhcp \
+  -e 'vm_spread_group=lab;x'
+
+step "provision-vms: extra disk settings that could add options to a disk are refused"
+for bad in '{"size_gb": "8,cache=unsafe", "label": "data", "mount": "/srv/data"}' \
+    '{"size_gb": 8, "label": "data,serial=x", "mount": "/srv/data"}' \
+    '{"size_gb": 8, "label": "data", "mount": "/etc"}' '{"size_gb": 8, "label": "data", "mount": "/srv/../etc"}' \
+    '{"size_gb": 8, "storage": "local-lvm,iothread=0", "label": "data", "mount": "/srv/data"}' \
+    '{"size_gb": 8, "label": "data", "mount": "/srv/data", "fs": "btrfs"}' \
+    '{"size_gb": 8, "label": "data", "mount": "/srv/data", "cache": "unsafe"}'; do
+  play_fails 'vm_extra_disks item 1 (scsi1) may have only the keys' playbooks/provision-vms.yml --limit srv-dhcp \
+    -e "{\"vm_extra_disks\": [$bad]}"
+done
+play_fails 'the label and the mount of each disk in vm_extra_disks must all differ' playbooks/provision-vms.yml \
+  --limit srv-dhcp -e '{"vm_extra_disks": [{"size_gb": 8, "label": "a", "mount": "/srv/a"}, {"size_gb": 8, "label": "a", "mount": "/srv/b"}]}'
+no_vms 4063
+
 step "provision-vms: a server on DHCP, its address read from the guest agent, then a rerun that reads it again"
 play playbooks/provision-vms.yml --limit srv-dhcp
 play --idempotent playbooks/provision-vms.yml --limit srv-dhcp
@@ -546,6 +578,33 @@ step "baseline: first run, second run, checks"
 play playbooks/baseline.yml --limit srv-01
 play --idempotent playbooks/baseline.yml --limit srv-01
 play tests/verify-baseline.yml
+cool_down
+
+step "baseline: extra disks formatted while blank and mounted by label, then a rerun that changes nothing"
+# Loop devices stand in for the VM's disks, under the names QEMU gives them by serial.
+DISKS=(--limit srv-disks --tags data_disks -e data_disks_by_id_dir=/srv/test-disks)
+docker exec "$SRV" sh -euc 'mkdir -p /srv/test-disks; for label in data app-logs other; do
+    truncate -s 320M /srv/test-disks/$label.img; d=$(losetup -f --show /srv/test-disks/$label.img)
+    echo "$d" >>/srv/test-disks/loops; ln -s "$d" /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-$label; done
+  mkfs.ext4 -q -L other /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other'
+play playbooks/baseline.yml "${DISKS[@]}"
+play --idempotent playbooks/baseline.yml "${DISKS[@]}"
+play --idempotent playbooks/baseline.yml "${DISKS[@]}" --check
+[ "$(docker exec "$SRV" findmnt -n -o FSTYPE,LABEL /srv/data | tr -s ' ')" = "ext4 data" ] \
+  && [ "$(docker exec "$SRV" findmnt -n -o FSTYPE,LABEL /var/log/app | tr -s ' ')" = "xfs app-logs" ] \
+  && docker exec "$SRV" grep -qx 'LABEL=data /srv/data ext4 defaults,nofail 0 0' /etc/fstab \
+  || { echo "ERROR: the extra disks aren't mounted by label with nofail" >&2; docker exec "$SRV" sh -c 'findmnt; cat /etc/fstab'; exit 1; }
+
+step "baseline: a disk that holds another file system is left alone, and a missing disk is named"
+OTHER=(-e '{"vm_extra_disks": [{"size_gb": 1, "label": "other", "mount": "/srv/other", "fs": "xfs"}]}')
+play_fails "the disk usas-other (/srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other) holds a file system (type ext4, \
+label other), not nothing or an xfs file system" playbooks/baseline.yml "${DISKS[@]}" "${OTHER[@]}"
+[ "$(docker exec "$SRV" blkid -p -s TYPE -o value /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other)" = ext4 ] \
+  || { echo "ERROR: a disk holding a file system was formatted" >&2; exit 1; }
+play_fails 'srv-disks has no disk with the serial usas-gone' playbooks/baseline.yml "${DISKS[@]}" \
+  -e '{"vm_extra_disks": [{"size_gb": 1, "label": "gone", "mount": "/srv/gone"}]}'
+docker exec "$SRV" sh -euc 'umount /srv/data /var/log/app; sed -i "/,nofail /d" /etc/fstab
+  for d in $(cat /srv/test-disks/loops); do losetup -d "$d"; done; rm -r /srv/test-disks'
 cool_down
 
 step "baseline: a server on DHCP is reached at the address its guest agent reports"
