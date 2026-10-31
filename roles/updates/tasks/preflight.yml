@@ -76,8 +76,8 @@
     window_note: "outside its update window ({{ updates_window | usas_window_text }}): an apply would skip it"
   when: usas_updates_result.status == 'pending'
 
-- name: Line the server up for the apply
+- name: Line the server up for the waves
   ansible.builtin.group_by:
     key: usas_updates_ready
   changed_when: false
-  when: usas_updates_result.status == 'pending' and not ansible_check_mode
+  when: usas_updates_result.status == 'pending'
