@@ -1,0 +1,16 @@
+---
+# vm_extra_disks: each disk's keys, file systems and formats, checked by proxmox_vm before a VM is created and
+# by the baseline before a disk is formatted; tests/fuzz/ reads them from here. The label also names the disk's
+# serial (usas-<label>): 12 characters fit an ext4 and an xfs label and Proxmox's 20-byte serial.
+data_disks_keys: [size_gb, storage, label, mount, fs]
+data_disks_fs: [ext4, xfs]
+data_disks_fs_packages: {ext4: e2fsprogs, xfs: xfsprogs}
+data_disks_size_pattern: '^[1-9][0-9]{0,4}\Z'
+data_disks_label_pattern: '^[a-z0-9][a-z0-9_-]{0,11}\Z'
+data_disks_storage_pattern: '^[A-Za-z][A-Za-z0-9._-]{0,63}\Z'
+# An absolute path of plain names (no '..', no trailing '/'), and none of the system's own folders.
+data_disks_mount_pattern: '^(/[A-Za-z0-9_][A-Za-z0-9._-]{0,63}){1,8}\Z'
+data_disks_mount_reserved: [/bin, /boot, /boot/efi, /dev, /etc, /home, /lib, /lib64, /proc, /root, /run, /sbin, /sys,
+                            /tmp, /usr, /var, /var/lib, /var/log]
+# scsi0 is the system disk; scsi1 to scsi30 are free for these.
+data_disks_max: 30

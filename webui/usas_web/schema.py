@@ -55,6 +55,9 @@ NOT_FORM_FORMATS = frozenset({
     "pve_plan_server_group",
     # The installer ISO's file name: it follows each server's OS (vm_os), which the forms set.
     "installer_iso_name_pattern",
+    # Spread groups and Kubernetes groups: no form fields yet, so set in the inventory (host_vars). The extra disks'
+    # formats are the data_disks role's, which has no form fields yet either.
+    "provision_spread_group_pattern", "provision_k8s_group_pattern",
 })
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).

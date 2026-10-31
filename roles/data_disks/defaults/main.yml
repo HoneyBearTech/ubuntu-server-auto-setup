@@ -1,0 +1,10 @@
+---
+# The VM's extra disks, as proxmox_vm created them (see vm_extra_disks in roles/proxmox_vm/defaults/main.yml):
+# each { size_gb, storage, label, mount, fs }. Each is found by its serial (usas-<label>), formatted while it is
+# still blank and mounted by its label.
+vm_extra_disks: []
+# Where the server lists its disks by serial: QEMU's SCSI disks appear as scsi-0QEMU_QEMU_HARDDISK_<serial>.
+data_disks_by_id_dir: /dev/disk/by-id
+data_disks_by_id_prefix: scsi-0QEMU_QEMU_HARDDISK_
+# nofail: a missing disk doesn't stop the server from booting.
+data_disks_mount_options: defaults,nofail

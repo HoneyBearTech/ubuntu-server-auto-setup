@@ -150,7 +150,8 @@ rm -rf "$W/seed" "$W/vars.json"
 qemu-img create -q -f qcow2 -b "$CACHE/$FILE" -F qcow2 "$W/disk.qcow2" 32G
 cp "$OVMF_VARS" "$W/efivars.fd"
 
-# Starts the VM. Extra arguments are added to QEMU's.
+# Starts the VM, with the guest agent's channel that Proxmox adds for agent=1 (the baseline starts the agent).
+# Extra arguments are added to QEMU's.
 start_vm() {
   local name="$1"; shift
   qemu-system-x86_64 -machine q35,smm=on "${ACCEL[@]}" -smp 2 -m 2048 -name "$name" \
@@ -162,6 +163,8 @@ start_vm() {
     -device scsi-hd,drive=drive-scsi0,bus=scsihw0.0,bootindex=1 \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:2201-:22,hostfwd=tcp:127.0.0.1:2222-:2222" \
     -device "virtio-net-pci,netdev=net0,mac=$VM_MAC" \
+    -device virtio-serial-pci,id=qga0 -chardev "socket,path=$W/qga.sock,server=on,wait=off,id=qga" \
+    -device virtserialport,bus=qga0.0,chardev=qga,name=org.qemu.guest_agent.0 \
     -display none -serial "file:$W/serial-$name.log" "$@" &
   qemu_pid=$!
 }
@@ -194,8 +197,10 @@ for _ in $(seq 1 60); do on_vm test ! -e /run/nologin 2>/dev/null && break; slee
 step "What the first boot left"
 on_vm 'test -e /etc/cloud/cloud-init.disabled && sudo -n test -e /etc/sudoers.d/90-ansible-sysadmin && hostname' \
   | grep -qx srv-01 || { echo "ERROR: cloud-init didn't set up the server as the seed says" >&2; exit 1; }
-on_vm 'cloud-init status 2>/dev/null || true' | grep -q 'status: disabled' \
-  || { echo "ERROR: cloud-init isn't disabled after the first boot" >&2; exit 1; }
+# The baseline deletes cloud-init's cached copies of the seed only when this says disabled (roles/common).
+ci_status="$(on_vm 'cloud-init status 2>&1; cloud-init --version 2>&1' || true)"
+grep -q '^status: disabled' <<<"$ci_status" \
+  || { printf '%s\n' "$ci_status" >&2; echo "ERROR: cloud-init status doesn't say disabled after the first boot" >&2; exit 1; }
 # The firmware's SecureBoot variable: four attribute bytes, then 1 when Secure Boot is on.
 sb="$(on_vm 'od -An -tu1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c')"
 [ "$(awk '{print $NF}' <<<"$sb")" = 1 ] || { echo "ERROR: the VM didn't boot with Secure Boot on ($sb)" >&2; exit 1; }
