@@ -37,7 +37,7 @@ API for other programs. What should be reachable from where is described in the
 | `usas_pve_skipped` | made by the cluster inventory: VMs the updates playbook reports but never contacts (containers, templates, stopped, locked, Windows, no address, tag `usas-no-updates`) | none |
 | `pve_node_<node>`, `pve_tag_<tag>`, `pve_pool_<pool>` | made by the cluster inventory, for every VM it lists (names lowercased, other characters as `_`) | as above |
 | `usas_updates_targets`, `usas_updates_ready` | made by `updates.yml` while it runs: the servers in the run, and those with something to install | as in `servers`, `ubuntu_servers` and `other_servers` |
-| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `servers:ubuntu_servers:usas_vms` | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
+| `usas_vms` | only in a web UI run's own inventory (`runs/<id>.inventory.yml`): the VMs picked on the VMs page that aren't servers in the inventory, named `vm-<vmid>`; `baseline.yml` runs on `servers:ubuntu_servers:usas_vms`, and `updates.yml` includes `usas_vms` too | SSH as the user chosen for the VM, with passwordless sudo and none of the Vault's secrets (the variables below are set to `""` for them: `admin_password`, `ansible_become_password`, `mail_relay_password`, `fail2ban_webhook_url`); host keys pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
 
 ### Inventory variables
 
@@ -462,7 +462,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
 - **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (the cluster's VMs, and check
-  runs of the baseline against the ones selected), run, history, account. Each form
+  runs of the baseline or the updates playbook against the ones selected), updates (each server's newest
+  updates result, the schedules, the `updates_*` settings), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
   and names it; defaults, help and accepted formats come from the roles. The HTTP paths are listed in
   [web-ui.md](web-ui.md#http-endpoints): page URLs, and the JSON API under `/api/` that the UI's own app
@@ -470,14 +471,23 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   except [the status API](#the-status-api).
 - **Look**: a dark theme by default, light or the system's choice from the theme switch (kept in the
   `usas_theme` cookie).
-- **Runs**: `build-installer`, `provision`, `baseline`, `site` and `keys`, with check mode, differences and
-  a limit, the same as the [commands](#commands). From the VMs page: `baseline` in check mode (`--check
+- **Runs**: `build-installer`, `provision`, `baseline`, `site`, `keys`, `updates-check` and `updates`, with
+  check mode, differences and a limit, the same as the [commands](#commands). From the VMs page: `baseline` in check mode (`--check
   --diff`) on up to 25 selected VMs, with `--tags` from a fixed list (`ssh_keys`, `common`, `firewall`,
   `ssh`, `fail2ban`, `hardening`) and a second inventory the UI writes (`runs/<id>.inventory.yml`). Exit
   status, logs and each host's result (`runs/<id>.hosts.json`, from `callback_plugins/usas_summary.py`) are
   kept in the run history. A check run that passed can be run for real once, within 30 minutes, with the
-  same inventory, tags and pinned keys and no settings saved since. One run at a time, also across processes
-  (a lock on `runs/.lock`).
+  same inventory, tags and pinned keys and no settings saved since. The VMs page also runs `updates.yml` the
+  same way (`--check` first), with an extra-variables file (`runs/<id>.vars.yml`, every value `!unsafe`) of
+  only `updates_scope` (`all` or `security`), `updates_reboot` (`never` or `if_required`), `updates_snapshot`
+  and `updates_ignore_window` (`true` or `false`), and the hosts' `usas_pve_vmid`, `usas_pve_node`,
+  `usas_pve_name`, `usas_pve_alias`, `usas_pve_tags` and `usas_pve_hastate` in its inventory, as the cluster
+  inventory sets them. Every updates run from the UI sets `updates_report_dir` to `/data/updates/reports`,
+  and `runs/<id>.hosts.json` then also holds each server's result (`updates`: status, packages, reboot,
+  snapshot, wave). One run at a time, also across processes (a lock on `runs/.lock`). **Schedules** run the
+  updates playbook in weekly windows from the container's own scheduler (`USAS_SCHEDULER`, on by default), or
+  from the host with `docker exec <container> python -m usas_web updates --schedule <id>` (exit status 0 when
+  the run, and an install schedule's update, succeeded; 1 otherwise; 2 for an unknown schedule).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
@@ -537,13 +547,13 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | --- | --- | --- | --- |
 | Proxmox VE API (`https://<pve_api_host>:8006/api2/json`) | control node | HTTPS, API token (`PVEAPIToken=` header), certificate verified | List the cluster's nodes and each node's ISO storages (`/nodes`, `/nodes/<node>/storage`), list VMs, create, configure, start and watch them on their nodes; for a new server with `net_mode: dhcp`, check first that the token may ask its guest agent (`/access/permissions`); for servers with `net_mode: dhcp`, read `net0`'s MAC address from the VM's configuration and ask the guest agent's `network-get-interfaces` for its address (`VM.GuestAgent.Audit` on Proxmox VE 9, `VM.Monitor` on 8). A read whose connection drops (pveproxy restarting a worker) is retried up to 3 times, 5 seconds apart; any answer, an error included, is final. A VM creation whose connection drops is retried the same way, and the run carries on only with a VM of that ID that has the host's name and the description "Installed by ubuntu-server-auto-setup". |
 | Proxmox VE API, from the updates playbook (with `updates_snapshot`, or the cluster inventory) | control node | HTTPS, the same API token, certificate verified (`pve_validate_certs`) | `GET /cluster/resources?type=vm` (the VM's node and lock now), `GET /nodes/<node>/qemu/<vmid>/feature?feature=snapshot`, `GET .../config` (which storages hold its disks) and `GET /nodes/<node>/storage/<id>/status` (how full they are), with `VM.Audit` and `Datastore.Audit`; `GET`, `POST` (`snapname`, `description`, `vmstate=0`) and `DELETE .../qemu/<vmid>/snapshot[/<name>]` with `VM.Snapshot`, each followed by its task's status (`/nodes/<node>/tasks/<upid>/status`). Never rollback. The cluster inventory (`usas_pve`) reads `/cluster/resources`, VM configs and guest agents, as the VMs page does. |
-| Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9). The answers are cached in memory only; nothing is written to `/data`. |
+| Proxmox VE API, read-only (the web UI's VMs page) | the web UI | HTTPS, the same API token, certificate verified as for the playbooks; 10-second timeout, 5 seconds per guest-agent call | `GET /version`, `/cluster/resources?type=vm`, `/nodes/<node>/qemu/<vmid>/config`, and the guest agent's `network-get-interfaces`, `get-osinfo` and `get-host-name` (`VM.GuestAgent.Audit` on Proxmox VE 9); before an updates run with a snapshot, `/access/permissions?path=/vms/<vmid>` (the token's own privileges) and `/nodes/<node>/qemu/<vmid>/feature?feature=snapshot`. The answers are cached in memory only; nothing is written to `/data`. |
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |
 | Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
-| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline, in check mode first; for real only after that check passed and the user confirmed it. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
+| VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline or the updates playbook, in check mode first; for real only after that check passed and the user confirmed it. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |
 | Ubuntu and Debian archives | servers, Proxmox nodes | APT over HTTP(S) with Ubuntu's/Debian's signed repository metadata | Packages and updates. |
 | PyPI, Ansible Galaxy | control node (`make deps`), image build | HTTPS; the image installs hash-pinned packages | Ansible, the Python packages and the collections. |
 | Docker Hub (`docker.io`), or its mirror GitHub Container Registry (`ghcr.io`) | Docker on the operator's machine | HTTPS; the image is signed (cosign) in both | The container image. |

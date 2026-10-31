@@ -34,7 +34,9 @@ export function duration(run: Run, now: number = Date.now() / 1000): string {
 
 export function runOptions(run: Run): string {
   const parts = [run.check && "check", run.diff && "diff", run.tags?.length && `tags ${run.tags.join(",")}`,
-    run.limit && `limit ${run.limit}`].filter(Boolean);
+    run.limit && `limit ${run.limit}`,
+    ...Object.entries(run.options ?? {}).filter(([, v]) => v !== "false").map(([k, v]) => (v === "true" ? k : `${k} ${v}`)),
+  ].filter(Boolean);
   return parts.length ? parts.join(" ") : "none";
 }
 

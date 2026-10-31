@@ -23,8 +23,9 @@ def answers(ui) -> dict:
                           "servers-1-vm_os": "debian-13", "servers-1-vm_install_method": "cloud_image"})
     ui.app_state.store.save_cluster("olympus", {"hephaestus": "online", "ares": "online", "hermes": "offline"},
                                     {"local": "dir", "synology-nfs": "nfs, shared"}, ["synology-nfs"])
-    data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers")}
+    data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers", "updates")}
     data["defaults"]["timezones"] = ["America/Chicago", "Etc/UTC", "Europe/Berlin"]  # a few are enough
+    data["updates"]["timezones"] = data["defaults"]["timezones"]
     return data
 
 

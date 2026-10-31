@@ -19,7 +19,7 @@ import yaml
 from .problems import Problem
 
 ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
-         "hardening")
+         "hardening", "updates")
 
 # The OS catalog (roles/os_catalog/vars/catalog.yml): an OS field (choices_var=OS_CATALOG) offers its releases that
 # are still supported and that this release can install, with one of these methods.
@@ -59,6 +59,11 @@ NOT_FORM_FORMATS = frozenset({
     "pve_plan_server_group",
     # The installer ISO's file name: it follows each server's OS (vm_os), which the forms set.
     "installer_iso_name_pattern",
+    # The updates role's checks of what servers report (package and service names, URLs, seconds), its own
+    # snapshots' names, per-host update groups and its supported releases: not settings of the Updates page.
+    "updates_package_pattern", "updates_url_pattern", "updates_seconds_pattern", "updates_snapshot_name_pattern",
+    "updates_snapshot_marker_pattern", "updates_group_pattern", "updates_max_entries", "updates_supported_releases",
+    "updates_families",
     # Spread groups and Kubernetes groups: no form fields yet, so set in the inventory (host_vars). The extra disks'
     # formats are the data_disks role's, which has no form fields yet either.
     "provision_spread_group_pattern", "provision_k8s_group_pattern",
@@ -337,6 +342,30 @@ SECTIONS: dict[str, tuple[Spec, ...]] = {
           help="Kept in the Vault; on the server only root can read it."),
     ),
 }
+
+SECTIONS["updates"] = (
+    S("updates_scope", "What to install", "choice", "updates", choices_var="updates_scope_values"),
+    S("updates_apt_upgrade", "How apt upgrades", "choice", "updates", choices_var="updates_apt_upgrade_values"),
+    S("updates_kernel", "Install kernel updates", "bool", "updates"),
+    S("updates_exclude_packages", "Packages to leave alone", "list", "updates",
+      pattern_var="updates_package_glob_pattern"),
+    S("updates_reboot", "Reboots", "choice", "updates", choices_var="updates_reboot_values"),
+    S("updates_restart_services", "Services that run old code", "choice", "updates",
+      choices_var="updates_restart_values", advanced=True),
+    S("updates_health_services", "Services that must run after an update", "list", "updates",
+      pattern_var="updates_service_pattern", advanced=True),
+    S("updates_snapshot", "Snapshot each VM before its update", "bool", "updates"),
+    S("updates_snapshot_keep", "Snapshots each VM keeps", "text", "updates",
+      pattern_var="updates_snapshot_keep_pattern", advanced=True),
+    S("updates_snapshot_max_age", "Delete the playbook's snapshots after (days)", "text", "updates",
+      pattern_var="updates_snapshot_age_pattern", advanced=True),
+    S("updates_serial", "Servers per wave", "text", "updates", pattern_var="updates_serial_pattern"),
+    S("updates_group_max_parallel", "Servers of an update group per wave", "text", "updates",
+      pattern_var="updates_parallel_pattern", advanced=True),
+    S("updates_node_max_parallel", "Servers that may reboot per Proxmox node and wave", "text", "updates",
+      pattern_var="updates_parallel_pattern", advanced=True),
+    S("updates_notify", "When to notify", "choice", "updates", choices_var="common_mail_report_values"),
+)
 
 # Columns of the servers table. "name" is the inventory host name; "firewall_ports" are extra rules for that host.
 SERVER_COLUMNS: tuple[Spec, ...] = (

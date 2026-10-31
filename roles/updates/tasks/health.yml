@@ -3,6 +3,16 @@
 # runs, so do updates_health_services, the system state is no worse than before and no unit has failed since
 # (each one is named), and updates_health_urls answer
 # (from the control node, certificates checked). Any problem fails the server, which stops later batches.
+# After a reboot, SSH can answer once and then go away again for a moment (sshd or a port forward still
+# starting): wait until a whole login works again, not just until the port opens.
+- name: Wait until the server lets Ansible log in after its reboot
+  ansible.builtin.wait_for_connection:
+    sleep: 2
+    timeout: "{{ updates_health_timeout | int }}"
+  register: updates_login_after
+  failed_when: false
+  when: usas_updates_result.reboot.done
+
 - name: Wait for the server to finish starting
   ansible.builtin.command:
     argv: [timeout, "{{ updates_health_timeout | int }}", systemctl, is-system-running, --wait]

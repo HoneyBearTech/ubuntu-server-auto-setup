@@ -517,6 +517,29 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
     ```
 
     Then forget it again on the VMs page.
+- [ ] **Updates from the VMs page**, if the release touches the VMs page, the runner, the summary callback or
+  the updates playbook. On test-06 (VM 9006, pinned as above) with an update waiting (on a fresh cloud image
+  there usually is one; otherwise `sudo apt-get install --allow-downgrades <package>=<older version>` first):
+  - [ ] Select VM 9006, choose **Updates**: the snapshot box says why it can't be ticked when the token's role
+    lacks `VM.Snapshot`, and is ticked once `VM.Snapshot` is added (docs/updates.md, "Snapshots").
+  - [ ] **Review the plan** with **Reboots: Never**, then **Run the check**: the "Updates per server" table
+    lists the package with its versions, and `ssh ubuntu@192.0.2.15 'apt list --upgradable'` still lists it.
+  - [ ] **Install the updates for real** after ticking the box: the table says **Updated** with the version
+    installed, and `apt list --upgradable` no longer lists it. A second check says **Up to date**.
+  - [ ] With **Reboots: When an update asks for it**, the confirmation names `vm-9006` as a VM that may
+    reboot. The audit log's `run.check` and `run.apply` entries have `playbook: updates` and the choices.
+- [ ] **Updates on a schedule**, if the release touches the scheduler or the Updates page. From a passing
+  updates check of test-06, **Schedule this plan** as **List the pending updates**, today's weekday, a start
+  two minutes from now, a 30-minute window, your time zone: a wrong password is refused.
+  - [ ] Within about a minute of the start, the Updates page's schedule shows a check run as its last run, and
+    the server's newest result matches it. A second schedule for the same window, while the first runs, says
+    "Skipped: another run was going until the window closed." once its window has closed.
+  - [ ] An **Install the updates** schedule with an update waiting on test-06 runs a check, then the update
+    (`apt list --upgradable` is empty afterwards); with `qm set 9006 --lock backup` before the window, the
+    check is refused and nothing is installed (then `qm unlock 9006`).
+  - [ ] `docker exec usas-rc python -m usas_web updates --schedule <id>` runs it now and exits 0. Delete both
+    schedules; the audit log has `schedule.created`, `schedule.run`, `schedule.apply` or `schedule.aborted`, and
+    `schedule.deleted`.
 - [ ] **The status API** ([web-ui.md](web-ui.md#dashboards-heimdall)): before any token exists,
   `/api/status` answers 404. On the account page, **Create a token** (a wrong password is refused); the
   token is shown once. A call with it as `Authorization: Bearer` answers the summary, which holds no host,

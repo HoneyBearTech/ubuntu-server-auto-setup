@@ -113,6 +113,20 @@ The playbook doesn't fight them: it waits for them, and then reports the server 
 masks or reconfigures their timers; on the servers this project installed, the baseline sets them up. The
 report shows what each server does on its own as one line, such as "Automatic: security daily, no reboot".
 
+## From the web UI
+
+The web UI's **VMs** page runs this playbook on the VMs you select, after you pin their host keys: choose
+**Updates**, then what to install, whether a VM may reboot, a snapshot, and whether to ignore the update
+windows. A check run comes first and lists what each VM would install; its page then offers the real run
+for 30 minutes, with a confirmation that names the VMs that may reboot
+([web-ui.md](web-ui.md#walking-through-it)). A VM outside the inventory logs in as the user you give, with
+passwordless sudo, and gets none of the Vault's secrets; its Proxmox tags `usas-group-<name>` and its HA
+state reach the waves as with the cluster inventory. The **Run** page offers `updates-check` and `updates`
+for the servers in the inventory. Either way the report goes to the web UI's data folder
+(`/data/updates/reports`). A passing check run can become a **schedule**: the check, or the check and then the
+update, in a weekly window, with the password again; the **Updates** page lists the schedules, each server's
+newest result and these settings ([web-ui.md](web-ui.md#walking-through-it)).
+
 ## Every VM on the cluster
 
 The cluster inventory adds every VM of the Proxmox VE cluster to the run, whether you put it in the

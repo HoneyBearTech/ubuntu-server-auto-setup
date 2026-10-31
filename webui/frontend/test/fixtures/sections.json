@@ -1134,5 +1134,223 @@
   "default_node": "hephaestus",
   "default_os": "ubuntu-26.04",
   "default_install_method": "autoinstall"
+ },
+ "updates": {
+  "hosts": {},
+  "schedules": [],
+  "scheduler": true,
+  "days": [
+   "mon",
+   "tue",
+   "wed",
+   "thu",
+   "fri",
+   "sat",
+   "sun"
+  ],
+  "kinds": {
+   "check": "List the pending updates (check only)",
+   "apply": "Install the updates (after a passing check)"
+  },
+  "minutes": [
+   30,
+   720
+  ],
+  "timezone": "Europe/Berlin",
+  "timezones": [
+   "America/Chicago",
+   "Etc/UTC",
+   "Europe/Berlin"
+  ],
+  "title": "Updates",
+  "fields": [
+   {
+    "name": "updates_scope",
+    "label": "What to install",
+    "kind": "choice",
+    "help": "All: every update; security: only those from a security suite (Ubuntu's and Debian's -security pockets, ESM).",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_scope",
+    "default": "all",
+    "choices": [
+     "all",
+     "security"
+    ]
+   },
+   {
+    "name": "updates_apt_upgrade",
+    "label": "How apt upgrades",
+    "kind": "choice",
+    "help": "Safe: apt-get upgrade --with-new-pkgs (new kernels come in, nothing is removed). dist may remove packages, so it needs updates_scope: all and no updates_exclude_packages.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_apt_upgrade",
+    "default": "safe",
+    "choices": [
+     "safe",
+     "dist"
+    ]
+   },
+   {
+    "name": "updates_kernel",
+    "label": "Install kernel updates",
+    "kind": "bool",
+    "help": "False leaves kernels alone (adds updates_kernel_packages to the excludes).",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_kernel",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "updates_exclude_packages",
+    "label": "Packages to leave alone",
+    "kind": "list",
+    "help": "Shell globs of packages to leave alone in this run (never written to the server). An update that needs one of them skips the server, with the reason in the report.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_exclude_packages",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "updates_reboot",
+    "label": "Reboots",
+    "kind": "choice",
+    "help": "Never: report \"reboot pending\" only. if_required: reboot when the server asks for it, inside updates_reboot_window, then check its health.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_reboot",
+    "default": "never",
+    "choices": [
+     "never",
+     "if_required"
+    ]
+   },
+   {
+    "name": "updates_restart_services",
+    "label": "Services that run old code",
+    "kind": "choice",
+    "help": "Host: keep the server's own needrestart setting. list: only list the services to restart. auto: restart them.",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_restart_services",
+    "default": "host",
+    "choices": [
+     "host",
+     "list",
+     "auto"
+    ]
+   },
+   {
+    "name": "updates_health_services",
+    "label": "Services that must run after an update",
+    "kind": "list",
+    "help": "Health checks after an update or a reboot: services that ran before must run after, and these too.",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_health_services",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "updates_snapshot",
+    "label": "Snapshot each VM before its update",
+    "kind": "bool",
+    "help": "A Proxmox snapshot of each VM's disks before its update (not its memory), on the node it runs on now, through the API settings of the inventory (pve_api_host, pve_api_user, pve_api_token_id, pve_api_token_secret). The token's role needs VM.Snapshot (docs/updates.md, \"Snapshots\"); rolling back is left to a Proxmox admin.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_snapshot",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "updates_snapshot_keep",
+    "label": "Snapshots each VM keeps",
+    "kind": "text",
+    "help": "How many of this playbook's snapshots each VM keeps after a healthy update (0 deletes the new one too), and the age in days after which they are deleted at the next run. Snapshots without the usas_upd_ name and the playbook's description (the operator's own) are never deleted.",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_snapshot_keep",
+    "default": "1",
+    "choices": null
+   },
+   {
+    "name": "updates_snapshot_max_age",
+    "label": "Delete the playbook's snapshots after (days)",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_snapshot_max_age",
+    "default": "7",
+    "choices": null
+   },
+   {
+    "name": "updates_serial",
+    "label": "Servers per wave",
+    "kind": "text",
+    "help": "Waves (tasks/plan.yml): the servers are updated a wave at a time, in inventory order, each in the first wave with room for it. A wave holds at most updates_serial servers (a number, or a percentage of the servers being updated), at most updates_group_max_parallel of each update group, and at most updates_node_max_parallel that may reboot (updates_reboot: if_required) on each Proxmox node; 0 means no limit for the last two. The run takes these three from the first server: set them for all servers (group_vars/all, or -e).",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_serial",
+    "default": "25%",
+    "choices": null
+   },
+   {
+    "name": "updates_group_max_parallel",
+    "label": "Servers of an update group per wave",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_group_max_parallel",
+    "default": "1",
+    "choices": null
+   },
+   {
+    "name": "updates_node_max_parallel",
+    "label": "Servers that may reboot per Proxmox node and wave",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_node_max_parallel",
+    "default": "2",
+    "choices": null
+   },
+   {
+    "name": "updates_notify",
+    "label": "When to notify",
+    "kind": "choice",
+    "help": "Notifications, sent once per run from the control node (set them for all servers, in group_vars/all): on-change (an apply updated or rebooted a server, a check found updates waiting, or a server failed or couldn't be reached), always, or only-on-error.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_notify",
+    "default": "on-change",
+    "choices": [
+     "always",
+     "only-on-error",
+     "on-change"
+    ]
+   }
+  ],
+  "values": {
+   "updates_scope": "all",
+   "updates_apt_upgrade": "safe",
+   "updates_kernel": true,
+   "updates_exclude_packages": "",
+   "updates_reboot": "never",
+   "updates_restart_services": "host",
+   "updates_health_services": "",
+   "updates_snapshot": false,
+   "updates_snapshot_keep": "1",
+   "updates_snapshot_max_age": "7",
+   "updates_serial": "25%",
+   "updates_group_max_parallel": "1",
+   "updates_node_max_parallel": "2",
+   "updates_notify": "on-change"
+  }
  }
 }

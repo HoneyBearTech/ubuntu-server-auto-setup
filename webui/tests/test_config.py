@@ -28,3 +28,11 @@ def test_overrides():
 def test_bad_cookie_setting():
     with pytest.raises(ValueError, match="USAS_SECURE_COOKIES"):
         from_env({"USAS_SECURE_COOKIES": "sometimes"})
+
+
+def test_the_scheduler_setting():
+    from usas_web.config import from_env as env
+
+    assert env({}).scheduler and not env({"USAS_SCHEDULER": "OFF"}).scheduler
+    with pytest.raises(ValueError, match="USAS_SCHEDULER"):
+        env({"USAS_SCHEDULER": "sometimes"})

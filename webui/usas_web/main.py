@@ -32,13 +32,13 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, nodes, status, vmplan, vms
+from . import __version__, nodes, scheduler, status, vmplan, vms
 from .audit import AuditLog, session_fingerprint
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
-from .runner import PLAYBOOKS, Run, RunError, Runner
+from .runner import PLAYBOOKS, UPDATE_ACTIONS, Run, RunError, Runner
 from .schema import Field, Invalid, Schema, display_value, parse_value
 from .sshkeys import (
     KeyProblem,
@@ -50,7 +50,7 @@ from .sshkeys import (
     saved_ca,
     vm_alias,
 )
-from .store import Config, Store
+from .store import Config, Store, write_private
 
 HERE = Path(__file__).parent
 # The page URLs and their titles (the browser tab shows the title before the app has loaded).
@@ -62,11 +62,13 @@ PAGES = {
     "/servers": "Servers",
     "/hardening": "Hardening",
     "/vms": "VMs",
+    "/updates": "Updates",
     "/run": "Run",
     "/runs": "History",
     "/account": "Account",
 }
-SECTION_TITLES = {"proxmox": "Proxmox API", "defaults": "Defaults for every server", "hardening": "Hardening"}
+SECTION_TITLES = {"proxmox": "Proxmox API", "defaults": "Defaults for every server", "hardening": "Hardening",
+                  "updates": "Updates"}
 UNSAFE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
@@ -84,6 +86,8 @@ FRONTEND_ENTRY = "src/main.tsx"
 VM_API_TIMEOUT = 10  # longest a VMs page call to the API may take, whatever pve_api_timeout says
 PLAN_TTL = 600  # a reviewed plan can be run for 10 minutes
 CHECK_TTL = 1800  # a real run needs a passing check run of the same plan from the last 30 minutes
+# The kinds of run the VMs page starts (Run.kind), and the playbook each runs.
+VM_RUNS = {"vms": "baseline", "updates": "updates"}
 # Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
 log = logging.getLogger("usas_web")
 
@@ -168,7 +172,9 @@ def value_json(f: Field, value: Any) -> str | bool:
     return "" if shown is None else str(shown)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, background: bool = True) -> FastAPI:
+    """The web UI. background=False is the command line's (python -m usas_web updates): no scheduler thread,
+    and the run history's running runs are left alone (the web UI may be running one)."""
     settings = settings or from_env()
     os.umask(0o077)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -181,14 +187,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     passkeys = Passkeys(settings)
     audit = AuditLog(settings.data_dir / "audit.jsonl")
 
-    def run_ended(run: Run) -> None:
-        if run.kind == "vms":
-            hosts = (runner.hosts(run.id) or {}).get("hosts") or {}
-            audit.record("run.finished", run=run.id, check=run.check, status=run.status, returncode=run.returncode,
-                         hosts={name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
-                                for name, r in hosts.items() if isinstance(r, dict)})
+    updates_state = settings.data_dir / "updates" / "state.json"
 
-    runner = Runner(settings, on_finish=run_ended)
+    def remember_updates(run: Run, results: dict[str, Any]) -> None:
+        """Keeps each server's newest updates result (updates/state.json, 0600), for the Updates page."""
+        try:
+            state = json.loads(updates_state.read_text())
+        except (OSError, ValueError):
+            state = {}
+        hosts = state.get("hosts") if isinstance(state, dict) and isinstance(state.get("hosts"), dict) else {}
+        for name, result in results.items():
+            if isinstance(result, dict):
+                hosts[str(name)] = {"run": run.id, "check": run.check, "finished": run.finished, "result": result}
+        write_private(updates_state, json.dumps({"hosts": hosts}) + "\n")
+
+    def run_ended(run: Run) -> None:
+        if run.id in pending_applies:
+            continue_schedule(run, pending_applies.pop(run.id))
+        if run.action in UPDATE_ACTIONS:
+            found = ((runner.hosts(run.id) or {}).get("updates") or {}).get("hosts")
+            if isinstance(found, dict) and found:
+                remember_updates(run, found)
+        if run.kind in VM_RUNS:
+            data = runner.hosts(run.id) or {}
+            hosts = data.get("hosts") or {}
+            results = {name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
+                       for name, r in hosts.items() if isinstance(r, dict)}
+            # An updates run also records what the playbook says each server ended as (updated, nothing, ...).
+            for name, r in ((data.get("updates") or {}).get("hosts") or {}).items():
+                if isinstance(r, dict):
+                    results.setdefault(name, {})["updates"] = r.get("status")
+            audit.record("run.finished", run=run.id, check=run.check, status=run.status, returncode=run.returncode,
+                         hosts=results)
+
+    pending_applies: dict[str, str] = {}  # a scheduled apply's check run -> its schedule
+    runner = Runner(settings, on_finish=run_ended, recover=background)
     keys = Keys(settings)
     lister = VmLister(releases=vms.catalog_releases(schema.os_catalog))
     tokens = status.StatusTokens(settings.status_token_file, store.vault_password)
@@ -209,6 +242,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.schema, app.state.keys, app.state.vm_lister = schema, keys, lister
     app.state.passkeys = passkeys
     app.state.audit = audit
+    schedules = scheduler.ScheduleStore(settings.data_dir / "schedules.json")
+    app.state.schedules = schedules
     app.state.status_tokens, app.state.status_throttle, app.state.cluster_counts = tokens, throttle, counts
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
@@ -1237,6 +1272,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                      fetched=int(time.time()),
                      run={"presets": [{"key": k, "label": label, "tags": list(tags) if tags is not None else None}
                                       for k, (label, tags) in vmplan.PRESETS.items()],
+                          "updates": {name: list(values) for name, (_, values) in vmplan.UPDATE_OPTIONS.items()},
                           "default_preset": vmplan.DEFAULT_PRESET, "tags": list(vmplan.TAGS),
                           "max_hosts": vmplan.MAX_HOSTS, "user": str(setting(config, "admin_user")),
                           "ssh_port": int(setting(config, "ssh_port")), "busy": runner.current() is not None,
@@ -1285,6 +1321,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (KeyProblem, Invalid) as exc:
             return reply(422, vmid=vmid, error=exc.message)
 
+    def snapshot_problems(api: PveApi, vmids: list[int]) -> dict[int, str]:
+        """Why each VM can't have the snapshot an updates run would take before its update ("" if it can): the
+        token's privileges on it (VM.Snapshot) and Proxmox's own check of its disks. Blocks: run it in a thread."""
+        nodes_of = {vm.vmid: vm.node for vm in lister.resources(api)}
+        found = {}
+        for vmid in vmids:
+            node = nodes_of.get(vmid)
+            if node is None:
+                found[vmid] = "It isn't on the cluster any more."
+                continue
+            try:
+                privileges = api.get(f"/access/permissions?path=/vms/{vmid}") or {}
+                allowed = privileges.get(f"/vms/{vmid}") if isinstance(privileges, dict) else None
+                if not isinstance(allowed, dict) or not allowed.get("VM.Snapshot"):
+                    found[vmid] = "The API token's role lacks VM.Snapshot (docs/updates.md, \"Snapshots\")."
+                    continue
+                feature = api.get(f"/nodes/{quote(node, safe='')}/qemu/{vmid}/feature?feature=snapshot") or {}
+                if not (isinstance(feature, dict) and str(feature.get("hasFeature")) in ("1", "True", "true")):
+                    found[vmid] = "Proxmox says its disks don't support snapshots."
+                    continue
+            except RemoteProblem as exc:
+                found[vmid] = f"Proxmox couldn't say: {exc.message}"
+                continue
+            found[vmid] = ""
+        return found
+
+    @app.post("/api/vms/snapshots")
+    async def vm_snapshots(request: Request):
+        """Whether the selected VMs can have a snapshot before their updates, and why not."""
+        require_login(request)
+        form = await checked_form(request)
+        selected_text = [str(x) for x in form.getlist("vmid")]
+        if not all(vms.VMID_PATTERN.match(x) for x in selected_text) or len(selected_text) > vmplan.MAX_HOSTS:
+            raise Forbidden()
+        api = pve_api(store.load())
+        if api is None:
+            return reply(409, error="Set up the Proxmox API first: the host and the token.", setup="/proxmox")
+        try:
+            found = await asyncio.to_thread(snapshot_problems, api, list(dict.fromkeys(int(x) for x in selected_text)))
+        except RemoteProblem as exc:
+            return reply(502, error=exc.message)
+        return reply(vms=[{"vmid": vmid, "possible": not why, "reason": why} for vmid, why in found.items()])
+
     def stored_plan(session, plan_id: str) -> vmplan.Plan | None:
         now = time.time()
         for key in [k for k, (made, _) in session.vm_plans.items() if now - made > PLAN_TTL]:
@@ -1308,8 +1387,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         selected = list(dict.fromkeys(int(x) for x in selected_text))
         values = {k: str(val) for k, val in form.items() if isinstance(val, str) and k.startswith("vm-")}
         preset = str(form.get("preset", ""))
+        updates = preset == vmplan.UPDATES
         try:
-            tags = vmplan.preset_tags(preset, [str(t) for t in form.getlist("tags")])
+            if updates:
+                tags, options = [], vmplan.update_options(
+                    {k: str(val) for k, val in form.items() if isinstance(val, str) and k.startswith("updates-")})
+            else:
+                tags, options = vmplan.preset_tags(preset, [str(t) for t in form.getlist("tags")]), {}
         except vmplan.PlanProblem as exc:
             return reply(422, errors=exc.errors)
         if len(selected) > vmplan.MAX_HOSTS:
@@ -1333,18 +1417,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     audit.record("hostkey.adopt", **who(request), vmid=vmid, alias=alias_of(vmid), address=address,
                                  fingerprints=[k.fingerprint for k in adopted])
         pins = {alias: [k.fingerprint for k in found] for alias, found in keys.pins().items()}
-        formats = vmplan.Formats(ipv4=str(next(c for c in schema.server_columns if c.name == "ansible_host").pattern),
-                                 users=schema.by_name["admin_user"].patterns)
+        formats = plan_formats()
         try:
             plan = vmplan.build(rows, selected, values, servers=config.servers, pins=pins,
                                 aliases={vmid: alias_of(vmid) for vmid in selected}, formats=formats,
-                                settings=plan_settings(config), tags=tags, preset=preset)
+                                settings=plan_settings(config), tags=tags, preset=preset,
+                                playbook=vmplan.UPDATES if updates else "baseline", options=options)
         except vmplan.PlanProblem as exc:
             return reply(422, errors=exc.errors)
+        if options.get("updates_snapshot") == "true":
+            try:
+                problems = await asyncio.to_thread(snapshot_problems, api, selected)
+            except RemoteProblem as exc:
+                return reply(502, error=exc.message)
+            refused = "; ".join(f"VM {vmid}: {why}" for vmid, why in problems.items() if why)
+            if refused:
+                return reply(422, errors={"updates-snapshot": f"No snapshot is possible for {refused}"})
         plan_id = secrets.token_urlsafe(16)
         stored_plan(session, "")  # drops expired plans
         session.vm_plans[plan_id] = (time.time(), plan)
         return reply(plan_id=plan_id, plan=vmplan.plan_json(plan), expires=int(time.time()) + PLAN_TTL)
+
+    def plan_formats() -> vmplan.Formats:
+        return vmplan.Formats(ipv4=str(next(c for c in schema.server_columns if c.name == "ansible_host").pattern),
+                              users=schema.by_name["admin_user"].patterns)
 
     @app.post("/api/vms/run")
     async def vm_run(request: Request):
@@ -1356,10 +1452,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(422, error="That plan has expired (plans last 10 minutes). Review it again.")
         if form.get("mode") != "check":
             return reply(422, error="A plan runs in check mode first; its run's page then offers the real run.")
+        kind = "updates" if plan.playbook == vmplan.UPDATES else "vms"
         try:
-            started = runner.start("baseline", True, True, plan.limit, store.host_names(), secret_values(),
-                                   kind="vms", inventory=plan.inventory, tags=plan.tags, targets=plan.summary(),
-                                   plan=plan.digest)
+            started = runner.start(VM_RUNS[kind], True, kind == "vms", plan.limit, store.host_names(),
+                                   secret_values(), kind=kind, inventory=plan.inventory, tags=plan.tags,
+                                   targets=plan.summary(), plan=plan.digest, extra_vars=plan.options or None)
         except RunError as exc:
             return reply(422, error=exc.message)
         for target in plan.targets:
@@ -1367,13 +1464,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audit.record("vm.override", **who(request), run=started.id, vmid=target.vmid, name=target.name,
                              reason="its OS isn't a release of the OS catalog, or the guest didn't report it; "
                                     "run anyway")
-        audit.record("run.check", **who(request), run=started.id, plan=plan.digest, tags=plan.tags,
-                     targets=plan.summary())
+        if plan.options.get("updates_ignore_window") == "true":
+            audit.record("updates.window_ignored", **who(request), run=started.id,
+                         vms=[t.vmid for t in plan.targets])
+        audit.record("run.check", **who(request), run=started.id, plan=plan.digest, playbook=VM_RUNS[kind],
+                     tags=plan.tags, options=plan.options, targets=plan.summary())
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     def apply_problem(check: Run | None) -> str:
         """Why a check run's plan can't be run for real now, or "" if it can."""
-        if check is None or check.kind != "vms" or not check.check or check.applied_from:
+        if check is None or check.kind not in VM_RUNS or not check.check or check.applied_from:
             return "Only a check run started from the VMs page can be run for real."
         if check.status != "succeeded":
             return "The check run didn't succeed: fix what failed and run the check again."
@@ -1390,13 +1490,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pins = {t.get("alias", alias_of(int(t["vmid"]))): [k.fingerprint for k in
                                                            keys.trusted(t.get("alias") or alias_of(int(t["vmid"])))]
                 for t in check.targets}
-        if vmplan.digest(check.tags, inventory, pins) != check.plan:
+        if vmplan.digest(check.tags, inventory, pins, VM_RUNS[check.kind], check.options) != check.plan:
             return "A VM's pinned host keys changed since the check run: run the check again."
         return ""
 
     def apply_json(run: Run) -> dict[str, Any] | None:
         """For a VMs page check run: whether its plan can be run for real, and until when."""
-        if run.kind != "vms" or not run.check:
+        if run.kind not in VM_RUNS or not run.check:
             return None
         problem = apply_problem(run)
         return {"possible": not problem, "problem": problem,
@@ -1404,8 +1504,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/vms/apply")
     async def vm_apply(request: Request):
-        """Runs a passing check run's plan for real: the same hosts, inventory, tags and pinned keys, within 30
-        minutes of the check, once, after the user confirmed it."""
+        """Runs a passing check run's plan for real: the same playbook, hosts, inventory, tags, options and pinned
+        keys, within 30 minutes of the check, once, after the user confirmed it."""
         require_login(request)
         form = await checked_form(request)
         check = runner.get(str(form.get("run_id", "")))
@@ -1417,14 +1517,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return reply(422, error=problem)
         inventory = runner.path(check.id, ".inventory.yml").read_text()
         try:
-            started = runner.start("baseline", False, True, check.limit, store.host_names(), secret_values(),
-                                   kind="vms", inventory=inventory, tags=check.tags, targets=check.targets,
-                                   plan=check.plan, applied_from=check.id)
+            started = runner.start(VM_RUNS[check.kind], False, check.kind == "vms", check.limit, store.host_names(),
+                                   secret_values(), kind=check.kind, inventory=inventory, tags=check.tags,
+                                   targets=check.targets, plan=check.plan, applied_from=check.id,
+                                   extra_vars=check.options or None)
         except RunError as exc:
             audit.record("run.refused", **who(request), check=check.id, reason=exc.message)
             return reply(422, error=exc.message)
-        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan, tags=check.tags,
-                     targets=check.targets, confirmed=True)
+        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan,
+                     playbook=VM_RUNS[check.kind], tags=check.tags, options=check.options, targets=check.targets,
+                     confirmed=True)
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
     @app.get("/audit.jsonl")
@@ -1547,5 +1649,172 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                                  "can leave the seed ISO on the node; see "
                                                  "docs/installing.md#troubleshooting.")
         return reply(message="The run isn't running any more.")
+
+    # --- Updates: the page, the settings and the schedules -------------------------------------------------
+
+    def updates_hosts() -> dict[str, Any]:
+        try:
+            data = json.loads(updates_state.read_text())
+        except (OSError, ValueError):
+            return {}
+        hosts = data.get("hosts") if isinstance(data, dict) else None
+        return hosts if isinstance(hosts, dict) else {}
+
+    def schedule_json(s: scheduler.Schedule, now: float) -> dict[str, Any]:
+        window = scheduler.last_window(s, now)
+        return {"id": s.id, "name": s.name, "kind": s.kind, "kind_label": scheduler.KINDS.get(s.kind, s.kind),
+                "days": s.days, "start": s.start, "minutes": s.minutes, "timezone": s.timezone,
+                "targets": [{k: t.get(k) for k in ("vmid", "name", "address")} for t in s.targets],
+                "options": s.options, "created": s.created, "made_from": s.made_from,
+                "next": scheduler.next_start(s, now), "open": bool(window and window[0] <= now < window[1]),
+                "last_window": s.last_window, "last_outcome": s.last_outcome, "last_time": s.last_time or None,
+                "last_run": s.last_run}
+
+    def schedule_plan(s: scheduler.Schedule) -> vmplan.Plan:
+        """A schedule's plan, made again from the cluster's listing and the keys pinned now: a VM whose key isn't
+        pinned any more, or that is gone, refuses the whole run. Blocks (the scheduler's thread)."""
+        config = store.load()
+        api = pve_api(config)
+        if api is None:
+            raise vmplan.PlanProblem({"selection": "The Proxmox API isn't set up."})
+        network = vms.subnet(config.values.get("net_gateway"), setting(config, "net_prefix"))
+        rows = {row["vmid"]: row for row in lister.list(api, vm_servers(config), network)["vms"]}
+        selected = [int(t["vmid"]) for t in s.targets]
+        form = {}
+        for t in s.targets:
+            if not t.get("static"):
+                prefix = f"vm-{int(t['vmid'])}-"
+                form.update({prefix + "address": str(t.get("address") or ""), prefix + "user": str(t.get("user") or ""),
+                             prefix + "port": "" if t.get("port") is None else str(t["port"])})
+        pins = {alias: [k.fingerprint for k in found] for alias, found in keys.pins().items()}
+        return vmplan.build(rows, selected, form, servers=config.servers, pins=pins,
+                            aliases={vmid: alias_of(vmid) for vmid in selected}, formats=plan_formats(),
+                            settings=plan_settings(config), tags=[], preset=vmplan.UPDATES, playbook=vmplan.UPDATES,
+                            options={**s.options, "updates_ignore_window": "false"})
+
+    def fire_schedule(s: scheduler.Schedule) -> tuple[str, str]:
+        """Starts a schedule's check run (an apply schedule's update follows it in continue_schedule)."""
+        try:
+            plan = schedule_plan(s)
+            started = runner.start("updates", True, False, plan.limit, store.host_names(), secret_values(),
+                                   kind="updates", inventory=plan.inventory, targets=plan.summary(), plan=plan.digest,
+                                   extra_vars=plan.options, schedule=s.id)
+        except (vmplan.PlanProblem, RemoteProblem, RunError) as exc:
+            return "", f"Refused: {exc.message}"
+        if s.kind == "apply":
+            pending_applies[started.id] = s.id
+            return started.id, f"Check run {started.id} started; the update follows if it passes."
+        return started.id, f"Check run {started.id} started."
+
+    def continue_schedule(check: Run, schedule_id: str) -> None:
+        """After an apply schedule's check: installs with the same plan if the check passed, found nothing
+        surprising, and the window is still open; otherwise says why not."""
+        s = next((x for x in schedules.load() if x.id == schedule_id), None)
+        if s is None:
+            return
+        problems = ([f"the check run {check.status}"] if check.status != "succeeded"
+                    else scheduler.surprises((runner.hosts(check.id) or {}).get("updates")))
+        window = scheduler.last_window(s, time.time())
+        if not (window and time.time() < window[1]):
+            problems.append("its window closed")
+        started = None
+        if not problems:
+            try:
+                inventory = runner.path(check.id, ".inventory.yml").read_text()
+                started = runner.start("updates", False, False, check.limit, store.host_names(), secret_values(),
+                                       kind="updates", inventory=inventory, targets=check.targets, plan=check.plan,
+                                       applied_from=check.id, extra_vars=check.options, schedule=s.id)
+            except (OSError, RunError) as exc:
+                problems.append(getattr(exc, "message", str(exc)))
+        if started is None:
+            outcome = f"Not installed: {'; '.join(problems)}."
+            audit.record("schedule.aborted", schedule=s.id, name=s.name, check=check.id, reasons=problems)
+            schedules.update(s.id, last_outcome=outcome)
+            return
+        audit.record("schedule.apply", schedule=s.id, name=s.name, check=check.id, run=started.id,
+                     targets=check.targets, options=check.options)
+        schedules.update(s.id, last_outcome=f"The check passed: updating in run {started.id}.", last_run=started.id)
+
+    sched = scheduler.Scheduler(schedules, fire_schedule, lambda: runner.current() is not None, audit.record)
+    app.state.scheduler = sched
+    if background and settings.scheduler:
+        sched.start()
+
+    @app.get("/api/updates")
+    async def updates_data(request: Request):
+        require_login(request)
+        config = store.load()
+        now = time.time()
+        return reply(hosts=updates_hosts(), schedules=[schedule_json(s, now) for s in schedules.load()],
+                     scheduler=settings.scheduler, days=list(scheduler.DAYS), kinds=scheduler.KINDS,
+                     minutes=[scheduler.MIN_MINUTES, scheduler.MAX_MINUTES],
+                     timezone=str(setting(config, "timezone")), timezones=timezones,
+                     **section_json("updates", config))
+
+    @app.post("/api/updates")
+    async def updates_settings(request: Request):
+        require_login(request)
+        form = await checked_form(request)
+        config = store.load()
+        problems = apply_section("updates", form, config)
+        if problems:
+            return reply(422, errors=problems.errors)
+        store.save(config)
+        return reply(message="Saved the updates settings.")
+
+    def schedule_source_problem(check: Run | None) -> str:
+        """Why a run can't become a schedule, or "" if it can: a passing VMs page updates check from the last
+        30 minutes, with no setting saved since."""
+        if check is None or check.kind != "updates" or not check.check or check.applied_from:
+            return "Only an updates check run started from the VMs page can become a schedule."
+        if check.status != "succeeded":
+            return "The check run didn't succeed: fix what failed and run the check again."
+        if time.time() - (check.finished or 0) > CHECK_TTL:
+            return "The check run is more than 30 minutes old: run the check again."
+        if check.settings != runner.settings_digest():
+            return "Settings were saved since the check run: run the check again."
+        return ""
+
+    @app.post("/api/updates/schedules")
+    async def updates_schedules(request: Request):
+        """Makes a schedule from a passing updates check run (after the password again), or deletes one."""
+        session = require_login(request)
+        form = await checked_form(request)
+        action = str(form.get("action", ""))
+        if action == "delete":
+            gone = schedules.remove(str(form.get("id", "")))
+            if gone is None:
+                return reply(404, error="There is no such schedule.")
+            audit.record("schedule.deleted", **who(request), schedule=gone.id, name=gone.name)
+            log.info("Updates schedule %s deleted from %s", gone.name, client(request))
+            return reply(message=f"Deleted the schedule {gone.name}.")
+        if action != "create":
+            raise Forbidden()
+        check = runner.get(str(form.get("run_id", "")))
+        problem = schedule_source_problem(check)
+        if problem:
+            return reply(422, error=problem)
+        try:
+            values = scheduler.parse({k: str(v) for k, v in form.items() if isinstance(v, str)}, set(timezones))
+        except scheduler.ScheduleProblem as exc:
+            return reply(422, errors=exc.errors)
+        # A schedule runs without anyone there: making one needs the password, as a status token does.
+        wait = auth.wait_seconds(client(request))
+        if wait:
+            return reply(429, error=f"Too many failed attempts. Try again in {wait} seconds.")
+        if not auth.verify_password(str(form.get("schedule_current", ""))):
+            auth.record_failure(client(request))
+            return reply(422, errors={"schedule_current": "The current password is wrong."})
+        options = {k: v for k, v in check.options.items() if k != "updates_ignore_window"}
+        try:
+            made = schedules.add(values, check.targets, options, session_fingerprint(session.sid), check.id,
+                                 time.time())
+        except scheduler.ScheduleProblem as exc:
+            return reply(422, errors=exc.errors)
+        audit.record("schedule.created", **who(request), schedule=made.id, name=made.name, kind=made.kind,
+                     days=made.days, start=made.start, minutes=made.minutes, timezone=made.timezone,
+                     check=check.id, targets=made.targets, options=made.options)
+        log.info("Updates schedule %s (%s) created from %s", made.name, made.kind, client(request))
+        return reply(message=f"Saved the schedule {made.name}.", redirect="/updates")
 
     return app
