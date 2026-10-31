@@ -169,24 +169,22 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
   needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
   boundary B21 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
-
+- pyasn1 0.6.5 (from 0.6.4) in the CI and web UI requirements, for GHSA-2qm8-x737-gmw5,
+  GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p and GHSA-mm57-4v3p-rchx.
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
   [assurance case](docs/assurance-case.md).
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
 
 ### Fixed
 
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
-
-### Security
-
-- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
-  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
-  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
-  VM's key is pinned by cluster and VM ID.
 
 ### Documentation
 
