@@ -105,6 +105,9 @@
         - /var/log/installer/autoinstall-user-data
         - /var/lib/cloud/instances/usas-test/user-data.txt
         - /var/lib/cloud/instances/usas-test/user-data.txt.i
+        - /etc/cloud/cloud-init.disabled
+        - /var/lib/cloud/instances/usas-test/cloud-config.txt
+        - /var/lib/cloud/instances/usas-test/obj.pkl
       register: verify_files
 
     - name: Check files
@@ -116,6 +119,9 @@
           - not verify_files.results[3].stat.exists
           - not verify_files.results[4].stat.exists
           - not verify_files.results[5].stat.exists
+          # cloud-init's other copies go only where it is disabled; where it still runs, it reads them.
+          - verify_files.results[7].stat.exists != verify_files.results[6].stat.exists
+          - verify_files.results[8].stat.exists != verify_files.results[6].stat.exists
 
     - name: Read the timezone
       ansible.builtin.command: timedatectl show -p Timezone --value

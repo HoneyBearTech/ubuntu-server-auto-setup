@@ -59,7 +59,7 @@ NODE_STORAGES = {
 STORAGES = {
     "local": {"type": "dir", "content": "iso,vztmpl,backup", "shared": 0},
     "local-lvm": {"type": "lvmthin", "content": "images,rootdir", "shared": 0},
-    "synology-nfs": {"type": "nfs", "content": "images,iso", "shared": 1},
+    "synology-nfs": {"type": "nfs", "content": "images,iso,import", "shared": 1},
     "usb-iso": {"type": "dir", "content": "iso", "shared": 0},
 }
 HANG_VMIDS = {4099}
@@ -255,6 +255,24 @@ def listed_status(vm):
     """A VM's status as /cluster/resources shows it: the previous one for a few seconds after a change."""
     previous, since = vm.get("listed", (vm["status"], 0))
     return previous if time.time() - since < RESOURCES_LAG_SECONDS else vm["status"]
+
+
+def _import_from(config, node):
+    """Checks a disk's import-from as Proxmox does: an image in Import content of a storage the node has, into a new
+    volume (<storage>:0). Returns an error message, or None."""
+    for key, value in config.items():
+        if not re.fullmatch(r"(scsi|virtio|sata|ide)[0-9]+", key) or "import-from=" not in value:
+            continue
+        target, *options = value.split(",")
+        source = dict(option.partition("=")[::2] for option in options)["import-from"]
+        storage, _, volume = source.partition(":")
+        if not target.endswith(":0"):
+            return f"{key}: import-from needs a new volume (<storage>:0), got '{target}'"
+        if storage not in NODE_STORAGES.get(node, []) or "import" not in STORAGES[storage]["content"].split(","):
+            return f"{key}: storage '{storage}' doesn't allow Import content on {node}"
+        if not re.fullmatch(r"import/[A-Za-z0-9._+-]+\.qcow2", volume):
+            return f"{key}: '{source}' isn't an image in Import content"
+    return None
 
 
 def upid(action, vmid, node=NODE):
@@ -495,7 +513,7 @@ class PveHandler(BaseHTTPRequestHandler):
             if vmid in vms:
                 return self._reply(500, {"vmid": f"VM {vmid} already exists"})
             config = dict(form)
-            error = _special_disks(config, vmid)
+            error = _special_disks(config, vmid) or _import_from(config, node)
             if error:
                 return self._reply(400, {"config": error})
             for key in [k for k in config if re.fullmatch(r"net[0-9]+", k)]:
@@ -505,7 +523,8 @@ class PveHandler(BaseHTTPRequestHandler):
             vms[vmid] = {"node": node, "config": config, "status": "stopped", "starts": 0, "polls": 0,
                          "installed": False, "config_updates": [], "agent_polls": 0}
             return self._reply(200, upid("qmcreate", vmid, node))
-        m = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|status/current|status/start|agent/network-get-interfaces)", path)
+        m = re.fullmatch(r"/nodes/([^/]+)/qemu/(\d+)/(config|resize|status/current|status/start|agent/network-get-interfaces)",
+                         path)
         if not m:
             return self._reply(501, {"path": f"{method} {path} is not implemented by the mock"})
         node, vmid, action = m.group(1), m.group(2), m.group(3)
@@ -520,6 +539,13 @@ class PveHandler(BaseHTTPRequestHandler):
                 vm["config"].pop(key.strip(), None)
             vm["config"].update({k: v for k, v in form.items() if k != "delete"})
             return self._reply(200, None)
+        if action == "resize" and method == "PUT":
+            # Proxmox VE 9 answers with a task; only an absolute size larger than the disk's is taken here.
+            disk, size = form.get("disk", ""), form.get("size", "")
+            if disk not in vm["config"] or not re.fullmatch(r"[1-9][0-9]*G", size):
+                return self._reply(400, {"size": f"can't resize {disk!r} to {size!r}"})
+            vm.setdefault("resized", []).append({"disk": disk, "size": size})
+            return self._reply(200, upid("resize", vmid, node))
         if action == "agent/network-get-interfaces" and method == "GET":
             return self._agent_interfaces(int(vmid), vm)
         if action == "status/start" and method == "POST":

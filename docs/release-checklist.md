@@ -110,6 +110,57 @@ be tagged; replace them with yours.
   ssh sysadmin@192.0.2.10 'ip -br address; ip route show default; sudo netplan get ethernets'
   ```
 
+## Cloud images
+
+Three more disposable VMs, each with `vm_install_method: cloud_image` in its inventory entry: `test-10`
+(`vm_os: debian-13`, VM ID `9010`), `test-11` (`alma-10`, `9011`) and `test-12` (`rocky-9`, `9012`, with the
+default `vm_cpu_type: host`). `192.0.2.20` stands for whichever of them a step is about.
+
+- [ ] Allow Import content on `<iso-storage>`: in the Proxmox web interface, **Datacenter → Storage**, select
+  `<iso-storage>`, click **Edit**, add **Import** to **Content**, click **OK**. With the node user, run
+  `make prepare-node` again. `ls -ld "$(dirname "$(dirname "$(pvesm path <iso-storage>:iso/x.iso)")")/import"`
+  on the node shows the folder.
+- [ ] `make build-installer LIMIT=test-10,test-11,test-12,<node>` reports "downloaded by <node>" for each image,
+  and a second run reports `changed=0`. The images are in the storage's Import content:
+
+  ```bash
+  pvesm list <iso-storage> --content import    # the three .qcow2 files the catalog names
+  ```
+
+- [ ] `make provision LIMIT=test-10,test-11,test-12` ends with `failed=0`, each VM taking about a minute. On
+  each VM's console the image boots once, powers off, and starts again from its disk:
+
+  ```bash
+  qm config 9010 | grep -E '^(scsi0|ide2|boot):'   # scsi0 ... size=32G; no ide2; boot: order=scsi0
+  ```
+
+- [ ] On a node without AVX2 (an Intel Ivy Bridge Xeon, for example), `make provision LIMIT=test-12 ARGS="-e
+  vm_os=rocky-10"` stops before creating anything, naming the node's CPU and the missing flags; `alma-10`
+  installs there.
+- [ ] Each VM runs under Secure Boot with its vendor's keys, cloud-init is disabled, sudo needs no password yet,
+  and SELinux is enforcing on AlmaLinux and Rocky Linux:
+
+  ```bash
+  ssh sysadmin@192.0.2.20 'mokutil --sb-state; cloud-init status; sudo -n true && echo sudo ok; getenforce'
+  # SecureBoot enabled / status: disabled / sudo ok / Enforcing (on the RHEL family)
+  ```
+
+- [ ] A reboot keeps the host key and the host name (cloud-init stays off without the seed):
+
+  ```bash
+  ssh-keygen -F 192.0.2.20 | tail -1 > /tmp/before
+  ssh sysadmin@192.0.2.20 'sudo reboot'; sleep 60
+  ssh-keyscan -t ed25519 192.0.2.20 2>/dev/null | diff - /tmp/before >/dev/null && echo same key
+  ssh sysadmin@192.0.2.20 hostnamectl --static     # test-10
+  ```
+
+- [ ] After `make baseline LIMIT=test-10,test-11,test-12`, no copy of the password hash is left under
+  cloud-init's folders, and the baseline passes on each:
+
+  ```bash
+  ssh sysadmin@192.0.2.20 "sudo grep -rl '\$6\$' /var/lib/cloud /etc/cloud"   # prints nothing
+  ```
+
 ## Secure Boot and disk encryption
 
 CI installs from the real ISO under Secure Boot with a TPM 2.0 in QEMU, set up the way Proxmox sets up the
@@ -501,11 +552,14 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   qm stop 9004; qm destroy 9004 --purge     # on hyve
   qm stop 9005; qm destroy 9005 --purge     # the encrypted test VM (its TPM state volume goes too)
   qm stop 9006; qm destroy 9006 --purge     # the VM made by hand for the VMs page's runs
+  for vm in 9010 9011 9012; do qm stop $vm; qm destroy $vm --purge; done   # the cloud-image VMs
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03 \
     /var/tmp/ubuntu-server-auto-setup/seed-test-04
   ```
 
+- [ ] Keep the cloud images for the next run, or delete them: `pvesm list <iso-storage> --content import`,
+  then `pvesm free <volume>` for each.
 - [ ] Remove the test keys: any key added to the GitHub account for the run, the test image's key from
   `/root/.ssh/authorized_keys` on the Proxmox node (if it isn't the key you keep), and the test VM's entries
   in your `known_hosts`:

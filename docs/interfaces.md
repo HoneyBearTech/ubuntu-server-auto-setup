@@ -63,7 +63,7 @@ example shows a typical value.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `vm_os` | `ubuntu-26.04` | The server's operating system: an id from the [OS catalog](#the-os-catalog): `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-26.04`, `debian-12`, `debian-13`, `centos-stream-9`, `centos-stream-10`, `rocky-9`, `rocky-10`, `alma-9`, `alma-10`. A release past its `eol` still installs, with a warning. Until 1.0, a server whose inventory sets `ubuntu_release` gets `ubuntu-<that release>`. |
-| `vm_install_method` | `autoinstall` | How it's installed: `autoinstall`, Ubuntu's installer ISO (Ubuntu only; the disk layouts and disk encryption need it). `cloud_image` (every family) is refused until cloud-image installs land (see the [roadmap](roadmap.md)). |
+| `vm_install_method` | `autoinstall` | How it's installed: `autoinstall`, Ubuntu's installer ISO (Ubuntu only; the disk layouts and disk encryption need it), or `cloud_image` (every family): the vendor's cloud image, copied into the VM's disk, grown to `vm_disk_gb` and set up by cloud-init on its first boot, in about a minute. A cloud image needs Import content on `pve_iso_storage` (Datacenter → Storage → Content: Import, Proxmox VE 8.2 or later), a `vm_disk_gb` at least the image's own size, and no `vm_disk_encryption`. Rocky Linux 10 and CentOS Stream 10 need an x86-64-v3 CPU: `vm_cpu_type` `host` (or `x86-64-v3`) on a node whose CPU has AVX2 (Intel Haswell, AMD Excavator and later); they're refused otherwise, before the VM is created. AlmaLinux 10's image runs on older CPUs. |
 | `vm_os_image_url`, `vm_os_image_sha256`, `vm_os_family` | `""` | An image the catalog doesn't have (`cloud_image` only): an `https://` URL of a `.qcow2`, `.img` or `.raw` image (no query string), its SHA-256 in lowercase hexadecimal, and its family (`ubuntu`, `debian` or `rhel`; not needed when `vm_os` is in the catalog). The image is checked against that checksum only, so take both from a source you trust. |
 
 Every server's settings are checked before anything is created or downloaded: `vm_os` must be in the catalog
@@ -394,8 +394,8 @@ vendor publishes only SHA-512, as Debian does for cloud images), `file` (the nam
 Proxmox node; cloud images end in `.qcow2`, as Proxmox's Import content requires), `build` (the point release or
 the vendor's build serial) and `signed` (`true` when the vendor signs the checksum file the checksum came from and
 the script checked that signature; `false` for CentOS Stream and Debian's cloud images, which are HTTPS only).
-The catalog lists all eleven releases, but this release installs only the Ubuntu installer ISOs from it; the
-other images are used once cloud-image installs land (see the [roadmap](roadmap.md)).
+`build-installer.yml` downloads each image a server needs onto its node (the installer ISO into the ISO
+storage, a cloud image into the same storage's Import folder), checked against that checksum.
 
 ### The web UI
 

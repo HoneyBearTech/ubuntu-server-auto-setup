@@ -144,15 +144,36 @@
     fail_msg: "pvesm path gave a folder that isn't an absolute path: {{ proxmox_node_user_iso_dirs }}"
     quiet: true
 
+# Cloud images go in a storage's Import folder (<storage>/import, next to template/iso), which Proxmox makes once
+# the storage allows Import content.
+- name: Look for each storage's Import folder
+  ansible.builtin.stat:
+    path: "{{ item.value | dirname | dirname }}/import"
+    get_checksum: false
+  loop: "{{ proxmox_node_user_iso_dirs | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: proxmox_node_user_import_stats
+
+- name: Note the folders the user writes to
+  vars:
+    proxmox_node_user_imports: >-
+      {{ proxmox_node_user_import_stats.results | selectattr('stat.isdir', 'defined') | selectattr('stat.isdir') | list }}
+  ansible.builtin.set_fact:
+    proxmox_node_user_write_dirs: >-
+      {{ (proxmox_node_user_iso_dirs | combine(dict(proxmox_node_user_imports | map(attribute='item.key')
+          | map('regex_replace', '$', ' (Import)') | zip(proxmox_node_user_imports | map(attribute='stat.path')))))
+         | dict2items }}
+
 # An ACL entry for the user on each folder, rather than a group or new owner: Proxmox keeps owning them.
-- name: Let the user write to the ISO folders
+- name: Let the user write to the ISO and Import folders
   ansible.posix.acl:
     path: "{{ item.value }}"
     entity: "{{ pve_ssh_user }}"
     etype: user
     permissions: rwx
     state: present
-  loop: "{{ proxmox_node_user_iso_dirs | dict2items }}"
+  loop: "{{ proxmox_node_user_write_dirs }}"
   loop_control:
     label: "{{ item.key }}: {{ item.value }}"
   register: proxmox_node_user_acls
@@ -161,11 +182,11 @@
 
 # An NFS server can accept the ACL entry (or report it as already there) and still refuse the user, so write a
 # file as the user to be sure.
-- name: Write a test file to each ISO folder as {{ pve_ssh_user }}
+- name: Write a test file to each ISO and Import folder as {{ pve_ssh_user }}
   ansible.builtin.command:
     argv: [runuser, -u, "{{ pve_ssh_user }}", --, sh, -c, 'f=$(mktemp -p "$1" .usas-write-test.XXXXXX) && rm -f -- "$f"',
            sh, "{{ item.value }}"]
-  loop: "{{ proxmox_node_user_iso_dirs | dict2items }}"
+  loop: "{{ proxmox_node_user_write_dirs }}"
   loop_control:
     label: "{{ item.key }}: {{ item.value }}"
   register: proxmox_node_user_writes
@@ -174,7 +195,7 @@
   check_mode: false
   when: proxmox_node_user_exists
 
-- name: Fail unless the user can write to every ISO folder
+- name: Fail unless the user can write to every ISO and Import folder
   vars:
     proxmox_node_user_failed: >-
       {{ (proxmox_node_user_acls.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list)

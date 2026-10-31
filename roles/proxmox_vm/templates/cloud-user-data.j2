@@ -1,0 +1,27 @@
+#cloud-config
+# First-boot settings for a cloud image. Holds a password hash: deleted from the node after the first boot.
+# Built as data and written with to_nice_yaml, so every value comes back exactly as given and no inventory value
+# can change the structure (tests/fuzz/fuzz_user_data.py checks this).
+{#  The admin user gets sudo from its own file, as the autoinstall's late-commands give it: cloud-init's sudo key
+    would write 90-cloud-init-users, which the baseline doesn't manage. Once set up, the VM powers off; the role
+    detaches the seed and boots it again. cloud-init.disabled keeps cloud-init from running on later boots,
+    which on some images would treat the missing seed as a new instance (new host keys, the image's default
+    user). #}
+{% set sudoers = '/etc/sudoers.d/90-ansible-' ~ admin_user %}
+{% set user_data = {
+     'hostname': inventory_hostname_short,
+     'preserve_hostname': false,
+     'users': [{'name': admin_user, 'gecos': admin_realname, 'shell': '/bin/bash', 'lock_passwd': false,
+                'passwd': provision_password_hash, 'ssh_authorized_keys': provision_ssh_keys}],
+     'disable_root': true,
+     'ssh_pwauth': false,
+     'write_files': [
+       {'path': sudoers, 'owner': 'root:root', 'permissions': '0440',
+        'content': admin_user ~ ' ALL=(ALL:ALL) NOPASSWD: ALL\n'}],
+     'runcmd': [['touch', '/etc/cloud/cloud-init.disabled']],
+     'power_state': {'mode': 'poweroff', 'delay': 'now', 'condition': true}} %}
+{% if net_mode == 'dhcp' %}
+{#  The guest agent reports the address DHCP gave the VM (tasks/dhcp_address.yml). #}
+{%   set user_data = user_data | combine({'packages': ['qemu-guest-agent']}) %}
+{% endif %}
+{{ user_data | to_nice_yaml(indent=2, width=4096) }}

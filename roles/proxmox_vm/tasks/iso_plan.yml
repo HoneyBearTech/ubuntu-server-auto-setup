@@ -2,8 +2,9 @@
 # Works out where the installer ISOs must be built, for the first play of playbooks/build-installer.yml (over
 # servers and proxmox_nodes). Each server in the run that installs with autoinstall needs its release's ISO (from
 # vm_os) in the ISO storage (pve_iso_storage) of its node (pve_node); with no server in the run, each node in the
-# run needs its own default release's in its own pve_iso_storage. A storage the cluster shares, such as NFS, gets
-# each ISO once, from one node that uses it; a node-local storage gets it on every node that uses it. The nodes
+# run needs its own default release's in its own pve_iso_storage. A server that installs from a cloud image needs
+# that image in the same storage's Import folder instead. A storage the cluster shares, such as NFS, gets each ISO
+# or image once, from one node that uses it; a node-local storage gets it on every node that uses it. The nodes
 # that build join the group pve_iso_build, each with its ISOs in installer_isos. Nothing here connects to a host:
 # the API answers for every node.
 - name: Check that the Proxmox API is set
@@ -39,11 +40,14 @@
       node: "{{ pve_node if pve_is_server else inventory_hostname }}"
       ssh_host: "{{ pve_ssh_host if pve_is_server else inventory_hostname }}"
       storage: "{{ pve_iso_storage }}"
-      # The installer ISO this host needs, as the installer_iso role builds it; none for a cloud-image install.
+      cloud_image: "{{ pve_is_server and os_catalog_selected.method == 'cloud_image' }}"
+      # The installer ISO this host needs, as the installer_iso role builds it, or its cloud image.
       isos: >-
         {{ [{'name': ubuntu_iso_name, 'release': ubuntu_release | string, 'point_release': ubuntu_point_release | string,
              'base_url': ubuntu_iso_base_url}]
-           if not pve_is_server or os_catalog_selected.method == 'autoinstall' else [] }}
+           if not pve_is_server or os_catalog_selected.method == 'autoinstall'
+           else [{'name': os_catalog_selected.image.file, 'url': os_catalog_selected.image.url,
+                  'checksum': os_catalog_selected.image.checksum}] }}
 
 - name: Gather the placements of the run
   vars:

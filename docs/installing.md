@@ -65,10 +65,10 @@ with only the privileges it needs:
 | Privilege | Why |
 | --- | --- |
 | `VM.Allocate` | create the VM |
-| `VM.Config.Disk`, `VM.Config.CDROM`, `VM.Config.CPU`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Options`, `VM.Config.HWType`, `VM.Config.Cloudinit` | set up its disks, the two ISOs, CPU, memory, network, boot order, machine type and options |
+| `VM.Config.Disk`, `VM.Config.CDROM`, `VM.Config.CPU`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Options`, `VM.Config.HWType`, `VM.Config.Cloudinit` | set up its disks (and grow a cloud image's), the ISOs, CPU, memory, network, boot order, machine type and options |
 | `VM.PowerMgmt` | start the VM |
 | `VM.Audit` | list VMs (to skip existing ones) and watch the installer finish |
-| `Datastore.AllocateSpace`, `Datastore.Audit` | allocate the disks and use the ISOs in the ISO storage |
+| `Datastore.AllocateSpace`, `Datastore.Audit` | allocate the disks, use the ISOs in the ISO storage, and copy a cloud image from its Import content into a VM's disk |
 | `SDN.Use` | attach the VM to a bridge (Proxmox VE 8 and later check this) |
 | `VM.GuestAgent.Audit` (Proxmox VE 9 and later) | read-only questions to the VMs' guest agents: the address DHCP gave a server with `net_mode: dhcp` (provisioning and the baseline), and the web UI's VMs page (addresses, OS and host name). Servers with static addresses don't need it. |
 
@@ -189,6 +189,12 @@ and override it on the servers that go elsewhere, and list every node they use i
   `LIMIT=`, only the servers in the limit count, and a node builds only if it is in the limit too
   (`LIMIT=db-01,hyve`); a node left out is reported as skipped.
 - Each VM's seed ISO is written on its own node, in its ISO storage.
+- A server with `vm_install_method: cloud_image` installs from its release's cloud image, which `build-installer`
+  downloads into the Import content of the same storage, once per shared storage as for the ISO. Allow it
+  first, in the Proxmox web interface: **Datacenter → Storage**, select the storage (`pve_iso_storage`), click
+  **Edit**, add **Import** to **Content** and click **OK** (Proxmox VE 8.2 or later). Proxmox then creates the
+  storage's `import` folder; with the node user, run `prepare-node.yml` again so it may write there. The token
+  needs no other privilege: the node downloads the image, and the API only copies it into the VM's disk.
 
 Every variable is described in [interfaces.md](interfaces.md) and the README's
 [configuration section](../README.md#configuration); each role's `defaults/main.yml` has the full list.

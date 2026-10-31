@@ -1,6 +1,7 @@
 # Stands in for a VM the Ubuntu installer has just set up: Ubuntu with systemd, SSH (socket-activated from
 # 24.04 on), sudo-rs on 26.04 and the admin user with passwordless sudo, as the autoinstall user-data leaves
-# it, with copies of the answers' password hash where the installer and cloud-init leave them. D-Bus,
+# it, with copies of the answers' password hash where the installer and cloud-init leave them, and a stand-in for
+# cloud-init's status command (disabled on the cloud-image stand-ins, as the seed leaves it). D-Bus,
 # python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs them before
 # the baseline has installed anything.
 # The package lists are kept, as on an installed server: the apt module judges them by the directory's age, so
@@ -51,8 +52,18 @@ RUN . /etc/os-release \
  && install -d -m 0700 /var/lib/cloud/instances/usas-test \
  && echo 'password: "$6$test$hash"' > /var/lib/cloud/instances/usas-test/user-data.txt \
  && cp /var/lib/cloud/instances/usas-test/user-data.txt /var/lib/cloud/instances/usas-test/user-data.txt.i \
+ && cp /var/lib/cloud/instances/usas-test/user-data.txt /var/lib/cloud/instances/usas-test/cloud-config.txt \
+ && cp /var/lib/cloud/instances/usas-test/user-data.txt /var/lib/cloud/instances/usas-test/obj.pkl \
  && echo usas-test > /var/lib/cloud/instances/usas-test/instance-id \
  && ln -s /var/lib/cloud/instances/usas-test /var/lib/cloud/instance \
+ && mkdir -p /etc/cloud \
+ && if [ "$ID" != ubuntu ]; then touch /etc/cloud/cloud-init.disabled; fi \
+ && printf '%s\n' '#!/bin/sh' \
+      '# Stands in for cloud-init status: disabled after a cloud-image install (the seed writes cloud-init.disabled),' \
+      '# done after the Ubuntu installer.' \
+      'if [ -e /etc/cloud/cloud-init.disabled ]; then echo "status: disabled"; else echo "status: done"; fi' \
+      > /usr/bin/cloud-init \
+ && chmod 0755 /usr/bin/cloud-init \
  && if [ "$admin_group" = wheel ]; then systemctl enable sshd; \
     elif [ "$ID" = debian ] || [ "$VERSION_ID" = 22.04 ]; then systemctl enable ssh; else systemctl enable ssh.socket; fi
 STOPSIGNAL SIGRTMIN+3
