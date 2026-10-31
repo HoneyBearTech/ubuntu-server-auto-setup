@@ -1,0 +1,43 @@
+---
+# A release built for x86-64-v3 (Rocky Linux 10, CentOS Stream 10) stops in its boot loader on an older CPU, with
+# nothing on the console: check the VM's CPU type and the node's CPU before the VM is created.
+- name: Fail if the VM's CPU type can't run the release, {{ os_catalog_selected.name ~ ' ' ~ os_catalog_selected.version }}
+  ansible.builtin.assert:
+    that: vm_cpu_type not in provision_x86_64_v2_cpu_types
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ os_catalog_selected.name }} {{ os_catalog_selected.version }} needs an x86-64-v3
+      CPU, and vm_cpu_type {{ vm_cpu_type }} doesn't offer it. Set vm_cpu_type to host or x86-64-v3, or choose
+      vm_os alma-10 (built for x86-64-v2 too).
+    quiet: true
+
+- name: Read the CPU flags of {{ pve_node }}
+  ansible.builtin.command:
+    argv: [grep, -m, "1", -E, '^flags[[:space:]]*:', "{{ provision_cpuinfo_file }}"]
+  register: provision_cpu_flags
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: "{{ pve_ssh_host }}"
+
+- name: Read the CPU model of {{ pve_node }}
+  ansible.builtin.command:
+    argv: [grep, -m, "1", -E, '^model name[[:space:]]*:', "{{ provision_cpuinfo_file }}"]
+  register: provision_cpu_model
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: "{{ pve_ssh_host }}"
+
+- name: Fail unless the CPU is x86-64-v3 on {{ pve_node }}
+  vars:
+    provision_cpu_missing: >-
+      {{ provision_x86_64_v3_flags | difference((provision_cpu_flags.stdout | default('')).split(':', 1) | last | split) }}
+  ansible.builtin.assert:
+    that: provision_cpu_missing | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ os_catalog_selected.name }} {{ os_catalog_selected.version }} needs an x86-64-v3
+      CPU, and {{ pve_node }}'s{{ (' (' ~ (provision_cpu_model.stdout.split(':', 1) | last | trim) ~ ')')
+      if provision_cpu_model.stdout | default('') | length > 0 else '' }} lacks {{ provision_cpu_missing | sort | join(', ') }}
+      (Intel Haswell, AMD Excavator and later have them). Place it on another node with pve_node, or choose vm_os
+      alma-10, which is built for x86-64-v2 too.
+    quiet: true

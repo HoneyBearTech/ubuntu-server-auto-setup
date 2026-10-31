@@ -37,8 +37,8 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Done (0.7.0): the hardened baseline on more operating systems: Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12
   and 13, CentOS Stream 9 and 10, Rocky Linux 9 and 10, and AlmaLinux 9 and 10 (UFW on Ubuntu and Debian,
   firewalld on the RHEL family); any other release is refused unless you allow it.
-- In progress (0.7.0): installing all of those from the vendors' cloud images. Ubuntu keeps its installer ISO
-  as a choice.
+- Done (0.7.0): installing all of those from the vendors' cloud images (`vm_install_method: cloud_image`),
+  set up by cloud-init in about a minute. Ubuntu keeps its installer ISO as a choice.
 - Done: DHCP (the address read from the guest agent) and more network cards with VLANs
   ([interfaces.md](interfaces.md#networks)).
 - Done: Secure Boot by default for new VMs, and optional LUKS2 disk encryption unlocked by the VM's

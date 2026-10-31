@@ -1,6 +1,7 @@
 ---
 # Checks every host's placement against the cluster at once, before anything is created: its node must be one
-# of the cluster's nodes, and its ISO storage must allow ISO images and be active on that node. pve_placements
+# of the cluster's nodes, and its ISO storage must allow ISO images (and Import content, for a cloud image) and be
+# active on that node. pve_placements
 # is the play's list of {host, node, ssh_host, storage} (see filter_plugins/pve_cluster.py). One API endpoint,
 # any member of the cluster, answers for all of its nodes. Leaves pve_node_storages for the ISO plan.
 - name: Check the hosts' nodes and ISO storages against the cluster
@@ -64,8 +65,10 @@
       ansible.builtin.assert:
         that: pve_bad_storages | length == 0
         fail_msg: >-
-          {% for b in pve_bad_storages %}{{ b.host }}: storage '{{ b.storage }}' doesn't allow ISO images on node
-          {{ b.node }}, or isn't active there (ISO storages there: {{ b.available | join(', ') or 'none' }}).
-          {% endfor %}Set pve_iso_storage to one of them, or allow ISO images on the storage for that node
-          (Datacenter → Storage → Content: ISO image, and Nodes).
+          {% for b in pve_bad_storages %}{{ b.host }}: storage '{{ b.storage }}' doesn't allow ISO images{{
+          ' and Import content (for the cloud image)' if b.cloud_image else '' }} on node {{ b.node }}, or isn't active there
+          ({{ 'storages with both' if b.cloud_image else 'ISO storages' }} there: {{ b.available | join(', ') or 'none' }}).
+          {% endfor %}Set pve_iso_storage to one of them, or allow the content on the storage for that node
+          (Datacenter → Storage → Content: ISO image{{ ' and Import' if pve_bad_storages | selectattr('cloud_image') | list
+          else '' }}, and Nodes).
         quiet: true

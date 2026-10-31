@@ -6,17 +6,25 @@
   vars:
     os_catalog_node: "{{ pve_ssh_host }}"
 
-- name: Check that the autoinstall ISO has been built on {{ pve_node }}
+# The installer ISO, or the cloud image in the storage's Import folder (next to template/iso).
+- name: Note what the VM installs from
+  ansible.builtin.set_fact:
+    provision_cloud: "{{ os_catalog_selected.method == 'cloud_image' }}"
+    provision_media: >-
+      {{ (pve_iso_dir | dirname | dirname ~ '/import/' ~ os_catalog_selected.image.file)
+         if os_catalog_selected.method == 'cloud_image' else pve_iso_dir ~ '/' ~ installer_iso_name }}
+
+- name: Check that build-installer.yml has put the installer ISO or the cloud image on {{ pve_node }}
   ansible.builtin.stat:
-    path: "{{ pve_iso_dir }}/{{ installer_iso_name }}"
+    path: "{{ provision_media }}"
     get_checksum: false
   register: pve_installer_iso
   delegate_to: "{{ pve_ssh_host }}"
 
-- name: Fail if the installer ISO is missing
+- name: Fail if the installer ISO or the cloud image is missing
   ansible.builtin.assert:
     that: pve_installer_iso.stat.exists
-    fail_msg: "{{ installer_iso_name }} is not on {{ pve_node }}. Run playbooks/build-installer.yml first."
+    fail_msg: "{{ provision_media }} is not on {{ pve_node }}. Run playbooks/build-installer.yml first."
     quiet: true
 
 - name: Fetch public SSH keys from GitHub
@@ -64,14 +72,23 @@
         mode: "0700"
       delegate_to: "{{ pve_ssh_host }}"
 
-    - name: Render autoinstall user-data
+    - name: Render the user-data for {{ 'cloud-init' if provision_cloud else 'autoinstall' }}
       ansible.builtin.template:
-        src: user-data.j2
+        src: "{{ 'cloud-user-data.j2' if provision_cloud else 'user-data.j2' }}"
         dest: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/user-data"
         mode: "0600"
       delegate_to: "{{ pve_ssh_host }}"
       # The disk passphrase is in it in clear text: hidden even while debugging with pve_hide_secrets false.
       no_log: "{{ pve_hide_secrets | bool or vm_disk_encryption | bool }}"
+
+    # Autoinstall carries the network in its user-data; cloud-init reads it from a file of its own.
+    - name: Render the cloud-init network-config
+      ansible.builtin.template:
+        src: network-config.j2
+        dest: "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/network-config"
+        mode: "0600"
+      delegate_to: "{{ pve_ssh_host }}"
+      when: provision_cloud
 
     - name: Render meta-data
       ansible.builtin.template:
@@ -82,19 +99,11 @@
 
     - name: Build the NoCloud seed ISO
       ansible.builtin.command:
-        argv:
-          - xorriso
-          - -as
-          - mkisofs
-          - -quiet
-          - -output
-          - "{{ pve_iso_dir }}/seed-{{ inventory_hostname }}.iso"
-          - -volid
-          - CIDATA
-          - -joliet
-          - -rock
-          - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/user-data"
-          - "{{ installer_work_dir }}/seed-{{ inventory_hostname }}/meta-data"
+        argv: >-
+          {{ ['xorriso', '-as', 'mkisofs', '-quiet', '-output', pve_iso_dir ~ '/seed-' ~ inventory_hostname ~ '.iso',
+              '-volid', 'CIDATA', '-joliet', '-rock']
+             + (['user-data', 'meta-data'] + (['network-config'] if provision_cloud else []))
+               | map('regex_replace', '^', installer_work_dir ~ '/seed-' ~ inventory_hostname ~ '/') | list }}
       changed_when: true
       delegate_to: "{{ pve_ssh_host }}"
 
@@ -120,7 +129,9 @@
         node: "{{ pve_node }}"
         vmid: "{{ pve_vmid | int }}"
         name: "{{ inventory_hostname_short }}"
-        description: Installed by ubuntu-server-auto-setup (Ubuntu {{ os_catalog_point_release }})
+        description: >-
+          Installed by ubuntu-server-auto-setup ({{ (os_catalog_selected.name ~ ' ' ~ os_catalog_selected.version
+          ~ ' cloud image ' ~ os_catalog_selected.image.build) if provision_cloud else 'Ubuntu ' ~ os_catalog_point_release }})
         tags: "{{ pve_tags }}"
         ostype: l26
         machine: q35
@@ -137,17 +148,22 @@
         cores: "{{ vm_cores }}"
         memory: "{{ vm_memory_mb }}"
         scsihw: virtio-scsi-single
+        # A cloud image's disk is a copy of the image (Proxmox converts it to the storage's format), grown below.
         scsi:
-          scsi0: "{{ pve_storage }}:{{ vm_disk_gb }},discard=on,iothread=1,ssd=1"
-        ide:
-          ide2: "{{ pve_iso_storage }}:iso/{{ installer_iso_name }},media=cdrom"
-          ide3: "{{ pve_iso_storage }}:iso/seed-{{ inventory_hostname }}.iso,media=cdrom"
+          scsi0: >-
+            {{ pve_storage }}:{{ ('0,import-from=' ~ pve_iso_storage ~ ':import/' ~ os_catalog_selected.image.file)
+            if provision_cloud else vm_disk_gb }},discard=on,iothread=1,ssd=1
+        ide: >-
+          {{ {'ide2': pve_iso_storage ~ ':iso/seed-' ~ inventory_hostname ~ '.iso,media=cdrom'} if provision_cloud
+             else {'ide2': pve_iso_storage ~ ':iso/' ~ installer_iso_name ~ ',media=cdrom',
+                   'ide3': pve_iso_storage ~ ':iso/seed-' ~ inventory_hostname ~ '.iso,media=cdrom'} }}
         net: "{{ dict(provision_nics | map(attribute='key') | zip(provision_nics | map(attribute='proxmox'))) }}"
-        boot: order=scsi0;ide2
+        boot: "{{ 'order=scsi0' if provision_cloud else 'order=scsi0;ide2' }}"
         agent: enabled=1
         onboot: "{{ vm_onboot | bool }}"
         state: present
-        timeout: 300
+        # Copying a cloud image into the VM's disk takes longer than creating an empty one.
+        timeout: "{{ 900 if provision_cloud else 300 }}"
       delegate_to: localhost
       become: false
       register: pve_vm_create
@@ -202,7 +218,35 @@
               and not pve_hide_secrets | bool else '' }}
             quiet: true
 
-    - name: Start the VM (the installer runs now)
+    # The image's own size is a few GB; Proxmox refuses to shrink it, so vm_disk_gb must be at least that.
+    # cloud-init grows the root file system into the space on first boot.
+    - name: Grow the disk to vm_disk_gb GB, here {{ vm_disk_gb }}
+      ansible.builtin.uri:
+        url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/resize"
+        method: PUT
+        headers: "{{ pve_api_headers }}"
+        validate_certs: "{{ pve_validate_certs }}"
+        timeout: "{{ pve_api_timeout | int }}"
+        body_format: form-urlencoded
+        body:
+          disk: scsi0
+          size: "{{ vm_disk_gb }}G"
+      register: pve_vm_resize
+      delegate_to: localhost
+      become: false
+      when: provision_cloud
+      no_log: "{{ pve_hide_secrets }}"
+
+    - name: Wait until the disk has grown
+      ansible.builtin.include_tasks: wait_task.yml
+      vars:
+        pve_task: "{{ pve_vm_resize.json.data }}"
+        pve_task_what: resize VM {{ pve_vmid }}'s disk
+      # Proxmox VE 8.2 and later answer with a task; older ones resized before answering.
+      when: provision_cloud and pve_vm_resize.json.data | default('', true) is string
+        and pve_vm_resize.json.data | default('', true) is match('UPID:')
+
+    - name: Start the VM, and with it the {{ 'first boot, in which cloud-init sets it up' if provision_cloud else 'installer' }}
       ansible.builtin.uri:
         url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/start"
         method: POST
@@ -214,13 +258,13 @@
       become: false
       no_log: "{{ pve_hide_secrets }}"
 
-    - name: Wait until the installer is running
+    - name: Wait until the VM is running
       ansible.builtin.include_tasks: wait_task.yml
       vars:
         pve_task: "{{ pve_vm_start.json.data }}"
         pve_task_what: start VM {{ pve_vmid }}
 
-    - name: Wait for the installer to finish and power off the VM
+    - name: Wait until the VM powers off at the end of the {{ 'first boot' if provision_cloud else 'install' }}
       ansible.builtin.uri:
         url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/current"
         headers: "{{ pve_api_headers }}"
@@ -234,7 +278,7 @@
       become: false
       no_log: "{{ pve_hide_secrets }}"
 
-    - name: Detach the installer and seed ISOs and boot from disk only
+    - name: Boot from disk only, without the {{ 'seed ISO' if provision_cloud else 'installer and seed ISOs' }}
       ansible.builtin.uri:
         url: "{{ pve_api_url }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/config"
         method: PUT
@@ -243,7 +287,7 @@
         timeout: "{{ pve_api_timeout | int }}"
         body_format: form-urlencoded
         body:
-          delete: ide2,ide3
+          delete: "{{ 'ide2' if provision_cloud else 'ide2,ide3' }}"
           boot: order=scsi0
       delegate_to: localhost
       become: false

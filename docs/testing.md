@@ -57,8 +57,8 @@ run; your own `~/.ssh` is never touched. The steps:
    without OVMF, an unknown TPM version). `srv-two` is created through `/nodes/pve-test-2/...`, with its seed
    ISO on that node and the 24.04 installer; a new VM on a node whose host key isn't trusted isn't created.
    OS settings are refused before anything is created: a `vm_os` the catalog doesn't have, an image without
-   its family, Debian with `autoinstall`, `cloud_image` (not available yet), an `ubuntu_release` that disagrees
-   with `vm_os`, and malformed values. `tests/verify-aliases.yml` sets every name renamed in 0.7.0 under its
+   its family, Debian with `autoinstall`, disk encryption with `cloud_image`, an `ubuntu_release` that
+   disagrees with `vm_os`, and malformed values. `tests/verify-aliases.yml` sets every name renamed in 0.7.0 under its
    old name and checks the new names hold the values, and that the run lists the old names.
 3. **provision-vms** for `srv-hang`, whose install never finishes: the run must fail and must delete the
    seed ISO (which holds the password hash). The node must have no seed files left.
@@ -68,6 +68,17 @@ run; your own `~/.ssh` is never touched. The steps:
    configuration (every card matched by its MAC address, one default route). No DHCP lease, an agent the
    token may not ask, options smuggled into a card, an unknown card key, a second default route and a
    repeated MAC address must each stop the run with a message.
+   **Cloud images** for `srv-cloud` (Debian 13, `cloud_image`, on the NFS storage, which the mock gives Import
+   content): every catalog image is replaced by a small stand-in that the nodes serve like the ISOs.
+   `build-installer` downloads Debian's once into the shared storage's Import folder (SHA-512 checked), changes
+   nothing on a second run, keeps the good copy when a catalog checksum doesn't match, and refuses a storage
+   without Import content. Rocky Linux 10 is refused with a CPU type without x86-64-v3 and on a node whose CPU
+   lacks AVX2 (`provision_cpuinfo_file` points at an Ivy Bridge and a Haswell `/proc/cpuinfo` on the test
+   node); AlmaLinux 10 isn't checked. Then the VM: `tests/verify-cloud-image.yml` checks that the create call
+   imports the image (`import-from`) and attaches only the seed, that the disk was grown to `vm_disk_gb`, that
+   the seed was detached after the first boot, and the seed's `user-data` (the admin user, keys, the sudoers
+   file, cloud-init disabled afterwards, power-off), `meta-data` and `network-config` (matched by MAC
+   address), and that no seed is left.
    **Disk encryption** for `srv-luks`: without Secure Boot, with a layout other than `lvm`, with a malformed
    TPM state storage or with passphrases that are short, hold a line break or braces, the run must stop
    before anything is created. Then a run with `-v --diff` and `pve_hide_secrets: false`, whose output must
@@ -91,7 +102,9 @@ run; your own `~/.ssh` is never touched. The steps:
    admin user that doesn't exist yet: nothing may fail and nothing may change. Then the baseline twice,
    then `tests/verify-baseline.yml`: effective `sshd -T` settings, UFW rules and policies, the Fail2Ban jail,
    the sudoers file, the timezone, automatic updates, the removed installer answers file, exactly the
-   published key and the extra key in `authorized_keys`, and password and root logins refused. A check run
+   published key and the extra key in `authorized_keys`, and password and root logins refused. cloud-init's
+   copies of the user-data must be gone too: `user-data.txt*` always, `cloud-config.txt` and `obj.pkl` only
+   where the stand-in `cloud-init` reports itself disabled (the Debian and RHEL-family stand-ins). A check run
    on the finished server must report no changes.
 6. **Key sync**: the baseline reaches `srv-dhcp` at the address its guest agent reports, without changes; a
    key that is no longer published is removed; an empty key list is refused rather than

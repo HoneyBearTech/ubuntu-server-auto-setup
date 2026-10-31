@@ -69,14 +69,14 @@
       can use (mode 0700). Remove it, or run playbooks/prepare-node.yml again to hand it to {{ pve_ssh_user }}.
     quiet: true
 
-# The ISOs the plan gave this node (installer_isos), with the settings of the servers that need them; without a
-# plan, the node's own release in pve_iso_storage.
-- name: List the installer ISOs to build
+# The ISOs and cloud images the plan gave this node (installer_isos), with the settings of the servers that need
+# them (an image has a url); without a plan, the node's own release in pve_iso_storage.
+- name: List the installer ISOs to build and the cloud images to download
   ansible.builtin.set_fact:
     installer_iso_list: >-
-      {{ installer_isos if installer_isos | length > 0
+      {{ [{'url': '', 'checksum': ''}] | product(installer_isos if installer_isos | length > 0
          else [{'storage': pve_iso_storage, 'name': ubuntu_iso_name, 'release': ubuntu_release | string,
-                'point_release': ubuntu_point_release | string, 'base_url': ubuntu_iso_base_url}] }}
+                'point_release': ubuntu_point_release | string, 'base_url': ubuntu_iso_base_url}]) | map('combine') | list }}
 
 - name: Put each installer ISO in its ISO storages
   ansible.builtin.include_tasks: iso.yml
@@ -87,7 +87,18 @@
     ubuntu_iso_name: "{{ installer_iso.name }}"
     installer_iso_storages: >-
       {{ installer_iso_list | selectattr('name', 'equalto', installer_iso.name) | map(attribute='storage') | list }}
-  loop: "{{ installer_iso_list | unique(attribute='name') }}"
+  loop: "{{ installer_iso_list | rejectattr('url') | unique(attribute='name') | list }}"
   loop_control:
     loop_var: installer_iso
     label: "{{ installer_iso.name }}"
+
+# The cloud images the plan gave this node, each into the Import folder of each storage that needs it.
+- name: Put each cloud image in its storages' Import folders
+  ansible.builtin.include_tasks: image.yml
+  vars:
+    installer_image_storages: >-
+      {{ installer_iso_list | selectattr('name', 'equalto', installer_image.name) | map(attribute='storage') | list }}
+  loop: "{{ installer_iso_list | selectattr('url') | unique(attribute='name') | list }}"
+  loop_control:
+    loop_var: installer_image
+    label: "{{ installer_image.name }}"

@@ -118,14 +118,24 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `vm_os_image_sha256` and `vm_os_family` for an image the catalog doesn't have. Servers can now run different
   Ubuntu LTS releases (22.04, 24.04, 26.04) on one cluster: `build-installer.yml` builds each release's
   installer on the nodes whose servers need it. Every server's OS settings are checked before anything is
-  created or downloaded; a release past its end of support installs with a warning. Debian, CentOS Stream,
-  Rocky Linux and AlmaLinux (`vm_install_method: cloud_image`) are refused until cloud-image installs land.
+  created or downloaded; a release past its end of support installs with a warning.
+
+- **Installs from the vendors' cloud images** (`vm_install_method: cloud_image`), for every release in the OS
+  catalog: Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux. `build-installer.yml` downloads each image
+  a server needs into its ISO storage's Import content (once for a storage the cluster shares), checked against
+  the checksum the catalog pins. `provision-vms.yml` copies it into the new VM's disk (`import-from`), grows it
+  to `vm_disk_gb`, and boots it once with a cloud-init seed (the admin user, keys, passwordless sudo in
+  `/etc/sudoers.d/90-ansible-<user>`, the network matched by MAC address); the VM powers off, the seed is
+  detached and deleted, and the VM starts from its disk, about a minute after it was created. The same
+  hardware as before (OVMF with Secure Boot, q35, VirtIO). The storage must allow Import content (Proxmox VE
+  8.2 or later); the API token needs no new privilege. Rocky Linux 10 and CentOS Stream 10 need an x86-64-v3
+  CPU and are refused, before the VM is created, on a node whose CPU lacks AVX2 or with a CPU type that
+  doesn't offer it. ([interfaces.md](docs/interfaces.md#inventory-variables), [installing.md](docs/installing.md))
 
 - **The web UI chooses the OS**: a Default OS on the Defaults page and an OS column on the Servers page, each
   a dropdown of the catalog's supported releases (`Ubuntu 24.04 (noble) · until 2029-05-31`); the Run page
   shows each Ubuntu release's installer ISO and which node builds it.
-- **The baseline runs on Debian 12 and 13** (on servers you already have; installing Debian comes with
-  cloud-image installs): unattended-upgrades gets Debian's own origins (point releases and Debian-Security, no
+- **The baseline runs on Debian 12 and 13**: unattended-upgrades gets Debian's own origins (point releases and Debian-Security, no
   ESM), and a waiting reboot is found by comparing the newest kernel in `/boot` with the one running, since
   Debian writes no `/var/run/reboot-required`. The baseline and the updates playbook now share that check
   (`roles/updates/tasks/reboot_required/`). The baseline is now tested on Ubuntu 22.04 and 24.04 too: a new CI
@@ -146,6 +156,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- `vm_disk_encryption` needs `vm_install_method: autoinstall` (Ubuntu's installer encrypts the disk; a cloud
+  image comes unencrypted), and says so before anything is created.
+- `prepare-node.yml` also lets the node user write to each storage's Import folder, where Proxmox has made one
+  (run it again after allowing Import content on a storage).
 - The OS catalog pins AlmaLinux 10's x86-64-v2 cloud image instead of the x86-64 (v3) one, so AlmaLinux 10 runs on
   CPUs without AVX2 too (Intel Ivy Bridge and earlier). CentOS Stream 10 and Rocky Linux 10 publish only x86-64-v3
   builds. `make catalog` keeps choosing the v2 build.
@@ -170,6 +184,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `tests/coverage.py` counts the per-family task files too, and each suite measures its own roles.
 
 ### Security
+
+- **New trust: the vendors' cloud image hosts** (trust boundary B24 in the
+  [assurance case](docs/assurance-case.md)): the nodes download the images over HTTPS, and each must have the
+  checksum the reviewed OS catalog pins (or `vm_os_image_sha256`). A cloud image's seed disables cloud-init for
+  later boots, so a boot without the seed can't start over with new host keys or the image's default user, and
+  the baseline now also deletes cloud-init's `cloud-config.txt` and `obj.pkl` (which hold the password hash)
+  wherever cloud-init reports itself disabled.
 
 - The baseline also deletes cloud-init's root-only copies of the user-data it booted with
   (`/var/lib/cloud/instances/*/user-data.txt*`), which hold the admin password's hash, as it already did

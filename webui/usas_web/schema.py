@@ -45,6 +45,8 @@ NOT_FORM_FORMATS = frozenset({
     "vm_os_image_sha256_pattern",
     # firewalld's zone on the RHEL family: fixed, not a setting.
     "firewall_os_zone",
+    # What an x86-64-v3 release needs of the CPU (roles/proxmox_vm/tasks/cpu_check.yml): checked against the node.
+    "os_catalog_x86_64_v3_ids", "provision_x86_64_v2_cpu_types", "provision_x86_64_v3_flags", "provision_cpuinfo_file",
     # The inventory's server groups (servers, and ubuntu_servers before 0.7.0), for build-installer's plan.
     "pve_plan_server_group",
     # The installer ISO's file name: it follows each server's OS (vm_os), which the forms set.
