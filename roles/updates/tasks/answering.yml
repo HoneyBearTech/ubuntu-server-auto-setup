@@ -1,0 +1,13 @@
+---
+# The plays ignore unreachable servers, so that their results still reach the report: a task that couldn't reach
+# the server doesn't stop it. This does, before anything reads such a task's result (updates_answers, the
+# registered results; updates_answers_when, when it happened). apply.yml's rescue reports the server as
+# unreachable.
+- name: Stop if the server stopped answering
+  ansible.builtin.fail:
+    msg: >-
+      The server stopped answering {{ updates_answers_when }} ({{ (unreachable | first).msg | default('unreachable')
+      | usas_clean_text(160) }}); check it before running again.
+  vars:
+    unreachable: "{{ updates_answers | select('mapping') | select('unreachable') | list }}"
+  when: unreachable | length > 0

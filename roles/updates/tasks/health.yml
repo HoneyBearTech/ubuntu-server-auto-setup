@@ -21,6 +21,12 @@
   ansible.builtin.service_facts:
   register: updates_services_after
 
+- name: Check that the server answers after the update
+  ansible.builtin.include_tasks: answering.yml
+  vars:
+    updates_answers: "{{ [updates_reboot_run | default({}), updates_state_after, updates_failed_after, updates_services_after] }}"
+    updates_answers_when: "{{ 'after its reboot' if usas_updates_result.reboot.done else 'after its update' }}"
+
 - name: Call the health URLs
   ansible.builtin.uri:
     url: "{{ item.url }}"

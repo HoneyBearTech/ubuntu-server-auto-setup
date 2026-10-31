@@ -247,7 +247,9 @@ old name's value unless it's set itself, and each run says which old names the i
 | `updates_allow_unsupported` | `false` | Try a release outside `updates_supported_releases`, within a known family. |
 | `updates_allow_shared_become_password` | `false` | Allow the Vault admin password as the sudo password of a server in `other_servers`. |
 | `updates_max_fail_percentage` | `0` | Share of started servers that may fail before no further one starts. |
-| `updates_serial` | `25%` | The batch size (with `-e` only). |
+| `updates_serial` | `25%` | The most servers in a wave: a number (1 to 9999) or a percentage of the servers being updated. Read from the first server: set it for all. |
+| `updates_group_max_parallel`, `updates_node_max_parallel` | `1`, `2` | The most servers of one update group in a wave, and the most that may reboot (`updates_reboot: if_required`) on one Proxmox node (0 to 99, 0 for no limit). Read from the first server: set them for all. |
+| `updates_group` | `""` | The server's update groups: a name or a list (`^[a-z0-9][a-z0-9_.-]{0,62}\Z`, compared in lower case), with the Proxmox tags `usas-group-<name>` of a VM on the cluster. Groups only order the waves. |
 | `updates_notify` | `on-change` | When to notify: `on-change`, `always` or `only-on-error`. |
 | `updates_notify_mail` | `unattended_upgrades_mail` | Mail the run's summary here, through `mail_relay_host` (with `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`, `mail_relay_user`, `mail_relay_password`) from the control node, with the relay's certificate checked. |
 | `updates_webhook_url`, `updates_webhook_format` | `""`, `text` | POST the summary to this http(s) URL (normally from the Vault), as `text` or `json`, as for Fail2Ban. |
@@ -319,7 +321,7 @@ VLANs included. To allow SSH from one network only, set `firewall_ssh_sources`, 
 | `make keys` | `playbooks/baseline.yml --tags ssh_keys` | `servers` | Sync the admin account's authorized keys only. |
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
 | `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
-| `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a batch at a time. Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a wave at a time ([waves](updates.md#waves)). Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
@@ -367,8 +369,9 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `excluded`, `deferred`, `removals`, `reboot` (`expected`, `required`, `packages`, `done`, `held`, `why`),
 `restart_services`, `auto_updates`, `health` (`status`, `problems`), `snapshot` (`status`: `off`, `taken`,
 `removed` (taken, then deleted by `updates_snapshot_keep: 0`) or `none`; `name`, `node`, `reason` when there is
-none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `pve` (`vmid`, `node`,
-`name`, `alias`), `started` and `finished`.
+none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `wave` (`number` from 1,
+or 0 when the server wasn't planned; `of`, the number of waves; `groups`, its update groups; `ha`, whether
+Proxmox HA manages the VM), `pve` (`vmid`, `node`, `name`, `alias`), `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
 

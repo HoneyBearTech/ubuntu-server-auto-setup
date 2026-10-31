@@ -52,6 +52,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
   control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
   (B23).
+- **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
+  the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
+  update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags
+  `usas-group-<name>`), and two that may reboot on each Proxmox node (`updates_node_max_parallel: 2`). A check
+  run plans the waves too; the report gives each server's wave, groups and whether Proxmox HA manages it.
+  `updates_serial` can now be set in the inventory as well as with `-e`.
 
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
