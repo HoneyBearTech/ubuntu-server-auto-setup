@@ -187,7 +187,10 @@
    "iso_storages": {
     "local": "dir",
     "synology-nfs": "nfs, shared"
-   }
+   },
+   "import_storages": [
+    "synology-nfs"
+   ]
   },
   "ca": []
  },
@@ -273,12 +276,46 @@
     "choices": [
      "ubuntu-22.04",
      "ubuntu-24.04",
-     "ubuntu-26.04"
+     "ubuntu-26.04",
+     "debian-12",
+     "debian-13",
+     "centos-stream-9",
+     "centos-stream-10",
+     "rocky-9",
+     "rocky-10",
+     "alma-9",
+     "alma-10"
     ],
     "choice_labels": {
      "ubuntu-22.04": "Ubuntu 22.04 (jammy) · until 2027-06-01",
      "ubuntu-24.04": "Ubuntu 24.04 (noble) · until 2029-05-31",
-     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29"
+     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29",
+     "debian-12": "Debian 12 (bookworm) · until 2028-06-30",
+     "debian-13": "Debian 13 (trixie) · until 2030-06-30",
+     "centos-stream-9": "CentOS Stream 9 · until 2027-05-31",
+     "centos-stream-10": "CentOS Stream 10 · until 2030-05-31",
+     "rocky-9": "Rocky Linux 9 · until 2032-05-31",
+     "rocky-10": "Rocky Linux 10 · until 2035-05-31",
+     "alma-9": "AlmaLinux 9 · until 2032-05-31",
+     "alma-10": "AlmaLinux 10 · until 2035-05-31"
+    }
+   },
+   {
+    "name": "vm_install_method",
+    "label": "Install method",
+    "kind": "choice",
+    "help": "For servers that don't choose their own on the Servers page. A cloud image is imported as the VM's disk; it comes with the vendor's own disk layout. How the OS is installed: autoinstall, from the Ubuntu installer ISO (Ubuntu only; disk layouts and disk encryption need it), or cloud_image, from the vendor's cloud image (every release; the ISO storage must allow Import content).",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_install_method",
+    "default": "autoinstall",
+    "choices": [
+     "autoinstall",
+     "cloud_image"
+    ],
+    "choice_labels": {
+     "autoinstall": "Ubuntu installer (autoinstall)",
+     "cloud_image": "Cloud image"
     }
    },
    {
@@ -383,6 +420,7 @@
    "admin_password": "",
    "timezone": "Europe/Berlin",
    "vm_os": "ubuntu-26.04",
+   "vm_install_method": "autoinstall",
    "net_gateway": "10.0.0.1",
    "net_prefix": "24",
    "net_dns": "10.0.0.1\n1.1.1.1",
@@ -898,12 +936,46 @@
     "choices": [
      "ubuntu-22.04",
      "ubuntu-24.04",
-     "ubuntu-26.04"
+     "ubuntu-26.04",
+     "debian-12",
+     "debian-13",
+     "centos-stream-9",
+     "centos-stream-10",
+     "rocky-9",
+     "rocky-10",
+     "alma-9",
+     "alma-10"
     ],
     "choice_labels": {
      "ubuntu-22.04": "Ubuntu 22.04 (jammy) · until 2027-06-01",
      "ubuntu-24.04": "Ubuntu 24.04 (noble) · until 2029-05-31",
-     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29"
+     "ubuntu-26.04": "Ubuntu 26.04 (resolute) · until 2031-05-29",
+     "debian-12": "Debian 12 (bookworm) · until 2028-06-30",
+     "debian-13": "Debian 13 (trixie) · until 2030-06-30",
+     "centos-stream-9": "CentOS Stream 9 · until 2027-05-31",
+     "centos-stream-10": "CentOS Stream 10 · until 2030-05-31",
+     "rocky-9": "Rocky Linux 9 · until 2032-05-31",
+     "rocky-10": "Rocky Linux 10 · until 2035-05-31",
+     "alma-9": "AlmaLinux 9 · until 2032-05-31",
+     "alma-10": "AlmaLinux 10 · until 2035-05-31"
+    }
+   },
+   {
+    "name": "vm_install_method",
+    "label": "Install method",
+    "kind": "choice",
+    "help": "Empty uses the install method on the Defaults page.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_install_method",
+    "default": null,
+    "choices": [
+     "autoinstall",
+     "cloud_image"
+    ],
+    "choice_labels": {
+     "autoinstall": "Ubuntu installer (autoinstall)",
+     "cloud_image": "Cloud image"
     }
    },
    {
@@ -971,6 +1043,7 @@
     "pve_vmid": "4061",
     "pve_node": "",
     "vm_os": "",
+    "vm_install_method": "",
     "vm_cores": "",
     "vm_memory_mb": "",
     "vm_disk_gb": "",
@@ -984,7 +1057,8 @@
     "net_mac": "",
     "pve_vmid": "4070",
     "pve_node": "ares",
-    "vm_os": "",
+    "vm_os": "debian-13",
+    "vm_install_method": "cloud_image",
     "vm_cores": "",
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
@@ -998,6 +1072,7 @@
    "hermes"
   ],
   "default_node": "hephaestus",
-  "default_os": "ubuntu-26.04"
+  "default_os": "ubuntu-26.04",
+  "default_install_method": "autoinstall"
  }
 }

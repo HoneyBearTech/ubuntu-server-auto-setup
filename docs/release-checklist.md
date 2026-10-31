@@ -137,6 +137,11 @@ default `vm_cpu_type: host`). `192.0.2.20` stands for whichever of them a step i
 - [ ] On a node without AVX2 (an Intel Ivy Bridge Xeon, for example), `make provision LIMIT=test-12 ARGS="-e
   vm_os=rocky-10"` stops before creating anything, naming the node's CPU and the missing flags; `alma-10`
   installs there.
+- [ ] In the web UI: on the **Proxmox** page, click **Test the connection**; the ISO storage dropdown marks
+  `<iso-storage>` with `Import`. On the **SSH** page, click **Test the SSH login** for that node without AVX2;
+  it shows the node's CPU and "x86-64-v2 (no avx2, bmi2, fma, movbe)". On the **Servers** page, set a row's
+  **Node** to that node, **OS** to Rocky Linux 10 and **Install method** to Cloud image, and click **Save**: the
+  page refuses it, naming the node's CPU; AlmaLinux 10 saves. Put the row back as it was and click **Save**.
 - [ ] Each VM runs under Secure Boot with its vendor's keys, cloud-init is disabled, sudo needs no password yet,
   and SELinux is enforcing on AlmaLinux and Rocky Linux:
 

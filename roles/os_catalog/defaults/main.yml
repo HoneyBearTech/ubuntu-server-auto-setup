@@ -9,7 +9,8 @@ vm_os: >-
   {{ 'ubuntu-' ~ hostvars[inventory_hostname].ubuntu_release
      if hostvars[inventory_hostname].ubuntu_release is defined else 'ubuntu-26.04' }}
 # How the OS is installed: autoinstall, from the Ubuntu installer ISO (Ubuntu only; disk layouts and disk
-# encryption need it). cloud_image, from the vendor's cloud image, arrives with the next step of multi-OS support.
+# encryption need it), or cloud_image, from the vendor's cloud image (every release; the ISO storage must allow
+# Import content).
 vm_install_method: autoinstall
 # An image the catalog doesn't have (cloud_image only): its HTTPS URL, its SHA-256 and its family (ubuntu, debian
 # or rhel; not needed when vm_os is in the catalog). Checked only against that checksum, so take both from a

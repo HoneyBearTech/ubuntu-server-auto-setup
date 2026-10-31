@@ -115,7 +115,7 @@ def test_valid_values(sch, name, raw, expected):
     ("fail2ban_ignoreip", "10.0.0.0/8 enabled", "format"),
     ("fail2ban_bantime", "1 hour", "format"),
     ("fail2ban_sshd_mode", "paranoid", "one of"),
-    ("vm_os", "debian-13", "must be one of"),
+    ("vm_os", "debian-11", "must be one of"),
     ("vm_os", "ubuntu-26.04; x", "must be one of"),
     ("ssh_permit_root_login", "maybe", "one of"),
     ("admin_password", "two\nlines", "control characters"),

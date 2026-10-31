@@ -19,9 +19,10 @@ def answers(ui) -> dict:
                           "servers-0-pve_vmid": "4061", "servers-0-firewall_ports": "443/tcp",
                           "servers-1-name": "db-01",
                           "servers-1-ansible_host": "10.0.0.70", "servers-1-pve_vmid": "4070",
-                          "servers-1-vm_memory_mb": "8192", "servers-1-pve_node": "ares"})
+                          "servers-1-vm_memory_mb": "8192", "servers-1-pve_node": "ares",
+                          "servers-1-vm_os": "debian-13", "servers-1-vm_install_method": "cloud_image"})
     ui.app_state.store.save_cluster("olympus", {"hephaestus": "online", "ares": "online", "hermes": "offline"},
-                                    {"local": "dir", "synology-nfs": "nfs, shared"})
+                                    {"local": "dir", "synology-nfs": "nfs, shared"}, ["synology-nfs"])
     data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers")}
     data["defaults"]["timezones"] = ["America/Chicago", "Etc/UTC", "Europe/Berlin"]  # a few are enough
     return data

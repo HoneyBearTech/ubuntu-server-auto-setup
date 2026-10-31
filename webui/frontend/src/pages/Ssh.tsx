@@ -166,6 +166,14 @@ function NodePart({ node: n, index: i, busy, submit, notes, pending, user }: {
     <div className="card-body node-part" role="group" aria-labelledby={heading}>
       <h3 id={heading}>Node <code>{n.name}</code></h3>
       <p className="help">{used}</p>
+      {n.cpu ? (
+        <p className="help">
+          CPU{n.cpu.model ? <> <code>{n.cpu.model}</code></> : null}:{" "}
+          {n.cpu.missing.length
+            ? `x86-64-v2 (no ${n.cpu.missing.join(", ")}), so no Rocky Linux 10 or CentOS Stream 10 on this node.`
+            : "x86-64-v3, for every release."}
+        </p>
+      ) : null}
       <form method="post" action="/api/ssh" onSubmit={submit} className="stack">
         <input type="hidden" name="node" value={n.name} />
         <div className="field narrow">

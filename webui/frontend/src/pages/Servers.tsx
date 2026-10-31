@@ -21,6 +21,8 @@ function ServersForm({ data, reload, status, setStatus }: {
   setStatus: (n: NoticeT | null) => void;
 }) {
   const { columns, nodes } = data;
+  // The Defaults page's choices, which an empty OS or install method stands for.
+  const defaults: Record<string, string> = { vm_os: data.default_os, vm_install_method: data.default_install_method };
   const blank = () => Object.fromEntries(columns.map((c) => [c.name, ""]));
   const [rows, setRows] = useState<Row[]>(() =>
     (data.rows.length ? data.rows : [blank()]).map((values, key) => ({ key, values })));
@@ -108,11 +110,11 @@ function ServersForm({ data, reload, status, setStatus }: {
                               ))}
                             </select>
                           </div>
-                        ) : c.name === "vm_os" ? (
-                          // The catalog's supported releases; empty is the default OS (Defaults page).
+                        ) : c.name in defaults ? (
+                          // The catalog's supported releases, or the install methods; empty is the Defaults page's.
                           <div className="select">
                             <select {...common} defaultValue={value}>
-                              <option value="">Default{data.default_os ? ` (${label(c, data.default_os)})` : ""}</option>
+                              <option value="">Default{defaults[c.name] ? ` (${label(c, defaults[c.name])})` : ""}</option>
                               {(value && !(c.choices ?? []).includes(value) ? [...(c.choices ?? []), value]
                                 : c.choices ?? []).map((choice) => (
                                 <option key={choice} value={choice}>{label(c, choice)}</option>
@@ -160,7 +162,10 @@ function ServersForm({ data, reload, status, setStatus }: {
             is created on; the default is the node on the Proxmox page{nodes.length ? ""
               : " (test the connection there to pick from the cluster's nodes)"}. Extra network
             cards: {help("vm_extra_nics")} Extra firewall rules: {help("firewall_ports")} OS: the operating
-            system, from the releases this version supports; the default is the one on the Defaults page.
+            system, from the releases this version supports; the default is the one on the Defaults page. Install
+            method: the Ubuntu installer (Ubuntu only) or the vendor's cloud image (every release; the ISO storage
+            must allow Import content); the default is the one on the Defaults page. Rocky Linux 10 and CentOS
+            Stream 10 need a node whose CPU is x86-64-v3 (AVX2): the SSH page's login test reads each node's CPU.
           </p>
           <div aria-live="polite">{status ? <Notice notice={status} /> : null}</div>
         </div>

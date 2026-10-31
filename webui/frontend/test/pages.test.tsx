@@ -71,10 +71,13 @@ describe("the Proxmox page", () => {
     expect(node.value).toBe("hephaestus");
     const iso = screen.getByLabelText("ISO storage") as HTMLSelectElement;
     expect([...iso.options].map((o) => o.value)).toEqual(["local", "synology-nfs"]);
+    // Which of them allow Import content, which cloud images need.
+    expect([...iso.options].map((o) => o.text)).toEqual(["local (dir)", "synology-nfs (nfs, shared, Import)"]);
     expect(screen.getByText(/The nodes of cluster/)).toBeTruthy();
     const facts = screen.getByRole("complementary", { name: "Last connection test" });
     expect(within(facts).getByText("olympus")).toBeTruthy();
     expect(within(facts).getByText("offline")).toBeTruthy();
+    expect(within(facts).getByText("synology-nfs (Import content too)")).toBeTruthy();
     // The help says which variable a field sets, and its default.
     expect(document.getElementById("f-pve_api_port-help")?.textContent).toContain("Variable pve_api_port, default 8006.");
   });
@@ -381,6 +384,36 @@ describe("the servers page", () => {
     expect(api.posts("/api/servers")[0].body["servers-1-pve_node"]).toBe("ares");
   });
 
+  it("picks each server's OS and install method, the Defaults page's first", async () => {
+    const api = new FakeApi({ "POST /api/servers": () => ({ message: "Saved 2 server(s)." }) });
+    renderAt("/servers");
+    await loaded();
+    const method = (row: number) => screen.getByLabelText(`Install method, row ${row}`) as HTMLSelectElement;
+    expect([...method(1).options].map((o) => o.textContent)).toEqual(
+      ["Default (Ubuntu installer (autoinstall))", "Ubuntu installer (autoinstall)", "Cloud image"]);
+    expect(method(1).value).toBe("");
+    expect(method(2).value).toBe("cloud_image");
+    const os = screen.getByLabelText("OS, row 2") as HTMLSelectElement;
+    expect(os.value).toBe("debian-13");
+    expect([...os.options].map((o) => o.value)).toContain("rocky-10");
+    await userEvent.selectOptions(method(1), "cloud_image");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved 2 server(s).");
+    expect(api.posts("/api/servers")[0].body["servers-0-vm_install_method"]).toBe("cloud_image");
+    expect(api.posts("/api/servers")[0].body["servers-1-vm_os"]).toBe("debian-13");
+  });
+
+  it("shows why a release can't go on a server's node", async () => {
+    const message = "Rocky Linux 10 needs an x86-64-v3 CPU, and node hephaestus's lacks avx2. Choose another node.";
+    new FakeApi({ "POST /api/servers": () => reply(422, { errors: { "servers-0-vm_os": message } }) });
+    renderAt("/servers");
+    await loaded();
+    await userEvent.selectOptions(screen.getByLabelText("OS, row 1"), "rocky-10");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByLabelText("OS, row 1").getAttribute("aria-invalid")).toBe("true"));
+    expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+  });
+
   it("takes a typed node before a connection test, and keeps a node the cluster no longer lists", async () => {
     new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, nodes: [] }) });
     renderAt("/servers");
@@ -526,6 +559,17 @@ describe("the SSH page", () => {
     expect(body).toHaveProperty("key_file");
   });
 
+  it("shows each node's CPU from the last login test", async () => {
+    new FakeApi();
+    renderAt("/ssh");
+    await loaded();
+    expect(screen.getByText(/x86-64-v2 \(no avx2, bmi2, fma, movbe\), so no Rocky Linux 10 or CentOS Stream 10/))
+      .toBeTruthy();
+    expect(screen.getByText("Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz")).toBeTruthy();
+    expect(screen.getByText(/x86-64-v3, for every release/)).toBeTruthy();
+    expect(screen.getAllByText(/^CPU/).length).toBe(2);  // not for hermes, which wasn't tested
+  });
+
   it("tells root's key from another node user's", async () => {
     new FakeApi();
     renderAt("/ssh");
@@ -585,15 +629,17 @@ describe("the run page", () => {
     expect(api.posts("/api/run")[0].body).toEqual({ playbook: "provision", check: "on", limit: "web-01" });
   });
 
-  it("shows where build-installer puts each ISO", async () => {
+  it("shows where build-installer puts each ISO and cloud image", async () => {
     new FakeApi();
     renderAt("/run");
     await loaded();
-    expect(screen.getByText(/is shared by the cluster: each ISO is built once, on one node/)).toBeTruthy();
+    expect(screen.getByText(/is shared by the cluster: each ISO is built once, on 2 nodes/)).toBeTruthy();
+    expect(screen.getByText(/A cloud image is downloaded the same way, into the storage's Import folder/)).toBeTruthy();
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows.map((r) => r.textContent)).toEqual([
-      "ares (no SSH address yet)db-01synology-nfs (shared)ubuntu-26.04.1-live-server-amd64.isothis node",
-      "hephaestusweb-01synology-nfs (shared)ubuntu-26.04.1-live-server-amd64.isoares",
+      "ares (no SSH address yet)db-01synology-nfs (shared)debian-13-genericcloud-amd64-20261021-2638.qcow2 (cloud image)"
+        + "this node",
+      "hephaestusweb-01synology-nfs (shared)ubuntu-26.04.1-live-server-amd64.isothis node",
     ]);
   });
 
@@ -604,7 +650,7 @@ describe("the run page", () => {
     });
     renderAt("/run");
     await loaded();
-    expect(screen.getByText(/is each node's own: each ISO is built on one node/)).toBeTruthy();
+    expect(screen.getByText(/is each node's own: each ISO is built on 2 nodes/)).toBeTruthy();
     expect(screen.getByText(/to find out whether local is/)).toBeTruthy();
     cleanup();
     new FakeApi({ "GET /api/run": () => ({ ...fixtures.runPage, iso_plan: { ...fixtures.runPage.iso_plan, pairs: [], builders: [] } }) });
