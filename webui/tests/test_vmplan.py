@@ -175,3 +175,62 @@ def test_ports(bad):
 def test_too_many_rules():
     with pytest.raises(Invalid, match="At most"):
         p.parse_rules(",".join(["443"] * 21))
+
+
+def updates(selected, form=None, rows=None, options=None, servers=SERVERS):
+    rows = rows or {vmid: row(vmid) for vmid in selected}
+    aliases = {vmid: f"usas-pve-{vmid}" for vmid in selected}
+    pins = {a: ["SHA256:x"] for a in aliases.values()}
+    return p.build(rows, list(selected), form or {}, servers=servers, pins=pins, aliases=aliases, formats=FORMATS,
+                   settings=SETTINGS, tags=["ssh"], preset="ignored", playbook=p.UPDATES,
+                   options=p.update_options(options or {}))
+
+
+def test_update_options():
+    assert p.update_options({}) == {"updates_scope": "all", "updates_reboot": "never", "updates_snapshot": "false",
+                                    "updates_ignore_window": "false"}
+    assert p.update_options({"updates-scope": "security", "updates-reboot": "if_required", "updates-snapshot": "on",
+                             "updates-window": "on"}) == {"updates_scope": "security", "updates_reboot": "if_required",
+                                                          "updates_snapshot": "true", "updates_ignore_window": "true"}
+    for name, value in (("updates-scope", "dist"), ("updates-reboot", "always"), ("updates-scope", "all\n")):
+        with pytest.raises(p.PlanProblem) as caught:
+            p.update_options({name: value})
+        assert name in caught.value.errors
+
+
+def test_an_updates_plan():
+    rows = {101: row(101, support="unknown", reason="The guest didn't say.", tags=["usas-group-db", "{{x}}"],
+                     hastate="started"),
+            4000: row(4000)}
+    plan = updates([101, 4000], form=foreign_form(101, ufw="8080/tcp", hostname="on", override="on"), rows=rows,
+                   options={"updates-reboot": "if_required"})
+    # No tags, no override needed for an OS the guest didn't report (the playbook decides), no baseline settings.
+    assert (plan.playbook, plan.preset, plan.tags) == ("updates", "updates", [])
+    assert plan.options["updates_reboot"] == "if_required"
+    children = load_yaml(plan.inventory)["all"]["children"]
+    foreign = children["usas_vms"]["hosts"]["vm-101"]
+    assert set(foreign) == {"ansible_host", "ansible_user", *p.VAULT_VARS, "ansible_ssh_common_args",
+                            "ansible_control_path", "usas_pve_vmid", "usas_pve_node", "usas_pve_name",
+                            "usas_pve_alias", "usas_pve_tags", "usas_pve_hastate"}
+    assert all(foreign[name] == "" for name in p.VAULT_VARS)
+    assert foreign["usas_pve_tags"] == ["usas-group-db", "{{x}}"] and "!unsafe '{{x}}'" in plan.inventory
+    server = children["servers"]["hosts"]["web-00"]
+    assert "ansible_host" not in server and server["usas_pve_vmid"] == 4000 and server["usas_pve_node"] == "pve-1"
+    assert any("reboot if an update asks" in w and "vm-101, web-00" in w for w in plan.warnings)
+    assert any("passwordless sudo" in w for w in plan.warnings)
+    data = p.plan_json(plan)
+    assert data["preset_label"] == "Updates" and data["playbook"] == "updates"
+
+
+def test_an_updates_plan_has_its_own_digest():
+    form = foreign_form(101)
+    plan = updates([101], form=form)
+    assert plan.digest == updates([101], form=form).digest
+    assert plan.digest != updates([101], form=form, options={"updates-scope": "security"}).digest
+    assert plan.digest != build([101], form=form).digest
+    assert p.digest([], plan.inventory, {"usas-pve-101": ["SHA256:x"]}, p.UPDATES, plan.options) == plan.digest
+    warnings = updates([101], form=form, options={"updates-snapshot": "on", "updates-window": "on",
+                                                  "updates-scope": "security"}).warnings
+    assert any("Only security updates" in w for w in warnings) and any("VM.Snapshot" in w for w in warnings)
+    assert any("updates_window" in w for w in warnings)
+    assert any("Nothing reboots" in w for w in updates([101], form=form).warnings)

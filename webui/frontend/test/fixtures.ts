@@ -142,6 +142,7 @@ export const vms: VmsData = {
       { key: "full", label: "Full baseline", tags: [] },
       { key: "custom", label: "Custom", tags: null },
     ],
+    updates: { "updates-scope": ["all", "security"], "updates-reboot": ["never", "if_required"] },
     default_preset: "full",
     tags: ["ssh_keys", "common", "firewall", "ssh", "fail2ban", "hardening"],
     max_hosts: 25,

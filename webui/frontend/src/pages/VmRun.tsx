@@ -1,5 +1,5 @@
-// Running the baseline against the VMs selected on the VMs page: what to run, each VM's settings and pinned
-// host keys, then a review of the plan the server checked, then a check run (--check --diff, nothing changes).
+// Running the baseline, or the updates playbook, against the VMs selected on the VMs page: what to run, each VM's
+// settings and pinned host keys, then a review of the plan the server checked, then a check run (nothing changes).
 // The server checks everything again and builds the run from its own listing of the cluster; this part only
 // collects the choices. The review is a section of the page, not a dialog, and takes the focus when it appears.
 
@@ -24,6 +24,37 @@ export interface VmSettings {
 }
 
 const MANUAL = "manual";
+export const UPDATES = "updates";
+
+// The updates playbook's choices (vmplan.UPDATE_OPTIONS and UPDATE_BOXES).
+export interface UpdateChoices {
+  scope: string;
+  reboot: string;
+  snapshot: boolean;
+  window: boolean; // ignore each server's update window
+}
+
+export const DEFAULT_UPDATES: UpdateChoices = { scope: "all", reboot: "never", snapshot: false, window: false };
+
+const SCOPES: Record<string, { label: string; help: string }> = {
+  all: { label: "Every update", help: "Kernels too. Nothing is removed (apt upgrade --with-new-pkgs)." },
+  security: { label: "Security updates only", help: "From the release's security suite." },
+};
+
+const REBOOTS: Record<string, { label: string; help: string }> = {
+  never: { label: "Never", help: "A server that needs a reboot is reported as “reboot pending”." },
+  if_required: {
+    label: "When an update asks for it",
+    help: "Inside each server's reboot window, a wave at a time, then its health is checked.",
+  },
+};
+
+// Whether the selected VMs can have a snapshot before their updates (POST /api/vms/snapshots).
+interface Snapshots {
+  checked: string; // the VM IDs asked about
+  possible: boolean;
+  reasons: string[];
+}
 
 const SOURCE_WORDS: Record<string, string> = {
   agent: "guest agent",
@@ -47,21 +78,31 @@ export function chosenAddress(s: VmSettings): string {
   return s.address === MANUAL ? s.manual.trim() : s.address;
 }
 
-// The form the server reads (POST /api/vms/plan): vmid once per VM, and each VM's settings as vm-<vmid>-<name>.
-export function planForm(vms: Vm[], settings: Record<number, VmSettings>, preset: string, tags: string[]): FormData {
+// The form the server reads (POST /api/vms/plan): vmid once per VM, each VM's settings as vm-<vmid>-<name>, and
+// for the updates playbook its choices as updates-<name>.
+export function planForm(vms: Vm[], settings: Record<number, VmSettings>, preset: string, tags: string[],
+                         choices: UpdateChoices = DEFAULT_UPDATES): FormData {
   const form = new FormData();
+  const updates = preset === UPDATES;
   form.append("preset", preset);
   if (preset === "custom") for (const tag of tags) form.append("tags", tag);
+  if (updates) {
+    form.append("updates-scope", choices.scope);
+    form.append("updates-reboot", choices.reboot);
+    if (choices.snapshot) form.append("updates-snapshot", "on");
+    if (choices.window) form.append("updates-window", "on");
+  }
   for (const vm of vms) {
     form.append("vmid", String(vm.vmid));
     const s = settings[vm.vmid];
     if (!s) continue;
     const prefix = `vm-${vm.vmid}-`;
-    if (s.override) form.append(`${prefix}override`, "on");
+    if (s.override && !updates) form.append(`${prefix}override`, "on");
     if (vm.inventory_name) continue; // a server runs with its own settings
     form.append(`${prefix}address`, chosenAddress(s));
     form.append(`${prefix}port`, s.port.trim());
     form.append(`${prefix}user`, s.user.trim());
+    if (updates) continue; // the firewall rules and host name are the baseline's
     form.append(`${prefix}ufw`, s.ufw.trim());
     if (s.hostname) form.append(`${prefix}hostname`, "on");
   }
@@ -133,7 +174,7 @@ function Check({ id, label, checked, onChange, help, error }: {
   );
 }
 
-function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPinned, info }: {
+function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPinned, info, updates }: {
   vm: Vm;
   settings: VmSettings;
   set: (change: Partial<VmSettings>) => void;
@@ -143,6 +184,7 @@ function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPi
   pinned: HostKey[];
   onPinned: (keys: HostKey[]) => void;
   info: VmRunInfo;
+  updates: boolean;
 }) {
   const id = (name: string) => `f-vm-${vm.vmid}-${name}`;
   const err = (name: string) => errors[`vm-${vm.vmid}-${name}`];
@@ -151,7 +193,8 @@ function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPi
   const server = vm.inventory_name;
   const choices = addressChoices(vm);
   const address = server ? vm.ip : chosenAddress(settings);
-  const needsOverride = vm.support === "override" || (vm.support === "unknown" && !server);
+  // The updates playbook skips a release it doesn't support by itself, and says so.
+  const needsOverride = !updates && (vm.support === "override" || (vm.support === "unknown" && !server));
   const [busy, setBusy] = useState(false);
 
   const hostkey = async (action: string, extra: Record<string, string> = {}) => {
@@ -212,12 +255,16 @@ function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPi
           <Text id={id("user")} label="Login user" value={settings.user} className="mono"
                 onChange={(user) => set({ user })} error={err("user")}
                 help="It must accept the web UI's key and have passwordless sudo: VMs outside the inventory never get the admin password." />
-          <Text id={id("ufw")} label="Extra firewall rules" value={settings.ufw} className="mono"
-                onChange={(ufw) => set({ ufw })} error={err("ufw")}
-                help="What this VM serves besides SSH, separated by commas: such as 443/tcp, 5432/tcp from 10.0.0.0/24." />
-          <Check id={id("hostname")} checked={settings.hostname} onChange={(hostname) => set({ hostname })}
-                 error={err("hostname")} label={<>Set its host name to <code>{vm.name}</code></>}
-                 help="Off: the host name stays as it is." />
+          {updates ? null : (
+            <>
+              <Text id={id("ufw")} label="Extra firewall rules" value={settings.ufw} className="mono"
+                    onChange={(ufw) => set({ ufw })} error={err("ufw")}
+                    help="What this VM serves besides SSH, separated by commas: such as 443/tcp, 5432/tcp from 10.0.0.0/24." />
+              <Check id={id("hostname")} checked={settings.hostname} onChange={(hostname) => set({ hostname })}
+                     error={err("hostname")} label={<>Set its host name to <code>{vm.name}</code></>}
+                     help="Off: the host name stays as it is." />
+            </>
+          )}
         </div>
       )}
       {needsOverride ? (
@@ -288,20 +335,30 @@ function Review({ reviewed, busy, onRun }: { reviewed: Reviewed; busy: boolean; 
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), [reviewed]);
   const { plan } = reviewed;
+  const updates = plan.playbook === UPDATES;
   return (
     <section className="card review" aria-labelledby="vm-review-heading">
       <div className="card-body">
         <h2 id="vm-review-heading" tabIndex={-1} ref={heading}>Review: {plan.preset_label}</h2>
-        <p>
-          The check run (<code>--check --diff</code>) changes nothing: it reports what a real run would change on
-          {" "}{plural(plan.targets.length, "VM", "VMs")}. If it passes, its page offers the real run of the same
-          plan for 30 minutes.
-        </p>
+        {updates ? (
+          <p>
+            The check run (<code>playbooks/updates.yml --check</code>) installs nothing and reboots nothing: it
+            refreshes the package lists and reports what {plural(plan.targets.length, "VM", "VMs")} would install,
+            and whether a reboot is waiting. If it passes, its page offers the real run of the same plan for 30
+            minutes.
+          </p>
+        ) : (
+          <p>
+            The check run (<code>--check --diff</code>) changes nothing: it reports what a real run would change on
+            {" "}{plural(plan.targets.length, "VM", "VMs")}. If it passes, its page offers the real run of the same
+            plan for 30 minutes.
+          </p>
+        )}
         {plan.warnings.length ? (
           <div className="notice notice-warning">
             <Icon name="alert" />
             <div>
-              <p>On servers already in use, look out for:</p>
+              <p>{updates ? "What the real run would do:" : "On servers already in use, look out for:"}</p>
               <ul>{plan.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
             </div>
           </div>
@@ -344,6 +401,62 @@ function Review({ reviewed, busy, onRun }: { reviewed: Reviewed; busy: boolean; 
   );
 }
 
+function UpdateFields({ choices, set, snapshots, errors }: {
+  choices: UpdateChoices;
+  set: (change: Partial<UpdateChoices>) => void;
+  snapshots: Snapshots | null;
+  errors: Errors;
+}) {
+  const unavailable = snapshots !== null && !snapshots.possible;
+  const radios = (name: "scope" | "reboot", field: string, options: Record<string, { label: string; help: string }>) => (
+    <div className="choices">
+      {Object.entries(options).map(([value, o], i) => (
+        <div className="choice" key={value}>
+          <input type="radio" id={i === 0 ? `f-${field}` : `${field}-${value}`} name={field} value={value}
+                 checked={choices[name] === value} aria-describedby={`${field}-${value}-help`}
+                 onChange={() => set({ [name]: value })} />
+          <div>
+            <label htmlFor={i === 0 ? `f-${field}` : `${field}-${value}`}>{o.label}</label>
+            <p className="help" id={`${field}-${value}-help`}>{o.help}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <fieldset className="card-body fieldset" aria-labelledby="updates-heading">
+      <h3 id="updates-heading">Updates</h3>
+      <fieldset className="fieldset nested">
+        <legend>What to install</legend>
+        <FieldError id="f-updates-scope" error={errors["updates-scope"]} />
+        {radios("scope", "updates-scope", SCOPES)}
+      </fieldset>
+      <fieldset className="fieldset nested">
+        <legend>Reboots</legend>
+        <FieldError id="f-updates-reboot" error={errors["updates-reboot"]} />
+        {radios("reboot", "updates-reboot", REBOOTS)}
+      </fieldset>
+      <div className="check-field">
+        <div className="check">
+          <input type="checkbox" id="f-updates-snapshot" checked={choices.snapshot && !unavailable}
+                 disabled={snapshots === null || unavailable} onChange={(e) => set({ snapshot: e.target.checked })}
+                 aria-describedby="f-updates-snapshot-help" aria-invalid={errors["updates-snapshot"] ? true : undefined} />
+          <label htmlFor="f-updates-snapshot">Take a Proxmox snapshot of each VM before its update</label>
+        </div>
+        <p className="help" id="f-updates-snapshot-help">
+          {snapshots === null ? "Asking Proxmox whether the VMs can have one…"
+            : unavailable ? `Not possible: ${snapshots.reasons.join(" ")}`
+              : "Its disks only, not its memory. Rolling back is left to a Proxmox admin."}
+        </p>
+        <FieldError id="f-updates-snapshot" error={errors["updates-snapshot"]} />
+      </div>
+      <Check id="f-updates-window" checked={choices.window} onChange={(window) => set({ window })}
+             label="Ignore each server's update window"
+             help="A run by hand outside the window (updates_window). The audit log records it." />
+    </fieldset>
+  );
+}
+
 export function VmRun({ vms, dropped, info, fetched, refresh }: {
   vms: Vm[]; // the selected VMs that can still be selected
   dropped: Vm[]; // selected, but can't be any more
@@ -361,6 +474,33 @@ export function VmRun({ vms, dropped, info, fetched, refresh }: {
   const [error, setError] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const [busy, setBusy] = useState(false);
+  const [choices, setChoices] = useState<UpdateChoices>(DEFAULT_UPDATES);
+  const [snapshots, setSnapshots] = useState<Snapshots | null>(null);
+  const touched = useRef(false); // the snapshot box was changed by hand
+  const updates = preset === UPDATES;
+  const ids = vms.map((vm) => vm.vmid).join(",");
+
+  // For updates: ask whether the selected VMs can have a snapshot, and tick the box when every one can.
+  useEffect(() => {
+    if (!updates || !ids) return undefined;
+    let live = true;
+    const form = new FormData();
+    for (const id of ids.split(",")) form.append("vmid", id);
+    setSnapshots(null);
+    post<{ vms?: { vmid: number; possible: boolean; reason: string }[]; error?: string }>("/api/vms/snapshots", form)
+      .then((reply) => {
+        if (!live) return;
+        const found = reply.ok ? reply.data.vms ?? [] : [];
+        const reasons = reply.ok ? found.filter((v) => !v.possible).map((v) => `VM ${v.vmid}: ${v.reason}`)
+          : [reply.data.error ?? `The server answered ${reply.status}.`];
+        const possible = reply.ok && reasons.length === 0;
+        setSnapshots({ checked: ids, possible, reasons });
+        if (!touched.current) setChoices((c) => ({ ...c, snapshot: possible }));
+      });
+    return () => {
+      live = false;
+    };
+  }, [updates, ids]);
 
   // A newer listing has the pins; until it comes, the ones just pinned or forgotten here.
   useEffect(() => setPins({}), [fetched]);
@@ -377,7 +517,7 @@ export function VmRun({ vms, dropped, info, fetched, refresh }: {
     setBusy(true);
     const all = Object.fromEntries(vms.map((vm) => [vm.vmid, current(vm)]));
     const reply = await post<{ plan_id?: string; plan?: VmPlan; errors?: Errors; error?: string }>(
-      "/api/vms/plan", planForm(vms, all, preset, tags));
+      "/api/vms/plan", planForm(vms, all, preset, tags, { ...choices, snapshot: choices.snapshot && !!snapshots?.possible }));
     setBusy(false);
     if (reply.ok && reply.data.plan_id && reply.data.plan) {
       setErrors({});
@@ -406,7 +546,9 @@ export function VmRun({ vms, dropped, info, fetched, refresh }: {
       <section className="card" aria-labelledby="vm-run-heading">
         <form noValidate onSubmit={review}>
           <div className="card-body">
-            <h2 id="vm-run-heading">Run the baseline on {plural(vms.length, "selected VM", "selected VMs")}</h2>
+            <h2 id="vm-run-heading">
+              {updates ? "Update" : "Run the baseline on"} {plural(vms.length, "selected VM", "selected VMs")}
+            </h2>
             <p className="lead">
               First a check run, which changes nothing and shows what would change. Each VM's host key must be pinned
               first. At most {info.max_hosts} VMs per run.
@@ -439,6 +581,16 @@ export function VmRun({ vms, dropped, info, fetched, refresh }: {
                   </div>
                 </div>
               ))}
+              <div className="choice">
+                <input type="radio" id="preset-updates" name="preset" value={UPDATES} checked={updates}
+                       aria-describedby="preset-updates-help" onChange={() => { setPreset(UPDATES); stale(); }} />
+                <div>
+                  <label htmlFor="preset-updates">Updates</label>
+                  <p className="help" id="preset-updates-help">
+                    Install the pending package updates (<code>playbooks/updates.yml</code>) instead of the baseline.
+                  </p>
+                </div>
+              </div>
             </div>
             {custom ? (
               <fieldset className="fieldset nested">
@@ -459,8 +611,17 @@ export function VmRun({ vms, dropped, info, fetched, refresh }: {
               </fieldset>
             ) : null}
           </fieldset>
+          {updates ? (
+            <UpdateFields choices={choices} snapshots={snapshots?.checked === ids ? snapshots : null} errors={errors}
+                          set={(part) => {
+                            if ("snapshot" in part) touched.current = true;
+                            setChoices((c) => ({ ...c, ...part }));
+                            stale();
+                          }} />
+          ) : null}
           {vms.map((vm) => (
             <VmPart key={vm.vmid} vm={vm} settings={current(vm)} set={change(vm)} errors={errors} info={info}
+                    updates={updates}
                     keyState={keyStates[vm.vmid] ?? {}} pinned={pins[vm.vmid] ?? vm.pinned}
                     setKeyState={(state) => setKeyStates((all) => ({ ...all, [vm.vmid]: state }))}
                     onPinned={(keys) => { setPins((all) => ({ ...all, [vm.vmid]: keys })); stale(); refresh(); }} />

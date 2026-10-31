@@ -73,6 +73,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
   control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
   (B23).
+- **Updates from the VMs page** ([docs/web-ui.md](docs/web-ui.md#walking-through-it)): choose **Updates**
+  for the selected VMs, then what to install (every update or security only), whether they may reboot, a
+  Proxmox snapshot (offered only when the API token has `VM.Snapshot` and the disks can have one) and whether
+  to ignore the update windows. A check run lists what each VM would install; its page shows each server's
+  packages, reboot, snapshot and wave, and offers the real run for 30 minutes with a confirmation that names
+  the VMs that may reboot. The audit log records the playbook, the choices and what each server ended as. The
+  Run page offers `updates-check` and `updates` for the inventory's servers.
 - **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
   the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
   update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags
