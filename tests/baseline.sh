@@ -33,6 +33,11 @@ mock_pid=""
 cleanup() {
   status=$?
   if [ -n "$mock_pid" ]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
+  if [ "$status" -ne 0 ] && docker exec "$SRV" true 2>/dev/null; then
+    echo "--- the container's journal (last 80 lines) and pending systemd jobs:" >&2
+    docker exec "$SRV" journalctl -b --no-pager -n 80 >&2 || true
+    docker exec "$SRV" systemctl list-jobs --no-pager >&2 || true
+  fi
   docker rm -f "$SRV" >/dev/null 2>&1 || true
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
 }
@@ -79,6 +84,10 @@ docker exec -i "$SRV" sh -c 'cat > /home/sysadmin/.ssh/authorized_keys && chown 
 docker exec "$SRV" sh -c 'echo "127.0.1.1 srv-01" >> /etc/hosts'
 for _ in $(seq 1 60); do ssh-keyscan -T 2 -p 2201 127.0.0.1 >"$TEST_TMP/known_hosts" 2>/dev/null && [ -s "$TEST_TMP/known_hosts" ] && break; sleep 1; done
 [ -s "$TEST_TMP/known_hosts" ] || { echo "ERROR: no SSH on port 2201" >&2; exit 1; }
+# sshd answers before systemd has finished booting, and until then pam_nologin refuses every user but root
+# (/run/nologin, removed by systemd-user-sessions): wait for it, as a freshly installed server would be.
+for _ in $(seq 1 120); do docker exec "$SRV" test ! -e /run/nologin && break; sleep 1; done
+docker exec "$SRV" test ! -e /run/nologin || { echo "ERROR: the container never finished booting" >&2; exit 1; }
 # debian (Ubuntu and Debian) or rhel, and the distribution itself.
 distro="$(docker exec "$SRV" sh -c '. /etc/os-release && echo "$ID"')"
 case "$distro" in ubuntu|debian) family=debian ;; *) family=rhel ;; esac
