@@ -172,6 +172,14 @@ cluster.
   ssh sysadmin@192.0.2.14 'sudo ls /var/log/installer/'    # no autoinstall-user-data
   ```
 
+- [ ] After its baseline run, no copy of the password hash is left where cloud-init keeps its data on
+  `test-05`. The command prints nothing. Any file it lists is a copy the baseline doesn't remove yet: open an
+  issue before releasing.
+
+  ```bash
+  ssh sysadmin@192.0.2.14 'sudo grep -rlF "\$6\$" /var/lib/cloud /etc/cloud'
+  ```
+
 - [ ] A Proxmox backup of `test-05` restores to a VM that boots unattended (the backup carries the TPM
   state, as [security.md](security.md#secure-boot-and-disk-encryption) says), then delete the restored VM.
 

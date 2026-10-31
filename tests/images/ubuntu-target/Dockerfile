@@ -1,7 +1,8 @@
 # Stands in for a VM the Ubuntu installer has just set up: Ubuntu with systemd, SSH (socket-activated from
 # 24.04 on), sudo-rs on 26.04 and the admin user with passwordless sudo, as the autoinstall user-data leaves
-# it. D-Bus, python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs
-# them before the baseline has installed anything.
+# it, with copies of the answers' password hash where the installer and cloud-init leave them. D-Bus,
+# python3-apt and tzdata are on every Ubuntu Server (the Docker images lack tzdata); check mode needs them before
+# the baseline has installed anything.
 # The package lists are kept, as on an installed server: the apt module judges them by the directory's age, so
 # emptied lists from a build minutes ago would count as fresh and never be refreshed.
 #
@@ -47,6 +48,11 @@ RUN . /etc/os-release \
  && mkdir -p /var/log/installer \
  && echo 'password: "$6$test$hash"' > /var/log/installer/autoinstall-user-data \
  && chmod 0600 /var/log/installer/autoinstall-user-data \
+ && install -d -m 0700 /var/lib/cloud/instances/usas-test \
+ && echo 'password: "$6$test$hash"' > /var/lib/cloud/instances/usas-test/user-data.txt \
+ && cp /var/lib/cloud/instances/usas-test/user-data.txt /var/lib/cloud/instances/usas-test/user-data.txt.i \
+ && echo usas-test > /var/lib/cloud/instances/usas-test/instance-id \
+ && ln -s /var/lib/cloud/instances/usas-test /var/lib/cloud/instance \
  && if [ "$admin_group" = wheel ]; then systemctl enable sshd; \
     elif [ "$ID" = debian ] || [ "$VERSION_ID" = 22.04 ]; then systemctl enable ssh; else systemctl enable ssh.socket; fi
 STOPSIGNAL SIGRTMIN+3

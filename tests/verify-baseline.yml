@@ -103,6 +103,8 @@
         - "{{ '/etc/systemd/system/timers.target.wants/dnf-automatic.timer' if ansible_facts.os_family == 'RedHat'
               else '/etc/apt/apt.conf.d/20auto-upgrades' }}"
         - /var/log/installer/autoinstall-user-data
+        - /var/lib/cloud/instances/usas-test/user-data.txt
+        - /var/lib/cloud/instances/usas-test/user-data.txt.i
       register: verify_files
 
     - name: Check files
@@ -112,6 +114,8 @@
           - verify_files.results[1].stat.exists
           - verify_files.results[2].stat.exists
           - not verify_files.results[3].stat.exists
+          - not verify_files.results[4].stat.exists
+          - not verify_files.results[5].stat.exists
 
     - name: Read the timezone
       ansible.builtin.command: timedatectl show -p Timezone --value

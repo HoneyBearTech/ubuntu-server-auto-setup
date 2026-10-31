@@ -307,6 +307,7 @@ still read until 1.0)
 | `firewall_allow` | `[]` | Extra firewall allow rules: `port`, `proto` (default `tcp`), optional `from` (a source address or network) and `comment`. |
 | `firewall_ssh_limit_rate` | `30/m` | On firewalld (the RHEL family), the rate of new SSH connections allowed from all sources together; UFW limits each source on its own. |
 | `fail2ban_enabled` | `true` | Install and configure Fail2Ban (from EPEL on the RHEL family). |
+| `baseline_allow_unsupported` | `false` | Run the baseline on a release the OS catalog doesn't list (it stops otherwise), with a warning. |
 | `fail2ban_ignoreip` | `[]` | Addresses and networks Fail2Ban never bans. Put your own management network here. |
 | `fail2ban_bantime`, `fail2ban_maxretry` | `1h`, `5` | The first ban's length and the failures that trigger it; repeat offenders get longer bans, up to `fail2ban_bantime_maxtime` (`1w`). |
 | `pkg_upgrade` | `dist` | The upgrade the baseline runs: `dist`, `safe`, `full` or `"no"`. |
@@ -320,7 +321,7 @@ still read until 1.0)
 | What | Supported |
 | --- | --- |
 | Installed on new VMs | Ubuntu Server 26.04 LTS (amd64) |
-| Hardened by the baseline | Ubuntu Server 24.04 LTS and 26.04 LTS, including servers this project didn't install |
+| Hardened by the baseline | Ubuntu Server 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 (the OS catalog's releases), including servers this project didn't install; it refuses others unless `baseline_allow_unsupported: true` |
 | Hypervisor | Proxmox VE 8 and 9 |
 | Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |
 | Container image | Windows (Docker Desktop with WSL 2), Linux and macOS; `linux/amd64` and `linux/arm64`; Python 3.14 and ansible-core 2.20 inside |

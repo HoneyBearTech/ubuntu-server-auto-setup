@@ -475,10 +475,11 @@ pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vm
   only by root and the user the playbooks log in as)
   in the node's ISO storage until you delete it ([installing.md](installing.md#troubleshooting)).
 - **The installer's own log.** Ubuntu's installer keeps a root-only copy of its configuration, including
-  the password hash, in `/var/log/installer/autoinstall-user-data`. The baseline's `common` role deletes it;
-  until the baseline has run, it is on the server. On an encrypted VM the copy also holds the disk
-  passphrase, so provisioning deletes it as soon as the VM first boots (it was only ever inside the
-  encrypted volume).
+  the password hash, in `/var/log/installer/autoinstall-user-data`, and cloud-init keeps the user-data it
+  booted with in `/var/lib/cloud/instances/*/user-data.txt*` (also root-only). The baseline's `common` role
+  deletes both; until the baseline has run, they are on the server. On an encrypted VM the installer's copy
+  also holds the disk passphrase, so provisioning deletes it as soon as the VM first boots (it was only ever
+  inside the encrypted volume).
 - **Passwordless sudo during provisioning.** The installer gives the admin user passwordless `sudo` so the
   first baseline run can work unattended; the baseline then removes it (`admin_sudo_nopasswd: false`, the
   default), so an SSH key alone doesn't give root afterwards. Until that first baseline run finishes, anyone
