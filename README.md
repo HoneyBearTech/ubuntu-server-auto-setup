@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/usas-banner-dark.svg">
-    <img alt="USAS, Ubuntu Server Auto Setup: a shield with two server units, and the name" src="docs/images/usas-banner-light.svg" width="520">
+    <img alt="USAS, Unattended Server Auto-Setup: a shield with two server units, and the name" src="docs/images/usas-banner-light.svg" width="520">
   </picture>
 </h1>
 
@@ -74,7 +74,7 @@ on Windows, Linux or macOS.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/usas-flow-dark.svg">
-  <img alt="Four steps: 1, the installer ISO, Ubuntu 26.04 checked and remastered on the node; 2, a Proxmox VM created through the API with a per-host seed ISO; 3, an unattended install with no keyboard, using autoinstall and your GitHub keys; 4, a hardened server with SSH, UFW, Fail2Ban and unattended upgrades" src="docs/images/usas-flow-light.svg">
+  <img alt="Four steps: 1, the OS image, the vendor's cloud image or Ubuntu's installer ISO, checked on the node; 2, a Proxmox VM created through the API with a per-host seed ISO; 3, an unattended install with no keyboard, using cloud-init or autoinstall and your GitHub keys; 4, a hardened server with SSH, a firewall, Fail2Ban and automatic updates" src="docs/images/usas-flow-light.svg">
 </picture>
 
 Three playbooks, run from your own machine (the "control node") or from the container image, plus

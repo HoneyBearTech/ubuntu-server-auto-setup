@@ -77,7 +77,8 @@ describe("the Proxmox page", () => {
     const facts = screen.getByRole("complementary", { name: "Last connection test" });
     expect(within(facts).getByText("olympus")).toBeTruthy();
     expect(within(facts).getByText("offline")).toBeTruthy();
-    expect(within(facts).getByText("synology-nfs (Import content too)")).toBeTruthy();
+    expect(within(facts).getByText("synology-nfs").closest("li")?.textContent).toBe("synology-nfsallows Import content");
+    expect(within(facts).getByText("local").closest("li")?.textContent).toBe("local");
     // The help says which variable a field sets, and its default.
     expect(document.getElementById("f-pve_api_port-help")?.textContent).toContain("Variable pve_api_port, default 8006.");
   });
