@@ -450,10 +450,6 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
     ```
 
     Then forget it again on the VMs page.
-- [ ] The [screen-reader walk-through](accessibility.md#screen-reader-walk-through) with VoiceOver on
-  macOS and with NVDA on Windows, on the image under test before its first-run setup (it starts with the
-  first-run page). Add a row per screen reader to its results table in the release pull request, and an
-  issue for each problem. Until a release has done this, the docs say it hasn't been run.
 - [ ] **The status API** ([web-ui.md](web-ui.md#dashboards-heimdall)): before any token exists,
   `/api/status` answers 404. On the account page, **Create a token** (a wrong password is refused); the
   token is shown once. A call with it as `Authorization: Bearer` answers the summary, which holds no host,
@@ -542,8 +538,6 @@ Real Proxmox run (docs/release-checklist.md), <date>
   sudo needs a password, SSH port change (or: not tested, why)
 - Web UI: setup, sign-in, passkey added and used (authenticator), cross-site and token-less posts refused,
   run streamed, status API off (404), token made, used and revoked, version <version>
-- Screen readers: VoiceOver <version> with Safari <version>, NVDA <version> with <browser> <version>:
-  steps passed, problems and their issues (or: not run, why)
 - Anything that failed, and the issue or pull request that fixes it
 ```
 
