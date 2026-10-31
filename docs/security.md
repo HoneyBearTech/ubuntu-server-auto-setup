@@ -215,6 +215,16 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   (`/access/permissions`, read-only) and whether its disks can have one, so a token without `VM.Snapshot`
   isn't discovered half-way through a run. What servers report about their packages is kept only as names
   that look like a package's, at most 5,000 per list, and shown as text.
+- **Updates on a schedule** give the web UI authority to act with no one there. No new secret is stored (the
+  Vault password was already readable by the container); the new risk is that someone who gets a session
+  could leave a schedule behind. So making a schedule needs the current password again (rate-limited like the
+  sign-in), it can only be made from a passing updates check run of the last 30 minutes with no setting saved
+  since, it can only run the updates playbook with that check's VMs and the same allowlisted choices (never
+  ignoring the update windows), and its creation, every run, skip, refusal and deletion are in the audit log
+  with the session. Each run builds the plan again: a VM whose host key isn't pinned any more refuses the whole
+  run, and an install runs only after a new check that passed with no failed or unreachable server and no
+  package removals, while the window is open. `USAS_SCHEDULER=off` turns the thread off; the command line
+  (`python -m usas_web updates --schedule <id>`) takes the same run lock.
 - **The status API for dashboards** (`GET /api/status`, for Heimdall and the like) is off until a signed-in
   session that enters the password again makes its token. The token (32 random bytes after `usas_st_`) is
   shown once; the data volume keeps only an HMAC-SHA256 of it, keyed from the Vault password through scrypt. It is accepted

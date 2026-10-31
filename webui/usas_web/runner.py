@@ -93,6 +93,7 @@ class Run:
     applied_from: str = ""  # a real run's check run
     # The allowlisted variables it was started with (EXTRA_VARS), such as a VMs page updates run's choices.
     options: dict[str, str] = field(default_factory=dict)
+    schedule: str = ""  # the updates schedule that started it
 
     @property
     def done(self) -> bool:
@@ -170,7 +171,7 @@ def inventory_names(text: str) -> set[str]:
 
 
 class Runner:
-    def __init__(self, settings: Settings, on_finish: Callable[[Run], None] | None = None):
+    def __init__(self, settings: Settings, on_finish: Callable[[Run], None] | None = None, recover: bool = True):
         self.settings = settings
         self.on_finish = on_finish  # called with each run that ends
         self.dir = settings.runs_dir
@@ -178,7 +179,8 @@ class Runner:
         self._current: tuple[Run, subprocess.Popen] | None = None
         self._file_lock: int | None = None  # the open runs/.lock while a run holds it
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for run in self.history():
+        # A run still "running" on disk stopped with the UI, unless another process (the command line) runs it.
+        for run in self.history() if recover else ():
             if run.status == "running":  # the UI stopped while it ran
                 run.status = "interrupted"
                 self._save(run)
@@ -342,7 +344,8 @@ class Runner:
     def start(self, action: str, check: bool, diff: bool, limit_text: str, names: set[str],
               redact: list[str], *, kind: str = "playbook", inventory: str | None = None,
               tags: tuple[str, ...] | list[str] = (), extra_vars: dict[str, Any] | None = None,
-              targets: list[dict[str, Any]] | None = None, plan: str = "", applied_from: str = "") -> Run:
+              targets: list[dict[str, Any]] | None = None, plan: str = "", applied_from: str = "",
+              schedule: str = "") -> Run:
         """Starts a run. limit_text is checked against names, the inventory's host and group names, plus those
         of inventory: YAML text for a second inventory, written by the caller from validated values only."""
         action = next((k for k in PLAYBOOKS if k == action), "")
@@ -366,7 +369,8 @@ class Runner:
                 run = Run(id=run_id, action=action, check=check, diff=diff, limit=limit, status="running",
                           started=time.time(), kind=kind, tags=tags, targets=list(targets or []), plan=plan,
                           inventory=inventory is not None, extra_vars=variables is not None,
-                          settings=self.settings_digest(), applied_from=applied_from, options=options)
+                          settings=self.settings_digest(), applied_from=applied_from, options=options,
+                          schedule=schedule)
                 log = self.log_path(run_id)
                 write_private(log, "")
                 if inventory is not None:

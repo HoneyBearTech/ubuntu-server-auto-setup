@@ -41,6 +41,8 @@ class Settings:
     port: int = 8080
     # Lets the tests set extra environment for ansible-playbook runs.
     run_env: dict[str, str] = field(default_factory=dict)
+    # The updates schedules' thread (USAS_SCHEDULER=on|off). On by default; nothing runs until a schedule exists.
+    scheduler: bool = True
 
     @property
     def inventory_file(self) -> Path:
@@ -133,6 +135,9 @@ def from_env(env: dict[str, str] | None = None) -> Settings:
     secure = (env.get("USAS_SECURE_COOKIES") or "auto").strip().lower()
     if secure not in ("auto", "true"):
         raise ValueError("USAS_SECURE_COOKIES must be auto or true")
+    scheduler = (env.get("USAS_SCHEDULER") or "on").strip().lower()
+    if scheduler not in ("on", "off"):
+        raise ValueError("USAS_SCHEDULER must be on or off")
     public = public_origin(env.get("USAS_PUBLIC_URL", ""))
     allowed = _list(env.get("USAS_ALLOWED_HOSTS"), LOOPBACK_HOSTS)
     public_host = urlsplit(public).hostname
@@ -150,4 +155,5 @@ def from_env(env: dict[str, str] | None = None) -> Settings:
         ansible_playbook=env.get("USAS_ANSIBLE_PLAYBOOK") or "ansible-playbook",
         host=env.get("USAS_HOST") or "0.0.0.0",
         port=int(env.get("USAS_PORT") or 8080),
+        scheduler=scheduler == "on",
     )

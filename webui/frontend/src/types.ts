@@ -34,6 +34,45 @@ export interface Certificate {
   expires: string;
 }
 
+// The Updates page (GET /api/updates): each server's newest result, the schedules and the settings section.
+export interface UpdatesHost {
+  run: string;
+  check: boolean;
+  finished: number | null;
+  result: UpdateResult;
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  kind: "check" | "apply" | string;
+  kind_label: string;
+  days: string[];
+  start: string;
+  minutes: number;
+  timezone: string;
+  targets: { vmid: number; name: string; address: string }[];
+  options: Record<string, string>;
+  created: number;
+  made_from: string;
+  next: number | null;
+  open: boolean;
+  last_window: string;
+  last_outcome: string;
+  last_time: number | null;
+  last_run: string;
+}
+
+export interface UpdatesData extends SectionData {
+  hosts: Record<string, UpdatesHost>;
+  schedules: Schedule[];
+  scheduler: boolean;
+  days: string[];
+  kinds: Record<string, string>;
+  minutes: [number, number];
+  timezone: string;
+}
+
 export interface SectionData {
   title: string;
   fields: FieldMeta[];
