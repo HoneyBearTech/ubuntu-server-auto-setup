@@ -198,8 +198,9 @@ The overview lists the steps and whether each is done.
    came from, and whether the playbooks support it. The address comes from the VM's QEMU guest agent if it
    runs (IPv4 only, loopback, link-local and container interfaces left out, an address in the servers'
    subnet first), otherwise from the Servers page (a row with the same VM ID), otherwise from the VM's
-   cloud-init `ipconfig0`. **Playbooks** says *Supported* for Ubuntu 26.04 and 24.04, *Untested release*
-   for other Ubuntu releases, *Confirm the OS* when no agent reported it, and *Not supported* for other
+   cloud-init `ipconfig0`. **Playbooks** says *Supported* for the [OS catalog](interfaces.md#the-os-catalog)'s releases
+   (Ubuntu, Debian and the RHEL family; the list follows the catalog), *Untested release* for another release
+   of one of those systems, *Confirm the OS* when no agent reported it, and *Not supported* for other
    systems, Windows, templates and containers, with the reason. The OS is what the guest itself reports,
    so it is advice, not proof. Sort by any column (the headings are buttons) and filter by name, VMID,
    address, OS or tag, node, status or support. The list refreshes every 30 seconds while the page is
@@ -207,7 +208,7 @@ The overview lists the steps and whether each is done.
    `VM.GuestAgent.Audit` on Proxmox VE 9 ([installing.md](installing.md#2-create-the-proxmox-api-token));
    on Proxmox VE 8 the page works without them.
 
-   **Running the baseline on VMs.** Tick running Ubuntu VMs (or **Select all VMs shown**; up to 25 per run;
+   **Running the baseline on VMs.** Tick running VMs (or **Select all VMs shown**; up to 25 per run;
    a row that can't be ticked says why). Below the table, choose what to run: **SSH keys only**, **SSH
    hardening and Fail2Ban**, the **Full baseline** (the default), or **Custom** parts. For each VM:
    - A VM whose VM ID is on the Servers page runs as that server, with its address, user and sudo password,
@@ -217,8 +218,8 @@ The overview lists the steps and whether each is done.
      that accepts the UI's key and has passwordless sudo, **Extra firewall rules** for what it serves, and
      whether to **Set its host name** (off by default). It gets none of the Vault's secrets: no admin
      password (so sudo stays passwordless for that user), no relay password, no webhook URL.
-   - An untested Ubuntu release, or a VM outside the inventory whose guest didn't report its OS, needs
-     **It runs Ubuntu Server** ticked.
+   - A release outside the OS catalog, or a VM outside the inventory whose guest didn't report its OS, needs
+     **Run the baseline on it anyway** ticked (recorded in the audit log).
    - **Host key**: **Scan the host key**, compare the fingerprints with the VM's console (`for f in
      /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done`), tick the box and **Pin these keys**. The
      keys are pinned to the cluster and VM ID, not the address, so a guest that reports another VM's

@@ -339,6 +339,7 @@ class Schema:
     def __init__(self, project_dir: Path):
         self.roles = load_roles(project_dir)
         catalog = yaml.safe_load((project_dir / CATALOG).read_text(encoding="utf-8"))["os_catalog"]
+        self.os_catalog = catalog
         self.os_choices = os_choices(catalog, datetime.date.today())
         # Each release's installer ISO, for the Run page's plan.
         self.installer_isos = {str(e["id"]): str(e["methods"]["autoinstall"]["file"])

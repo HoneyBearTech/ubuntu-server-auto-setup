@@ -97,7 +97,7 @@ def test_hostname_override_and_manual_address():
     assert host["baseline_allow_unsupported"] is True
     assert plan.targets[0].source == "manual"
     assert any("renamed to vm101" in w for w in plan.warnings)
-    assert any("aren't tested" in w for w in plan.warnings)
+    assert any("isn't a release of the OS catalog" in w for w in plan.warnings)
 
 
 def test_errors_are_collected_per_field():

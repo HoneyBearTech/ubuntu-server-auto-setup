@@ -222,7 +222,7 @@ function VmPart({ vm, settings, set, errors, keyState, setKeyState, pinned, onPi
       )}
       {needsOverride ? (
         <Check id={id("override")} checked={settings.override} onChange={(override) => set({ override })}
-               error={err("override")} label="It runs Ubuntu Server: run the baseline anyway"
+               error={err("override")} label="Run the baseline on it anyway"
                help={vm.reason} />
       ) : null}
 

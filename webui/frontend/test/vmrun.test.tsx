@@ -149,7 +149,7 @@ describe("running the baseline from the VMs page", () => {
     expect(part.getByText(/on the/).textContent).toContain("Server database");
     expect(part.queryByLabelText("Address")).toBeNull(); // a server keeps its own settings
     // A server whose guest didn't report its OS runs as from the Run page: no confirmation.
-    expect(part.queryByLabelText("It runs Ubuntu Server: run the baseline anyway")).toBeNull();
+    expect(part.queryByLabelText("Run the baseline on it anyway")).toBeNull();
     await user.click(screen.getByLabelText("Custom"));
     const parts = within(screen.getByRole("group", { name: "Parts of the baseline" }));
     await user.click(parts.getByLabelText("firewall"));
