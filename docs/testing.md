@@ -374,8 +374,8 @@ A failing test leaves a screenshot and a trace in `webui/frontend/test-results/`
 To watch the tests, pass Playwright's options through: `tests/webui-browser.sh --headed`, or
 `--debug -g "phone"` for one test.
 
-What a screen reader says can't be tested this way; the [screen-reader
-walk-through](accessibility.md#screen-reader-walk-through) is done by hand before each release.
+What a screen reader says can't be tested this way, and isn't tested by hand either
+([accessibility.md](accessibility.md#known-gaps)).
 
 ## Running them
 
