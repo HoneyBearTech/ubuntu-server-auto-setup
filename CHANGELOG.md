@@ -248,6 +248,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- On a server installed from a cloud image, the baseline's first run lost sudo after removing passwordless sudo:
+  the admin user joined its sudo group in the same SSH session, which kept its old groups. The baseline now logs in
+  again after the admin user's groups change. Found by the new weekly cloud-image test.
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.

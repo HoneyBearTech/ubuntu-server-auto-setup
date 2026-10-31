@@ -198,7 +198,8 @@ step "What the first boot left"
 on_vm 'test -e /etc/cloud/cloud-init.disabled && sudo -n test -e /etc/sudoers.d/90-ansible-sysadmin && hostname' \
   | grep -qx srv-01 || { echo "ERROR: cloud-init didn't set up the server as the seed says" >&2; exit 1; }
 # The baseline deletes cloud-init's cached copies of the seed only when this says disabled (roles/common).
-ci_status="$(on_vm 'cloud-init status 2>&1; cloud-init --version 2>&1' || true)"
+# Run as root, as the baseline runs it: on the RHEL family /run/cloud-init/cloud.cfg is root's only.
+ci_status="$(on_vm 'sudo -n cloud-init status 2>&1; cloud-init --version 2>&1' || true)"
 grep -q '^status: disabled' <<<"$ci_status" \
   || { printf '%s\n' "$ci_status" >&2; echo "ERROR: cloud-init status doesn't say disabled after the first boot" >&2; exit 1; }
 # The firmware's SecureBoot variable: four attribute bytes, then 1 when Secure Boot is on.
