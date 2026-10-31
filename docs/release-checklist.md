@@ -369,6 +369,16 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
   ARGS="-e updates_reboot=if_required"` installs it and holds the reboot, naming the package and the
   recovery steps; reboot from the console and follow "Recovery" in docs/security.md. If no such update is
   pending, note "not available" in the record.
+- [ ] **Snapshots.** Add `VM.Snapshot` to the token's role (docs/installing.md) and take an operator snapshot
+  of `test-01` first (`qm snapshot <vmid> mine`). On a VM with disks on LVM-thin or ZFS, a run with
+  `ARGS="-e updates_snapshot=true"` and an update pending takes `usas_upd_<date>_<time>` on the VM's current
+  node before installing (watch **Tasks** in the Proxmox UI), the report names it, and `mine` is still there
+  after a second run with an update pending (the older `usas_upd_` one is gone, `updates_snapshot_keep: 1`).
+  Migrate the VM to another node first, without changing `pve_node`, and the snapshot still goes to the node
+  it runs on. A VM with a raw disk on NFS or directory storage is `skipped` with "disks don't support
+  snapshots". Remove `VM.Snapshot` again (`pveum role modify UbuntuAutoSetup --privs <the list without it>`)
+  and a run fails the VM naming `VM.Snapshot`. Roll back once by hand following docs/updates.md
+  ("Rolling back"), then delete the snapshots you made.
 
 ## Web UI
 

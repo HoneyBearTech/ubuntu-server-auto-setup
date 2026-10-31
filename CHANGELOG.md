@@ -41,6 +41,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   and guest-agent answers from the cluster now shape the updates run's inventory; names and groups are fixed,
   values are never templated, and an address from a guest is used only with its pinned key (assurance case
   B20).
+- **Snapshots before updates** (`updates_snapshot: true`, off by default;
+  [docs/updates.md](docs/updates.md#snapshots)): each VM gets a Proxmox snapshot of its disks just before its
+  update, on the node it runs on now. VMs whose disks can't have one, locked VMs and servers without a VM ID
+  are skipped (or, with `updates_snapshot_required: false`, updated without). Old snapshots are cleaned up
+  (`updates_snapshot_keep: 1`, `updates_snapshot_max_age: 7` days), only ever the playbook's own: the
+  `usas_upd_` name and its description marker. An unhealthy VM keeps its snapshot; the report warns about a
+  storage over 85 % used; [docs/updates.md](docs/updates.md#rolling-back) is the rollback runbook. Needs
+  `VM.Snapshot` on the token's role, never `VM.Snapshot.Rollback`
+  ([docs/installing.md](docs/installing.md#2-create-the-proxmox-api-token)). **New attack surface:** the
+  control node now writes to the Proxmox API (creates and deletes snapshots), argued in the assurance case
+  (B23).
 
 - **The OS catalog** (`roles/os_catalog/vars/catalog.yml`): every image the project installs, pinned by URL
   and checksum like a lock file, for Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream 9 and
@@ -149,24 +160,22 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - **New trust on RHEL-family servers: EPEL**, for Fail2Ban (and msmtp for the mail relay): enabled only when
   needed, from the distribution's signed `epel-release`, with its packages checked against EPEL's key (trust
   boundary B21 in the [assurance case](docs/assurance-case.md); [security.md](docs/security.md)).
-
+- pyasn1 0.6.5 (from 0.6.4) in the CI and web UI requirements, for GHSA-2qm8-x737-gmw5,
+  GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p and GHSA-mm57-4v3p-rchx.
 - The ISO's integrity no longer depends on fetching Ubuntu's checksum file during a run: the checksum is
   reviewed in the repository, and a mirror can't change it. The vendors' signing keys and the hosts the
   catalog trusts are listed in [docs/security.md](docs/security.md), with a new trust boundary (B16) in the
   [assurance case](docs/assurance-case.md).
+- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
+  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
+  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
+  VM's key is pinned by cluster and VM ID.
 
 ### Fixed
 
 - `prepare-node.yml` stopped with "object of type 'dict' has no attribute 'pw_name'" when the work directory's
   owner had no user name, as after changing `pve_ssh_user`'s UID (`usermod -u`) to match a file server's user. It
   now refuses that directory with its reason and the owner's UID, and says how to hand it over.
-
-### Security
-
-- The assurance case adds trust boundary B22 for the web UI's SSH runs on VMs picked on the VMs page, the
-  malicious guest as an SSH target, and rows for CWE-522, CWE-345/923, CWE-918 and CWE-778.
-  `docs/security.md` lists what those runs guarantee and what they don't; `docs/host-keys.md` shows how a
-  VM's key is pinned by cluster and VM ID.
 
 ### Documentation
 

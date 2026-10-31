@@ -1,0 +1,26 @@
+---
+# Proxmox answers a start, snapshot or delete request straight away with the ID of a task (a UPID) that does the
+# work in the background: until that task has finished, the VM's status still reads "stopped", or the snapshot
+# isn't there yet. Waits for the task, on the node that runs it (the UPID's second field), then fails unless it
+# succeeded. Takes pve_task (the UPID), pve_task_what ("start VM 4071"), pve_task_timeout (seconds, 180 by
+# default), pve_api_url and pve_api_headers, and reads pve_validate_certs, pve_api_timeout and pve_hide_secrets
+# (true, 60 and true when unset, as from roles/updates).
+- name: Wait for Proxmox to {{ pve_task_what }}
+  ansible.builtin.uri:
+    url: "{{ pve_api_url }}/nodes/{{ pve_task.split(':')[1] | urlencode }}/tasks/{{ pve_task | urlencode }}/status"
+    headers: "{{ pve_api_headers }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    timeout: "{{ pve_api_timeout | default(60) | int }}"
+  register: pve_task_status
+  until: pve_task_status.json is defined and pve_task_status.json.data.status == 'stopped'
+  retries: "{{ (pve_task_timeout | default(180) | int / 2) | round(0, 'ceil') | int }}"
+  delay: 2
+  delegate_to: localhost
+  become: false
+  no_log: "{{ pve_hide_secrets | default(true) }}"
+
+- name: Fail unless Proxmox could {{ pve_task_what }}
+  ansible.builtin.assert:
+    that: pve_task_status.json.data.exitstatus == 'OK'
+    fail_msg: "Proxmox couldn't {{ pve_task_what }}: {{ pve_task_status.json.data.exitstatus }}"
+    quiet: true

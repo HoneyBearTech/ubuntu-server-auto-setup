@@ -215,7 +215,10 @@
       no_log: "{{ pve_hide_secrets }}"
 
     - name: Wait until the installer is running
-      ansible.builtin.include_tasks: wait_for_start.yml
+      ansible.builtin.include_tasks: wait_task.yml
+      vars:
+        pve_task: "{{ pve_vm_start.json.data }}"
+        pve_task_what: start VM {{ pve_vmid }}
 
     - name: Wait for the installer to finish and power off the VM
       ansible.builtin.uri:
@@ -285,7 +288,10 @@
   no_log: "{{ pve_hide_secrets }}"
 
 - name: Wait until the installed system is booting
-  ansible.builtin.include_tasks: wait_for_start.yml
+  ansible.builtin.include_tasks: wait_task.yml
+  vars:
+    pve_task: "{{ pve_vm_start.json.data }}"
+    pve_task_what: start VM {{ pve_vmid }}
 
 - name: Find the address DHCP gave the new VM
   ansible.builtin.include_tasks: dhcp_address.yml

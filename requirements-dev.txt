@@ -6,4 +6,4 @@ black>=26.10.1  # through ansible-lint; 26.10.1 fixes GHSA-cg8m-r9f2-5wm2
 pytest>=9.0.3  # 9.0.3 fixes CVE-2025-71176 (tmpdir handling)
 pygments>=2.20  # through pytest; 2.20.0 fixes PYSEC-2026-2987, 2.15.1 fixes PYSEC-2023-117
 pytest-cov>=7.0
-httpx2>=2.15
+httpx2>=2.16.0
