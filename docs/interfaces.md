@@ -377,16 +377,14 @@ What the role does on each member:
   (udp) and the kubelet's 10250/tcp from every other member; on a server also 6443/tcp from every other member
   and `k8s_api_sources`, and etcd's 2379:2380/tcp from the other servers. The one network the rules allow is k3s'
   own pod network (`10.42.0.0/16`): the kubelet's 10250/tcp on every member and, on a server, 6443/tcp, since
-  pods reach the API through its service and metrics-server the kubelets with their own addresses (firewalld
-  would drop them otherwise). On UFW each rule carries the comment
+  pods reach the API through its service and metrics-server the kubelets with their own addresses. On UFW each rule
+  carries the comment
   `usas-k8s <cluster>`; on firewalld they are rich rules in the default zone. A rule from an earlier run that the
   cluster no longer needs (a member that left or moved, the other flannel backend) is removed. firewalld's rich
   rules carry no comment, so there the role removes any rich rule on a k3s port (8472/udp, 51820/udp, 10250/tcp,
-  6443/tcp, 2379-2380/tcp) that it doesn't need, except those `firewall_allow` adds. On firewalld, k3s' pod and
-  service networks (`10.42.0.0/16`, `10.43.0.0/16`) are also sources of the `trusted` zone, as k3s documents:
-  firewalld rejects forwarded pod traffic otherwise, whatever the rich rules say. Pod traffic between nodes,
+  6443/tcp, 2379-2380/tcp) that it doesn't need, except those `firewall_allow` adds. Pod traffic between nodes,
   and traffic to LoadBalancer addresses, is forwarded rather than delivered to the node, so it needs no rule of its
-  own on UFW: its forward chains log it as blocked before flannel's own rules accept it.
+  own: UFW's forward chains log it as blocked before flannel's own rules accept it.
 - **Kernel:** the `br_netfilter` and `overlay` modules, loaded now and at boot
   (`/etc/modules-load.d/usas-kubernetes.conf`); `net.ipv4.ip_forward` and `net.bridge.bridge-nf-call-iptables`
   and `-ip6tables` set to 1 (`/etc/sysctl.d/91-usas-kubernetes.conf`). The run stops if `hardening_sysctl` or

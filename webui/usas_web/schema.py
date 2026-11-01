@@ -77,7 +77,7 @@ NOT_FORM_FORMATS = frozenset({
     # A member's address is its ansible_host, which the Servers page checks with provision_ipv4_pattern.
     "k8s_node_ipv4_pattern",
     # The kubernetes_node and k3s roles' files, ports, packages, services and platforms: not settings.
-    "k8s_node_flannel_ports", "k8s_node_owned_ports", "k8s_node_pod_cidr", "k8s_node_service_cidr",
+    "k8s_node_flannel_ports", "k8s_node_owned_ports", "k8s_node_pod_cidr",
     "k8s_node_firewalld_zone", "k8s_node_modules",
     "k8s_node_modules_file", "k8s_node_sysctl", "k8s_node_sysctl_file", "k8s_node_time_services",
     "k8s_node_container_types", "k8s_node_longhorn_packages", "k8s_node_longhorn_modules_file",
