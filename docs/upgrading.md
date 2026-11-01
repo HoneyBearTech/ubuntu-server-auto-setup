@@ -104,3 +104,8 @@ Moving an existing server to a new Ubuntu release (24.04 to 26.04) is not someth
   sysadmin`) as well.
 - **SSH keys**: add or remove them on GitHub, then `make keys ARGS=--ask-vault-pass`. With
   `ssh_keys_exclusive: true` (the default), keys you removed from GitHub are removed from the servers.
+- **A Kubernetes cluster's join tokens** (`vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>`): the
+  cluster holds them too, so rotate them with k3s first (`sudo k3s token rotate` on a server, as k3s'
+  documentation describes, then restart k3s on each member in turn), then put the new values in the Vault and
+  run `make kubernetes`, which writes them to the members' `config.yaml`. Changing only the Vault leaves the
+  cluster with the old ones ([kubernetes.md](kubernetes.md#2-the-join-tokens)).

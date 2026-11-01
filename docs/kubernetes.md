@@ -93,7 +93,7 @@ vault_k8s_agent_token_lab: <the second value>
 ```
 
 Keep a copy in your password manager. A token is part of a running cluster: changing it in the Vault later
-doesn't change the cluster's, and needs k3s' own token rotation first. A missing or malformed token stops
+doesn't change the cluster's, and needs k3s' own token rotation first ([rotating secrets](upgrading.md#rotating-secrets)). A missing or malformed token stops
 `make kubernetes` in its checks, before any member changes.
 
 ## 3. Provision, baseline, then `make kubernetes`
