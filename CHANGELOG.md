@@ -272,6 +272,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- An extra disk whose file system label held a character such as `\x1d` could be taken for the disk's own file
+  system with an empty label, and mounted: the baseline split blkid's output at every character Python counts as a
+  line break. It now splits at newlines only, so such a disk is left alone as "other". Found by the fuzz targets.
 - The VMs page asked to "confirm it is Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux" for a VM whose
   guest agent didn't report its OS; it now says "or". Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
