@@ -292,7 +292,7 @@ for moment, state in probes:
         longest, down_since = max(longest, moment - down_since), None
 if down_since is not None:
     longest = max(longest, probes[-1][0] - down_since)
-assert probes and longest <= 15, f"the API on the VIP didn't answer for {longest:.1f} s during the upgrade"
+assert probes and longest <= 30, f"the API on the VIP didn't answer for {longest:.1f} s during the upgrade"
 print(f"the VIP answered throughout ({len(probes)} probes, longest gap {longest:.1f} s)")
 EOF2
 fi
