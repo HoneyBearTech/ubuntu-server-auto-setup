@@ -221,9 +221,9 @@ def catalog_releases(entries: Any) -> tuple[Release, ...]:
     return tuple(found)
 
 
-def _names(items: list[str]) -> str:
+def _names(items: list[str], last: str = "and") -> str:
     items = list(dict.fromkeys(items))
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + f" {last} " + items[-1]
 
 
 @dataclass
@@ -265,6 +265,8 @@ def classify(vm: Vm, config: VmConfig | None, os: OsInfo | None, releases: tuple
     """(support, reason) against releases, the OS catalog's. The guest reports its own OS, so "supported" is
     advice, not proof."""
     systems = _names([r.name for r in releases]) if releases else "none"
+    # The VM is one of them, so "confirm it is" lists them with "or".
+    either = _names([r.name for r in releases], "or") if releases else "none"
     if vm.type == "lxc":
         return UNSUPPORTED, "A container (LXC), not a VM: the playbooks set up whole servers."
     if vm.template:
@@ -276,8 +278,8 @@ def classify(vm: Vm, config: VmConfig | None, os: OsInfo | None, releases: tuple
         if ostype in ("solaris", "other"):
             return UNSUPPORTED, f"Proxmox says the OS type is {ostype}: the playbooks set up {systems}."
         if vm.status != "running":
-            return UNKNOWN, f"Not running, so its guest agent can't report the OS: confirm it is {systems}."
-        return UNKNOWN, f"The guest agent didn't report the OS: confirm it is {systems} before running a playbook."
+            return UNKNOWN, f"Not running, so its guest agent can't report the OS: confirm it is {either}."
+        return UNKNOWN, f"The guest agent didn't report the OS: confirm it is {either} before running a playbook."
     name = os.pretty or os.id
     if any(r.matches(os) for r in releases):
         return SUPPORTED, f"{name} (reported by the guest)."
