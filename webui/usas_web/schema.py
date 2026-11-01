@@ -66,7 +66,7 @@ NOT_FORM_FORMATS = frozenset({
     "installer_iso_name_pattern",
     # The updates role's checks of what servers report (package and service names, URLs, seconds), its own
     # snapshots' names, per-host update groups and its supported releases: not settings of the Updates page.
-    "updates_package_pattern", "updates_url_pattern", "updates_seconds_pattern", "updates_snapshot_name_pattern",
+    "updates_package_pattern", "updates_url_pattern", "updates_snapshot_name_pattern",
     "updates_snapshot_marker_pattern", "updates_group_pattern", "updates_max_entries", "updates_supported_releases",
     "updates_families",
     # Spread groups: no form field yet, so set in the inventory (host_vars). The extra disks' formats are the
@@ -84,6 +84,10 @@ NOT_FORM_FORMATS = frozenset({
     "k8s_node_rancher_repo_url", "k8s_node_selinux_releases", "k8s_node_selinux_packages",
     "k3s_architectures", "k3s_binary", "k3s_config_dir", "k3s_config_file", "k3s_manifests_dir", "k3s_etcd_dir",
     "k3s_server_ca", "k3s_services", "k3s_manifest_files", "k3s_readonly_account", "k3s_api_port",
+    "k3s_upgrade_lock", "k3s_admin_kubeconfig", "k3s_bootstrap_dir", "k3s_helm_binary", "k3s_argocd_release",
+    "k3s_argocd_namespace", "k3s_argocd_root_app",
+    # The updates role's drain of a member: its groups and node names are the k3s role's (above), and k3s' binary.
+    "updates_k8s_group_pattern", "updates_k8s_node_name_pattern", "updates_k8s_binary",
 })
 # A Kubernetes cluster's name, as k3s_group_pattern, k8s_node_group_pattern and provision_k8s_group_pattern take
 # it between "k8s_" and "_servers"/"_agents".
@@ -124,7 +128,7 @@ class SchemaError(RuntimeError):
 class Spec:
     name: str
     label: str
-    kind: str  # text, int, bool, choice, list, secret
+    kind: str  # text, multiline (text over several lines), int, bool, choice, list, secret
     role: str | None = None  # role whose defaults/main.yml has the variable
     pattern_var: str | tuple[str, ...] | None = None  # vars/main.yml pattern(s) for the value (or each list item)
     choices_var: str | None = None  # vars/main.yml list of allowed values, or OS_CATALOG
@@ -387,6 +391,14 @@ SECTIONS["updates"] = (
     S("updates_node_max_parallel", "Servers that may reboot per Proxmox node and wave", "text", "updates",
       pattern_var="updates_parallel_pattern", advanced=True),
     S("updates_notify", "When to notify", "choice", "updates", choices_var="common_mail_report_values"),
+    S("updates_k8s_drain", "Drain Kubernetes members before a reboot", "bool", "updates"),
+    S("updates_k8s_wait_longhorn", "Wait for Longhorn's volumes after each member", "bool", "updates"),
+    S("updates_k8s_drain_timeout", "Seconds a drain may take", "text", "updates", pattern_var="updates_seconds_pattern",
+      advanced=True),
+    S("updates_k8s_ready_timeout", "Seconds to wait for a member to be Ready again", "text", "updates",
+      pattern_var="updates_seconds_pattern", advanced=True),
+    S("updates_k8s_longhorn_timeout", "Seconds to wait for Longhorn's volumes", "text", "updates",
+      pattern_var="updates_seconds_pattern", advanced=True),
 )
 
 # Columns of the servers table. "name" is the inventory host name; "firewall_ports" are extra rules for that host.
@@ -439,7 +451,19 @@ CLUSTER_FIELDS: tuple[Spec, ...] = (
     S("k8s_secrets_encryption", "Encrypt Secrets in etcd", "bool", "k3s", advanced=True),
     S("k8s_fetch_readonly_kubeconfig", "Fetch a read-only kubeconfig", "bool", "k3s", advanced=True,
       help="Kept in the data folder for kubectl from the container; the web UI never shows or offers it."),
-    S("k8s_ready_timeout", "Seconds to wait for a node to be Ready", "int", "k3s", minimum=30, maximum=3600,
+    S("k8s_ready_timeout", "Seconds to wait for a node to be Ready", "int", "k3s", minimum=1, maximum=99999,
+      advanced=True),
+    S("k8s_drain_timeout", "Seconds a node's drain may take in an upgrade", "int", "k3s", minimum=1, maximum=99999,
+      advanced=True),
+    # The optional handoff to Argo CD (K5).
+    S("k8s_bootstrap_argocd", "Hand the cluster over to Argo CD", "bool", "k3s"),
+    S("k8s_bootstrap_repo_url", "Git repository", "text", "k3s", pattern_var="k3s_bootstrap_url_pattern"),
+    S("k8s_bootstrap_path", "Folder of the Applications", "text", "k3s", pattern_var="k3s_bootstrap_path_pattern"),
+    S("k8s_bootstrap_revision", "Branch, tag or commit", "text", "k3s", pattern_var="k3s_bootstrap_revision_pattern",
+      help="What the root Application follows in the repository."),
+    S("k8s_bootstrap_repo_ca", "The Git server's CA certificate (PEM)", "multiline", "k3s",
+      pattern_var="k3s_bootstrap_ca_pattern", advanced=True),
+    S("k8s_bootstrap_timeout", "Seconds Helm waits for Argo CD", "int", "k3s", minimum=1, maximum=99999,
       advanced=True),
 )
 # The join tokens: write-only, in the Vault under the cluster's name ("-" written as "_"), never read back.

@@ -59,8 +59,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (server, agent or none) per server. The Run page runs `kubernetes.yml` for a cluster with the `install` or
   `upgrade` tag, a check first, then for real once after a confirmation (an upgrade's names the version), each
   step in the audit log. The VMs page shows each member's cluster and role, filters by cluster and warns when an
-  update wouldn't drain a member. Groups and variables set by hand in the inventory are kept when the UI saves.
-  The UI never shows a kubeconfig or talks to a cluster itself.
+  update wouldn't drain a member; the Updates page has the drain and Longhorn settings, and a cluster the Argo CD
+  handoff. Groups and variables set by hand in the inventory are kept when the UI saves. The UI never shows a
+  kubeconfig or talks to a cluster itself.
 
 ### Fixed
 

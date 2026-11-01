@@ -526,7 +526,8 @@ read-only deploy key) once it runs; the root Application syncs as soon as it can
 step (Helm, the chart and the cluster's objects aren't there to compare with). Removing Argo CD is the GitOps
 repository's business; homelab-kube's `docs/installing.md` ("Uninstalling") shows how.
 
-**In the web UI**, the Defaults page's **Kubernetes clusters** section edits each cluster's variables above (and
+**In the web UI**, the Defaults page's **Kubernetes clusters** section edits each cluster's variables above (with
+the [Argo CD handoff](#handing-a-cluster-over-to-argo-cd-optional), and
 `k8s_api_sources`, `k8s_flannel_backend` and `k8s_longhorn_prereqs` from the [node profile](#kubernetes-nodes))
 as the `vars` of the group `k8s_<cluster>`, a child of `servers`, and sets its two join tokens. The Servers
 page's **Kubernetes cluster** and **Kubernetes role** columns (server, agent or none) put a server into

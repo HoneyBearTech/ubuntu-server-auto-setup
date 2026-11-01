@@ -90,7 +90,8 @@ function ClusterCard({ row, index, data, errors, onRemove, onMake, busy }: {
     { legend: "Cluster", test: named("name", "k8s_version") },
     { legend: "Addresses", test: named("k8s_api_vip", "k8s_lb_pool", "k8s_api_sources", "k8s_api_vip_interface",
       "k8s_tls_san") },
-    { legend: "Nodes", test: () => true },
+    { legend: "Nodes", test: (f) => !f.name.startsWith("k8s_bootstrap_") },
+    { legend: "Hand over to Argo CD (off by default)", test: () => true },
   ]);
   const errorOf = (f: FieldMeta) => errors[prefix + f.name];
   const info = row.info;

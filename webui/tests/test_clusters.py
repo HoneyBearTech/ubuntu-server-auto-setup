@@ -170,7 +170,10 @@ def test_what_was_set_by_hand_is_kept(ui):
     ({"clusters-0-k8s_api_sources": "10.0.0.0/24 any"}, "clusters-0-k8s_api_sources", "format"),
     ({"clusters-0-k8s_flannel_backend": "host-gw"}, "clusters-0-k8s_flannel_backend", "one of"),
     ({"clusters-0-k8s_api_vip_interface": "eth0; x"}, "clusters-0-k8s_api_vip_interface", "format"),
-    ({"clusters-0-k8s_ready_timeout": "5"}, "clusters-0-k8s_ready_timeout", "between"),
+    ({"clusters-0-k8s_ready_timeout": "0"}, "clusters-0-k8s_ready_timeout", "between"),
+    ({"clusters-0-k8s_bootstrap_repo_url": "http://git.example/apps"}, "clusters-0-k8s_bootstrap_repo_url", "format"),
+    ({"clusters-0-k8s_bootstrap_revision": "main/../x"}, "clusters-0-k8s_bootstrap_revision", "format"),
+    ({"clusters-0-k8s_bootstrap_repo_ca": "not a certificate"}, "clusters-0-k8s_bootstrap_repo_ca", "format"),
     ({"clusters-0-k8s_token": "{{ lookup('pipe', 'id') }}" + "a" * 40}, "clusters-0-k8s_token", "format"),
     ({"cluster_count": "2", "clusters-1-name": "lab", "clusters-1-k8s_version": "v1.36.5+k3s1"},
      "clusters-1-name", "Another cluster"),
@@ -351,9 +354,15 @@ def test_the_vms_page_shows_members_and_never_takes_the_vip(ui, monkeypatch):
             {"ip-address": "10.0.0.91", "ip-address-type": "ipv4", "prefix": 24},
             {"ip-address": "10.0.0.51", "ip-address-type": "ipv4", "prefix": 24}]}]}})
     rows = {row["vmid"]: row for row in get(ui, "/api/vms").json()["vms"]}
-    assert rows[4000]["k8s"] == {"cluster": "lab", "role": "server", "inventory": True, "drain": False}
+    assert rows[4000]["k8s"] == {"cluster": "lab", "role": "server", "inventory": True, "drain": True}
     assert rows[101]["k8s"] == {"cluster": "edge", "role": "agent", "inventory": False, "drain": False}
     assert rows[101]["addresses"] == ["10.0.0.51"] and rows[101]["ip"] == "10.0.0.51"
+    # Draining turned off on the Updates page: the member isn't drained.
+    config = ui.app_state.store.load()
+    config.values["updates_k8s_drain"] = False
+    ui.app_state.store.save(config)
+    rows = {row["vmid"]: row for row in get(ui, "/api/vms").json()["vms"]}
+    assert rows[4000]["k8s"]["drain"] is False
 
 
 def test_an_update_warns_when_a_member_isnt_drained(ui, monkeypatch):

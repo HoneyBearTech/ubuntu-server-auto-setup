@@ -40,7 +40,7 @@ function Required({ field }: { field: FieldMeta }) {
   return field.required && !field.saved ? <span className="req"> (required)</span> : null;
 }
 
-const WIDE = new Set(["list"]);
+const WIDE = new Set(["list", "multiline"]);
 
 export function Field({ field, values, error, list, prefix = "" }: {
   field: FieldMeta;
@@ -101,8 +101,8 @@ export function Field({ field, values, error, list, prefix = "" }: {
         </select>
       </div>
     );
-  } else if (field.kind === "list") {
-    const rows = field.name === "admin_extra_ssh_keys" || field.name === "firewall_allow" ? 4 : 3;
+  } else if (field.kind === "list" || field.kind === "multiline") {
+    const rows = field.kind === "multiline" ? 6 : field.name === "admin_extra_ssh_keys" || field.name === "firewall_allow" ? 4 : 3;
     control = (
       <textarea id={id} name={name} rows={rows} spellCheck={false} defaultValue={String(value ?? "")}
                 aria-describedby={describedBy(id, error)} aria-invalid={invalid} />

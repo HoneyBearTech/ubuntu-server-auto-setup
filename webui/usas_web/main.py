@@ -1349,7 +1349,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         # The calls block (and wait for the guest agents), so they run in a thread.
         data = await asyncio.to_thread(lister.list, api, vm_servers(config), network, exclude=exclude)
         pins = keys.pins()
-        drain_default = schema.roles.defaults.get("updates", {}).get(clusters.DRAIN_VAR, False)
+        drain_default = setting(config, clusters.DRAIN_VAR)
         by_name = {c.name: c for c in config.clusters}
         for row in data["vms"]:
             ok, why = vmplan.selectable(row)
@@ -1546,7 +1546,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
             plan.warnings.extend(clusters.drain_warnings(
                 config, [(t.vmid, t.name) for t in plan.targets],
                 {vmid: list(rows[vmid].get("tags") or []) for vmid in selected if vmid in rows},
-                schema.roles.defaults.get("updates", {}).get(clusters.DRAIN_VAR, False)))
+                setting(config, clusters.DRAIN_VAR)))
         if options.get("updates_snapshot") == "true":
             try:
                 problems = await asyncio.to_thread(snapshot_problems, api, selected)

@@ -2,7 +2,7 @@
 
 export type Theme = "dark" | "light" | "system";
 
-export type FieldKind = "text" | "int" | "bool" | "choice" | "list" | "secret";
+export type FieldKind = "text" | "multiline" | "int" | "bool" | "choice" | "list" | "secret";
 
 export interface FieldMeta {
   name: string;

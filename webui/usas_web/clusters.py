@@ -19,7 +19,7 @@ from .store import Cluster, Config
 MAX_CLUSTERS = 16
 # The Proxmox tag proxmox_vm gives a member's VM (K1): usas-k8s-<cluster>-<role>.
 TAG = re.compile(r"^usas-k8s-([a-z][a-z0-9-]{0,30})-(server|agent)\Z")
-# The fleet updates' drain setting for cluster members (roles/updates, K4); off where the role doesn't have it.
+# The fleet updates' drain of cluster members (roles/updates): the Updates page's setting, or a cluster's own.
 DRAIN_VAR = "updates_k8s_drain"
 
 
