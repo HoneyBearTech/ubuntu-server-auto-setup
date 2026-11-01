@@ -490,14 +490,16 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   the run, and an install schedule's update, succeeded; 1 otherwise; 2 for an unknown schedule).
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
-  passkeys belong to) and `USAS_PORT` ([web-ui.md](web-ui.md#settings)).
+  passkeys belong to), `USAS_PORT` and `USAS_SCHEDULER` (`on` or `off`, the updates schedules)
+  ([web-ui.md](web-ui.md#settings)).
 - **Sign-in**: the password, or passkeys (WebAuthn) added on the account page, with "Require a passkey" to
   turn the password off ([web-ui.md](web-ui.md#passkeys)).
 - **Files in `/data`**: `inventory/hosts.yml` and `inventory/group_vars/all/vault.yml` are an ordinary
   inventory and Vault (the CLI can use them with `--vault-password-file /data/.vault-pass`); the UI also
   keeps `ssh/`, `pve-ca.pem`, `ca-bundle.pem`, `auth.json`, `passkeys.json`, `status-token.json`, `webui.json`,
   `audit.jsonl` (one JSON object per line: `time`, `event`, `session`, `client`, then the event's fields;
-  rotated to `audit.jsonl.1` to `.3` at 5 MB) and `runs/` there
+  rotated to `audit.jsonl.1` to `.3` at 5 MB), `schedules.json` (the updates schedules, `0600`),
+  `updates/state.json` (each server's newest updates result), `updates/reports/` and `runs/` there
   ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
   (`webui_firewall_allow`, `webui_firewall_allow_host`, `webui_authorize_ui_key`; before 0.7.0 `webui_ufw_allow`
   and `webui_ufw_allow_host`, which the UI still reads).

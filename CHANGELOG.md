@@ -283,6 +283,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The cluster inventory for the updates playbook (`inventory/pve.usas_pve.yml`) stopped with
+  "'vault_pve_api_token_id' is undefined" when the API token was in the Vault next to the inventory
+  (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
+  default, `group_vars` aren't read while an inventory is parsed. It now reads them as the playbooks do. Found by
+  the v0.7.0 release checklist.
 - Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
   (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
   Found by the v0.7.0 release checklist.
@@ -323,6 +328,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Documentation
 
+- The fleet updates are argued through in the assurance case
+  ([docs/assurance-case.md](docs/assurance-case.md)): a web UI session held without the password is a threat
+  actor of its own, and new rows cover missing authorization for runs nobody watches (CWE-862) and the audit
+  log's updates and schedule entries (CWE-778). [docs/interfaces.md](docs/interfaces.md) lists `USAS_SCHEDULER`,
+  `schedules.json`, `updates/state.json` and the updates reports in `/data`, and the README says what the
+  updates playbook does.
 - The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
   USAS, Unattended Server Auto-Setup (the repository keeps its name), installing and hardening Ubuntu, Debian
   and RHEL-family servers, with a supported-versions badge row.
