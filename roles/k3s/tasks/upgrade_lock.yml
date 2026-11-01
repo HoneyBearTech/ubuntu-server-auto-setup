@@ -1,0 +1,81 @@
+---
+# Before an upgrade changes anything, on the cluster's first server (k3s_lock_host): every member must be a Ready
+# node, and the run takes the cluster's upgrade lock, a ConfigMap in kube-system that only one run can create (the
+# API refuses a second one), so two runs never upgrade the same cluster at once. upgrade_unlock.yml removes it once
+# every node is upgraded; a run that fails leaves it, for someone to look at the cluster first.
+- name: Read the nodes before the upgrade
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - nodes
+      - -o
+      - jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}
+  register: k3s_nodes_before
+  changed_when: false
+  check_mode: false
+
+- name: Fail unless every member is a Ready node
+  ansible.builtin.assert:
+    that: k3s_not_ready | length == 0
+    fail_msg: >-
+      Cluster {{ k3s_cluster }} isn't whole: {{ k3s_not_ready | join(', ') }} {{ 'is' if k3s_not_ready | length == 1
+      else 'are' }} not a Ready node. Upgrade it only when every member is Ready (sudo k3s kubectl get nodes on a
+      server).
+    quiet: true
+  vars:
+    k3s_not_ready: >-
+      {{ k3s_run_members | reject('in', k3s_nodes_before.stdout_lines | select('match', '.*=True$')
+         | map('regex_replace', '=True$', '') | list) | list }}
+
+- name: Name the run in the lock
+  ansible.builtin.set_fact:
+    k3s_lock_run: "{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}-{{ '%08x' | format(4294967295 | random) }}"
+
+- name: Take the cluster's upgrade lock
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - --namespace=kube-system
+      - create
+      - configmap
+      - "{{ k3s_upgrade_lock }}"
+      - --from-literal=run={{ k3s_lock_run }}
+      - --from-literal=release={{ k8s_version }}
+      - --from-literal=started={{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}
+  register: k3s_lock
+  changed_when: k3s_lock.rc == 0
+  failed_when: k3s_lock.rc != 0 and 'AlreadyExists' not in k3s_lock.stderr
+
+# What another run wrote, read back from the cluster: only the characters a release and a time have.
+- name: Read who holds the lock
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - --namespace=kube-system
+      - get
+      - configmap
+      - "{{ k3s_upgrade_lock }}"
+      - -o
+      - jsonpath={.data.release} {.data.started}
+  register: k3s_lock_holder
+  changed_when: false
+  failed_when: false
+  when: k3s_lock.rc != 0
+
+- name: Fail if another run holds the lock
+  ansible.builtin.fail:
+    msg: >-
+      Another upgrade of cluster {{ k3s_cluster }} holds its lock (kube-system/{{ k3s_upgrade_lock }}: to
+      {{ k3s_holder[0] | default('?') }}, started {{ k3s_holder[1] | default('?') }}). Wait for it to finish. If it
+      stopped without finishing, look at the cluster first (sudo k3s kubectl get nodes: a node may still be cordoned),
+      then remove the lock with sudo k3s kubectl --namespace=kube-system delete configmap {{ k3s_upgrade_lock }} on
+      a server and run the upgrade again.
+  vars:
+    k3s_holder: >-
+      {{ k3s_lock_holder.stdout | default('') | regex_replace('[^A-Za-z0-9.+:TZ -]', '') | truncate(80, true, '')
+         | split(' ') }}
+  when: k3s_lock.rc != 0

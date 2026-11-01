@@ -1,0 +1,14 @@
+---
+# From the server the node is drained from: the API answers on its address (k8s_api_vip), with the certificate
+# k3s signed for it. upgrade.yml checks this after handing the address over and after a server's upgrade.
+- name: Wait until the API answers on its address
+  ansible.builtin.uri:
+    url: https://{{ k8s_api_vip }}:{{ k3s_api_port }}/ping
+    ca_path: "{{ k3s_server_ca }}"
+    return_content: true
+  register: k3s_vip_ping
+  until: k3s_vip_ping.status | default(0) == 200 and k3s_vip_ping.content | default('') | trim == 'pong'
+  retries: 30
+  delay: 2
+  delegate_to: "{{ k3s_helper }}"
+  when: not ansible_check_mode

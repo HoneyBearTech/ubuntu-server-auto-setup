@@ -2,8 +2,11 @@
 # Builds the k3s clusters the inventory describes (k8s_<cluster>_servers and k8s_<cluster>_agents groups) on servers
 # the baseline has prepared (roles/kubernetes_node), and runs again without changing anything. Every member is
 # checked before any of them changes; each cluster's first server starts it, the other servers join one at a time
-# (each checking etcd's ports first), then the agents. It doesn't upgrade k3s: a member on another release is
-# refused. docs/interfaces.md ("Kubernetes clusters") describes it; make kubernetes.
+# (each checking etcd's ports first), then the agents. A member on another release is refused, unless the run is
+# an upgrade (--tags upgrade, on its own): then every member is checked the same way, the run takes the cluster's
+# lock, and moves the servers one at a time, then the agents one at a time, to k8s_version (drained, the API's
+# address handed to another server first, uncordoned once Ready). docs/interfaces.md ("Kubernetes clusters")
+# describes it; make kubernetes, make kubernetes-upgrade.
 
 - name: Check every member and install k3s
   hosts: k8s_*_servers:k8s_*_agents
@@ -33,6 +36,9 @@
       ansible.builtin.include_role:
         name: k3s
         tasks_from: start
+        apply:
+          tags: [install]
+      tags: [install]
       when: inventory_hostname == k3s_seed
 
 # One at a time, so etcd keeps its quorum while a server restarts and a new one joins a cluster that's whole.
@@ -47,6 +53,9 @@
       ansible.builtin.include_role:
         name: k3s
         tasks_from: join
+        apply:
+          tags: [install]
+      tags: [install]
       when: inventory_hostname != k3s_seed
 
 - name: Join the agents
@@ -59,6 +68,9 @@
       ansible.builtin.include_role:
         name: k3s
         tasks_from: join
+        apply:
+          tags: [install]
+      tags: [install]
 
 - name: Check every node and fetch the read-only kubeconfig
   hosts: k8s_*_servers
@@ -69,4 +81,73 @@
       ansible.builtin.include_role:
         name: k3s
         tasks_from: finish
+        apply:
+          tags: [install]
+      tags: [install]
       when: inventory_hostname == k3s_seed
+
+# An upgrade (--tags upgrade; a run without tags skips these plays): each cluster's lock first, so that no other
+# run upgrades it at the same time.
+- name: Take each cluster's upgrade lock
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Take the lock on the first server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: upgrade_lock
+        apply:
+          tags: [upgrade]
+      tags: [upgrade]
+      when: k3s_upgrading | bool and inventory_hostname == k3s_lock_host and k3s_upgrade_needed | bool
+        and not ansible_check_mode
+
+# One at a time, so that etcd keeps its quorum and only one node's pods move at once; servers first, as Kubernetes
+# allows agents one minor release behind the servers, never ahead.
+- name: Upgrade the servers, one at a time
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade the server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: upgrade
+        apply:
+          tags: [upgrade]
+      tags: [upgrade]
+      when: k3s_upgrading | bool
+
+- name: Upgrade the agents, one at a time
+  hosts: k8s_*_agents
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade the agent
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: upgrade
+        apply:
+          tags: [upgrade]
+      tags: [upgrade]
+      when: k3s_upgrading | bool
+
+- name: Release each cluster's upgrade lock
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Release the lock on the first server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: upgrade_unlock
+        apply:
+          tags: [upgrade]
+      tags: [upgrade]
+      when: inventory_hostname == k3s_lock_host and k3s_lock_run is defined
