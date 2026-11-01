@@ -31,11 +31,15 @@ INV=(-i tests/inventory/k3s.yml -e "@$TEST_TMP/tokens.yml")
 IMAGE="usas-test-srv:$OS"
 NET=usas-k3s-test
 NODES=(k3s-s1 k3s-s2 k3s-s3 k3s-a1)
-declare -A ADDR=([k3s-s1]=172.29.30.11 [k3s-s2]=172.29.30.12 [k3s-s3]=172.29.30.13 [k3s-a1]=172.29.30.21)
-declare -A PORT=([k3s-s1]=2241 [k3s-s2]=2242 [k3s-s3]=2243 [k3s-a1]=2244)
-VIP=172.29.30.100
+# Each member's address on the test network and its local SSH port (functions, not associative arrays, so macOS's
+# bash 3.2 runs this too).
+addr() { case "$1" in k3s-s1) echo 10.217.30.11;; k3s-s2) echo 10.217.30.12;; k3s-s3) echo 10.217.30.13;; k3s-a1) echo 10.217.30.21;; esac; }
+port() { case "$1" in k3s-s1) echo 2241;; k3s-s2) echo 2242;; k3s-s3) echo 2243;; k3s-a1) echo 2244;; esac; }
+VIP=10.217.30.100
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
 
+# K8S_TEST_KEEP=1 leaves the containers, their volumes and the network after a failure, to look inside
+# (docker exec k3s-s1 k3s kubectl get pods -A); the next run removes them.
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -46,11 +50,13 @@ cleanup() {
       fi
     done
   fi
-  for node in "${NODES[@]}"; do
-    docker rm -f "$node" >/dev/null 2>&1 || true
-    docker volume rm "$node-rancher" >/dev/null 2>&1 || true
-  done
-  docker network rm "$NET" >/dev/null 2>&1 || true
+  if [ "$status" -eq 0 ] || [ "${K8S_TEST_KEEP:-}" != 1 ]; then
+    for node in "${NODES[@]}"; do
+      docker rm -f "$node" >/dev/null 2>&1 || true
+      docker volume rm "$node-rancher" >/dev/null 2>&1 || true
+    done
+    docker network rm "$NET" >/dev/null 2>&1 || true
+  fi
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
 }
 trap cleanup EXIT
@@ -100,26 +106,28 @@ printf 'vault_k8s_token_ci: %s\nvault_k8s_agent_token_ci: %s\n' "$(openssl rand 
   >"$TEST_TMP/tokens.yml"
 docker build -q -t "$IMAGE" --build-arg OS="$OS" --target target tests/images/ubuntu-target >/dev/null
 docker network rm "$NET" >/dev/null 2>&1 || true
-docker network create --subnet 172.29.30.0/24 --gateway 172.29.30.1 "$NET" >/dev/null
+docker network create --subnet 10.217.30.0/24 --gateway 10.217.30.1 "$NET" >/dev/null
 : >"$TEST_TMP/known_hosts"
 for node in "${NODES[@]}"; do
   docker rm -f "$node" >/dev/null 2>&1 || true
   docker volume rm "$node-rancher" >/dev/null 2>&1 || true
-  # k3s' overlayfs snapshotter needs its data on a volume, not on the container's own overlay (K0).
-  docker run -d --name "$node" --hostname "$node" --network "$NET" --ip "${ADDR[$node]}" --privileged \
-    --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$node-rancher:/var/lib/rancher" \
-    --tmpfs /run --tmpfs /run/lock -p "127.0.0.1:${PORT[$node]}:22" "$IMAGE" >/dev/null
+  # k3s' overlayfs snapshotter needs its data on a volume, not on the container's own overlay (K0). Each node gets a
+  # cgroup namespace of its own, as k3d does: with the host's (--cgroupns=host, as the baseline tests use), the four
+  # kubelets share one cgroup tree and kill each other's pods ("Pod sandbox changed") whenever another node starts.
+  docker run -d --name "$node" --hostname "$node" --network "$NET" --ip "$(addr "$node")" --privileged \
+    --cgroupns=private -v "$node-rancher:/var/lib/rancher" \
+    --tmpfs /run --tmpfs /run/lock -p "127.0.0.1:$(port "$node"):22" "$IMAGE" >/dev/null
   docker exec -i "$node" sh -c 'cat > /home/sysadmin/.ssh/authorized_keys && chown sysadmin: /home/sysadmin/.ssh/authorized_keys && chmod 600 /home/sysadmin/.ssh/authorized_keys' \
     <"$TEST_TMP/id_ed25519.pub"
   docker exec "$node" sh -c "echo '127.0.1.1 $node' >> /etc/hosts"
 done
 for node in "${NODES[@]}"; do
   for _ in $(seq 1 60); do
-    ssh-keyscan -T 2 -p "${PORT[$node]}" 127.0.0.1 >"$TEST_TMP/scan" 2>/dev/null && [ -s "$TEST_TMP/scan" ] && break
+    ssh-keyscan -T 2 -p "$(port "$node")" 127.0.0.1 >"$TEST_TMP/scan" 2>/dev/null && [ -s "$TEST_TMP/scan" ] && break
     sleep 1
   done
-  [ -s "$TEST_TMP/scan" ] || { echo "ERROR: no SSH on port ${PORT[$node]}" >&2; exit 1; }
-  sed "s/^127.0.0.1/[127.0.0.1]:${PORT[$node]}/" "$TEST_TMP/scan" >>"$TEST_TMP/known_hosts"
+  [ -s "$TEST_TMP/scan" ] || { echo "ERROR: no SSH on port $(port "$node")" >&2; exit 1; }
+  sed "s/^127.0.0.1/[127.0.0.1]:$(port "$node")/" "$TEST_TMP/scan" >>"$TEST_TMP/known_hosts"
   for _ in $(seq 1 120); do docker exec "$node" test ! -e /run/nologin && break; sleep 1; done
 done
 family="$(docker exec k3s-s1 sh -c '. /etc/os-release && case "$ID" in ubuntu|debian) echo debian;; *) echo rhel;; esac')"
@@ -157,11 +165,11 @@ cool_down
 
 step "a server that the others can't reach on etcd's peer port is stopped before it joins, with the hosts named"
 if [ "$family" = rhel ]; then
-  docker exec k3s-s2 sh -c "firewall-cmd -q --remove-rich-rule='rule family=\"ipv4\" source address=\"${ADDR[k3s-s1]}\" port port=\"2379-2380\" protocol=\"tcp\" accept'"
+  docker exec k3s-s2 sh -c "firewall-cmd -q --remove-rich-rule='rule family=\"ipv4\" source address=\"$(addr k3s-s1)\" port port=\"2379-2380\" protocol=\"tcp\" accept'"
 else
-  docker exec k3s-s2 ufw delete allow from "${ADDR[k3s-s1]}" to any port 2379:2380 proto tcp >/dev/null
+  docker exec k3s-s2 ufw delete allow from "$(addr k3s-s1)" to any port 2379:2380 proto tcp >/dev/null
 fi
-refused "nothing answered from k3s-s1 to k3s-s2 (${ADDR[k3s-s2]}) port 2380" playbooks/kubernetes.yml
+refused "nothing answered from k3s-s1 to k3s-s2 ($(addr k3s-s2)) port 2380" playbooks/kubernetes.yml
 docker exec k3s-s2 test ! -e /var/lib/rancher/k3s/server/db/etcd \
   || { echo "ERROR: k3s-s2 joined although the check failed" >&2; exit 1; }
 cool_down
