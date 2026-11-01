@@ -42,11 +42,13 @@ export function Notice({ notice, children }: { notice: NoticeT; children?: React
 }
 
 // The problems with a form, at its top. It takes the focus when it appears, so screen readers read it and
-// keyboard users start there; each problem links to its field. label names a field for its error key. id tells
-// two forms on one page apart.
-export function ErrorSummary({ errors, label, id = "error-summary" }: {
+// keyboard users start there; each problem links to its field. label names a field for its error key, and target
+// gives the ID of the field it links to (by default f-<key>, or the key itself with a label). id tells two forms
+// on one page apart.
+export function ErrorSummary({ errors, label, target, id = "error-summary" }: {
   errors: Errors;
   label?: (key: string) => string;
+  target?: (key: string) => string;
   id?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -68,7 +70,7 @@ export function ErrorSummary({ errors, label, id = "error-summary" }: {
       <h2>{entries.length === 1 ? "There is a problem" : `There are ${entries.length} problems`}</h2>
       <ul>
         {entries.map(([key, message]) => {
-          const id = label ? key : `f-${key}`;
+          const id = target ? target(key) : label ? key : `f-${key}`;
           return (
             <li key={key}>
               <a href={`#${id}`} onClick={jump(id)}>{label ? `${label(key)}: ${message}` : message}</a>

@@ -511,6 +511,13 @@ What it does to protect them:
   run passes only four allowlisted variables (`updates_scope`, `updates_reboot`, `updates_snapshot`,
   `updates_ignore_window`), each one of its fixed values and written `!unsafe`; a VM's Proxmox tags and HA
   state only order the waves.
+- **Kubernetes join tokens are write-only**: typed into a password field or made by the server
+  (`secrets.token_hex(32)`) and shown once, they go into the Vault and never come back to the browser; the page
+  empties a typed token as soon as the form is sent, and the audit log records only which token was set. Replacing
+  a saved token takes a tick (a running cluster needs k3s' own token rotation first). The UI never shows or offers
+  a kubeconfig and doesn't talk to a cluster: `kubernetes.yml` runs only after a passing check of the same
+  cluster, version and members, and an upgrade's confirmation is its version typed again. A cluster's API address
+  and LoadBalancer pool are never taken as a VM's address (also not any `/32` address a guest reports).
 - **What servers report about their updates is untrusted** too: the run's page keeps only package names that
   look like one, at most 5,000 per list, and shortened text, and shows it as text.
 - **What guests report is untrusted.** The VMs page shows what each VM's guest agent says (its addresses,
@@ -578,7 +585,7 @@ For reference:
 | `/api/theme` | POST | Remember the theme (`dark`, `light` or `system`) for this browser. |
 | `/api/status` | GET | The summary for dashboards ([interfaces.md](interfaces.md#the-status-api)). No sign-in and no session: it needs the status token as `Authorization: Bearer`, and answers 404 until one exists. |
 | `/api/status-token/create`, `/api/status-token/revoke` | POST | Make (or replace) the status token, which needs the current password and is answered once with the token; revoke it. |
-| `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
+| `/api/overview`, `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/clusters`, `/api/servers`, `/api/hardening`, `/api/run`, `/api/runs`, `/api/runs/<id>` | GET | A page's data: the fields (label, help, default, variable), the saved values (never a secret), the steps, the runs. |
 | `/api/vms` | GET | The cluster's VMs and containers with their status, use, address and its source, whether the playbooks support them and whether they can be selected, and their pinned host keys. Answers 409 until the Proxmox page has the API host and token, and 502 if the cluster can't be listed. |
 | `/api/vms/hostkey` | POST | A VM's host keys: `scan` (address and port), `trust` (the scanned keys, with `confirm`), `forget`, or `test` the login. |
 | `/api/vms/plan` | POST | Check the selected VMs (`vmid`, up to 25) and their settings (`vm-<vmid>-address`, `-port`, `-user`, `-ufw`, `-hostname`, `-override`) with a `preset` (and `tags` for custom; `updates` with `updates-scope`, `updates-reboot`, `updates-snapshot` and `updates-window` for the updates playbook), and answer the plan to review with a plan ID that lasts 10 minutes, or the errors per field. |
@@ -587,10 +594,14 @@ For reference:
 | `/api/vms/snapshots` | POST | Whether each selected VM (`vmid`) can have a snapshot before its updates: the token's `VM.Snapshot` on it and Proxmox's check of its disks, with the reason when it can't. |
 | `/api/vms/run` | POST | Run a reviewed plan (`plan_id`) in check mode (`mode=check`). |
 | `/api/vms/apply` | POST | Run a VMs page check run's plan for real (`run_id`, `confirm`): only if that check passed in the last 30 minutes, wasn't run for real yet, no settings were saved since and the pinned keys and the updates choices are the same. |
+| `/api/clusters` | POST | Save the Kubernetes clusters (`cluster_count`, `clusters-<n>-<field>`, `clusters-<n>-original` for the name it was loaded with) and the join tokens typed in (`clusters-<n>-k8s_token`, `-k8s_agent_token`; replacing a saved one needs `-k8s_token__replace`). A token is never sent back. |
+| `/api/clusters/token` | POST | Make a join token (`cluster`, `token`: `k8s_token` or `k8s_agent_token`; `replace` over a saved one), save it in the Vault and answer it this once (`Cache-Control: no-store`). |
+| `/api/kubernetes/run` | POST | Run `kubernetes.yml` for a cluster (`cluster`) with `action` `install` or `upgrade`, in check mode. |
+| `/api/kubernetes/apply` | POST | Run a Kubernetes check run for real (`run_id`, `confirm`, and for an upgrade `confirm_version`, the version typed again): only if that check passed in the last 30 minutes, wasn't run for real yet, and no settings were saved since. |
 | `/audit.jsonl` | GET | The audit log as a download (signed in). |
 | `/api/runs/<id>/hosts` | GET | Each host's result so far (the summary callback's), for the run's page; for the updates playbook also each server's result (`updates`). |
 | `/api/proxmox`, `/api/ssh`, `/api/defaults`, `/api/servers`, `/api/hardening` | POST | Save (or test, preview, scan…) with the form's `action`; errors come back by field name with status 422. |
-| `/api/run` | POST | Start a run. |
+| `/api/run` | POST | Start a run (not `kubernetes`, which starts with `/api/kubernetes/run`). |
 | `/api/runs/<id>/stop` | POST | Interrupt the run. |
 | `/ssh/id_ed25519.pub` | GET | The UI's public key, as a download. |
 | `/runs/<id>/log` | GET | The run's log as text. |

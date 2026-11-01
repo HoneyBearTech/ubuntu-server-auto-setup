@@ -40,15 +40,17 @@ function Required({ field }: { field: FieldMeta }) {
   return field.required && !field.saved ? <span className="req"> (required)</span> : null;
 }
 
-const WIDE = new Set(["list"]);
+const WIDE = new Set(["list", "multiline"]);
 
-export function Field({ field, values, error, list }: {
+export function Field({ field, values, error, list, prefix = "" }: {
   field: FieldMeta;
   values: Values;
   error?: string;
   list?: string; // the id of a <datalist> of suggestions
+  prefix?: string; // before the name, for a form with several of the same fields (clusters-0-)
 }) {
-  const id = fieldId(field.name);
+  const name = prefix + field.name;
+  const id = fieldId(name);
   const value = values[field.name];
   const invalid = error ? true : undefined;
 
@@ -56,7 +58,7 @@ export function Field({ field, values, error, list }: {
     return (
       <div className="check-field">
         <div className="check">
-          <input type="checkbox" id={id} name={field.name} defaultChecked={value === true}
+          <input type="checkbox" id={id} name={name} defaultChecked={value === true}
                  aria-describedby={describedBy(id, error)} aria-invalid={invalid} />
           <label htmlFor={id}>{field.label}</label>
         </div>
@@ -66,11 +68,32 @@ export function Field({ field, values, error, list }: {
     );
   }
 
+  if (field.kind === "list" && field.choices) {
+    // A set of the choices: one checkbox each, in a group named by the label.
+    const chosen = String(value ?? "").split("\n");
+    return (
+      <fieldset className="field wide check-group" id={id} tabIndex={-1} aria-describedby={describedBy(id, error)}>
+        <legend>{field.label}</legend>
+        <div className="check-row">
+          {field.choices.map((choice) => (
+            <div className="check" key={choice}>
+              <input type="checkbox" id={`${id}-${choice}`} name={name} value={choice}
+                     defaultChecked={chosen.includes(choice)} />
+              <label htmlFor={`${id}-${choice}`}>{field.choice_labels?.[choice] ?? choice}</label>
+            </div>
+          ))}
+        </div>
+        <Help field={field} id={id} />
+        <FieldError id={id} error={error} />
+      </fieldset>
+    );
+  }
+
   let control: ReactNode;
   if (field.kind === "choice") {
     control = (
       <div className="select">
-        <select id={id} name={field.name} defaultValue={String(value ?? "")} aria-describedby={describedBy(id, error)}
+        <select id={id} name={name} defaultValue={String(value ?? "")} aria-describedby={describedBy(id, error)}
                 aria-invalid={invalid}>
           {(field.choices ?? []).map((choice) => (
             <option key={choice} value={choice}>{field.choice_labels?.[choice] ?? choice}</option>
@@ -78,23 +101,23 @@ export function Field({ field, values, error, list }: {
         </select>
       </div>
     );
-  } else if (field.kind === "list") {
-    const rows = field.name === "admin_extra_ssh_keys" || field.name === "firewall_allow" ? 4 : 3;
+  } else if (field.kind === "list" || field.kind === "multiline") {
+    const rows = field.kind === "multiline" ? 6 : field.name === "admin_extra_ssh_keys" || field.name === "firewall_allow" ? 4 : 3;
     control = (
-      <textarea id={id} name={field.name} rows={rows} spellCheck={false} defaultValue={String(value ?? "")}
+      <textarea id={id} name={name} rows={rows} spellCheck={false} defaultValue={String(value ?? "")}
                 aria-describedby={describedBy(id, error)} aria-invalid={invalid} />
     );
   } else if (field.kind === "secret") {
     control = (
       <>
-        <input type="password" id={id} name={field.name} autoComplete="new-password" spellCheck={false}
+        <input type="password" id={id} name={name} autoComplete="new-password" spellCheck={false}
                aria-describedby={describedBy(id, error, [`${id}-saved`])} aria-invalid={invalid} />
         <p className="saved" id={`${id}-saved`}>
           {field.saved ? "A value is saved. Leave this empty to keep it." : "Not set yet."}
         </p>
         {field.saved && !field.required ? (
           <div className="check">
-            <input type="checkbox" id={`${id}-clear`} name={`${field.name}__clear`} />
+            <input type="checkbox" id={`${id}-clear`} name={`${name}__clear`} />
             <label htmlFor={`${id}-clear`}>Remove the saved value</label>
           </div>
         ) : null}
@@ -102,7 +125,7 @@ export function Field({ field, values, error, list }: {
     );
   } else {
     control = (
-      <input type="text" id={id} name={field.name} defaultValue={String(value ?? "")} className="mono"
+      <input type="text" id={id} name={name} defaultValue={String(value ?? "")} className="mono"
              inputMode={field.kind === "int" ? "numeric" : undefined} list={list} spellCheck={false}
              autoComplete="off" aria-describedby={describedBy(id, error)} aria-invalid={invalid} />
     );
