@@ -1,0 +1,97 @@
+---
+# A member other than the first server joins the cluster. playbooks/kubernetes.yml runs this on one server at a time,
+# then on the agents. A server that hasn't joined yet first checks etcd's and the API's ports in both directions
+# with every server already in the cluster, so a firewall in the way stops the run with the hosts named instead of
+# leaving etcd's join hanging.
+- name: Check that the API answers where the member joins
+  ansible.builtin.wait_for:
+    host: "{{ k3s_join_url | urlsplit('hostname') }}"
+    port: "{{ k3s_api_port }}"
+    timeout: 30
+  register: k3s_join_reach
+  ignore_errors: true
+  when: not ansible_check_mode
+
+- name: Fail unless the API answers
+  ansible.builtin.assert:
+    that: k3s_join_reach is not failed
+    fail_msg: >-
+      {{ inventory_hostname }} can't reach the cluster's API at {{ k3s_join_url }}. Check that k3s runs on
+      {{ k3s_seed }}{{ ' and that kube-vip holds ' ~ k8s_api_vip if k8s_api_vip else '' }}, and that the firewall on
+      the servers allows {{ k3s_api_port }}/tcp from {{ inventory_hostname }} (the baseline's kubernetes_node role).
+    quiet: true
+
+- name: Check etcd's ports with the servers already in the cluster
+  when: k3s_role == 'server' and not k3s_etcd.stat.exists and not ansible_check_mode
+  vars:
+    k3s_checks: "{{ k3s_members | k3s_join_checks(inventory_hostname, k3s_started) }}"
+    k3s_inbound: "{{ k3s_checks | selectattr('to', 'eq', inventory_hostname) | list }}"
+  block:
+    # Something has to listen on the peer port for the others to reach it: this, until each has connected once.
+    - name: Listen on etcd's peer port for the other servers
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
+          - -c
+          - |
+            import socket, sys
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("0.0.0.0", 2380))
+            s.listen(16)
+            s.settimeout(60)
+            for _ in range(int(sys.argv[1])):
+                s.accept()[0].close()
+          - "{{ k3s_inbound | length }}"
+      async: 90
+      poll: 0
+      register: k3s_listener
+      changed_when: false
+      when: k3s_inbound | length > 0
+
+    - name: Reach the other servers' etcd and API ports
+      ansible.builtin.wait_for:
+        host: "{{ item.address }}"
+        port: "{{ item.port }}"
+        timeout: 5
+      loop: "{{ k3s_checks | selectattr('from', 'eq', inventory_hostname) | list }}"
+      loop_control:
+        label: "{{ item.to }} ({{ item.address }}) port {{ item.port }}"
+      register: k3s_outbound
+      ignore_errors: true
+
+    - name: Reach this server's etcd peer port from the others
+      ansible.builtin.wait_for:
+        host: "{{ item.address }}"
+        port: "{{ item.port }}"
+        timeout: 5
+      loop: "{{ k3s_inbound }}"
+      loop_control:
+        label: from {{ item.from }}
+      delegate_to: "{{ item.from }}"
+      register: k3s_inbound_result
+      ignore_errors: true
+
+    - name: Wait for the listener to stop
+      ansible.builtin.async_status:
+        jid: "{{ k3s_listener.ansible_job_id }}"
+      register: k3s_listener_done
+      until: k3s_listener_done.finished
+      retries: 40
+      delay: 2
+      failed_when: false
+      when: k3s_inbound | length > 0
+
+    - name: Fail unless every port answered
+      ansible.builtin.assert:
+        that: k3s_unreached | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} can't join cluster {{ k3s_cluster }}: nothing answered {{ k3s_unreached | join('; ') }}.
+          Check the firewall on both servers (the baseline's kubernetes_node role allows these between members).
+        quiet: true
+      vars:
+        k3s_unreached: >-
+          {{ (k3s_outbound.results | default([]) + k3s_inbound_result.results | default([])) | k3s_unreached }}
+
+- name: Start k3s and wait until the node is Ready
+  ansible.builtin.include_tasks: start.yml

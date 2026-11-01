@@ -1,0 +1,92 @@
+---
+# k3s on a member, not started yet: the binary (only if it matches the catalog's SHA-256: get_url checks the
+# download before it replaces anything), its unit, its config.yaml, and on a server the manifests k3s applies.
+- name: Install the k3s binary, checked against the catalog
+  ansible.builtin.get_url:
+    url: "{{ k3s_release.binaries[k3s_arch].url }}"
+    checksum: sha256:{{ k3s_release.binaries[k3s_arch].sha256 }}
+    dest: "{{ k3s_binary }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: k3s_binary_install
+
+# k3s-selinux labels the binary container_runtime_exec_t; a new file needs labelling again.
+- name: Label the binary for SELinux
+  ansible.builtin.command:
+    argv: [restorecon, -v, "{{ k3s_binary }}"]
+  register: k3s_restorecon
+  changed_when: k3s_restorecon.stdout | length > 0
+  when: k3s_selinux | bool and k3s_binary_install is changed and not ansible_check_mode
+
+- name: Install k3s' service
+  ansible.builtin.template:
+    src: k3s.service.j2
+    dest: /etc/systemd/system/{{ k3s_service }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: k3s_unit
+
+- name: Create k3s' configuration directory
+  ansible.builtin.file:
+    path: "{{ k3s_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# It holds the join tokens: no_log, and no diff.
+- name: Write k3s' configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ k3s_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+  no_log: true
+  register: k3s_config_write
+  vars:
+    k3s_config_data: >-
+      {{ {'role': k3s_role, 'name': inventory_hostname, 'seed': inventory_hostname == k3s_seed, 'selinux': k3s_selinux,
+          'address': k3s_members | selectattr('host', 'eq', inventory_hostname) | map(attribute='address') | first}
+         | k3s_config({'join_url': k3s_join_url, 'vip': k8s_api_vip, 'tls_san': k8s_tls_san | map('string') | list,
+                       'disable': k8s_disable, 'taint': k8s_server_taint | bool,
+                       'encryption': k8s_secrets_encryption | bool, 'flannel_backend': k8s_flannel_backend,
+                       'token': lookup('ansible.builtin.vars', k3s_token_var),
+                       'agent_token': lookup('ansible.builtin.vars', k3s_agent_token_var)}) }}
+
+- name: Write the manifests k3s applies on the server
+  when: k3s_role == 'server'
+  vars:
+    k3s_manifests_on: >-
+      {{ (k3s_manifest_files.kube_vip if k8s_api_vip else [])
+         + (k3s_manifest_files.cloud_provider if k8s_lb_pool else [])
+         + (k3s_manifest_files.readonly if k8s_fetch_readonly_kubeconfig | bool else []) }}
+  block:
+    - name: Create the manifests directory
+      ansible.builtin.file:
+        path: "{{ k3s_manifests_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    # kube-vip and its cloud provider with k8s_api_vip and k8s_lb_pool, the read-only account with
+    # k8s_fetch_readonly_kubeconfig. Every server has the same files, so the cluster keeps them without the first.
+    - name: Write the manifests that are on
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ k3s_manifests_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ k3s_manifests_on }}"
+
+    # k3s stops applying a manifest that's removed; what it made stays until it's deleted with k3s kubectl delete.
+    - name: Remove the manifests that are off
+      ansible.builtin.file:
+        path: "{{ k3s_manifests_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ k3s_manifest_files.values() | flatten | difference(k3s_manifests_on) }}"

@@ -1,0 +1,44 @@
+---
+# The groups of a cluster's members, as roles/kubernetes_node's k8s_node_group_pattern.
+k3s_group_pattern: '^k8s_([a-z][a-z0-9-]{0,30})_(servers|agents)\Z'
+# Addresses (a member's, the VIP) and the LoadBalancer pool: IPv4 only, nothing that could add a key to the config.
+# tests/fuzz/ reads these from here.
+k3s_ipv4_pattern: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\Z'
+k3s_pool_pattern: >-
+  ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(/([0-9]|[12][0-9]|3[0-2])|-((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))\Z
+# A node's name in Kubernetes is its inventory name (a DNS label), and an extra certificate name a DNS name.
+k3s_node_name_pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\Z'
+k3s_san_pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*\Z'
+k3s_interface_pattern: '^[A-Za-z0-9_.-]{1,15}\Z'
+# A join token: what openssl rand -hex 32 makes, or another long random string of letters and digits.
+k3s_token_pattern: '^[A-Za-z0-9]{32,128}\Z'
+k3s_version_pattern: '^v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+\Z'
+k3s_disable_choices: [servicelb, traefik, local-storage, metrics-server]
+k3s_flannel_backends: [vxlan, wireguard-native]
+
+# The CPU architectures the catalog has binaries for, by Ansible's name for them.
+k3s_architectures:
+  x86_64: amd64
+  aarch64: arm64
+
+k3s_binary: /usr/local/bin/k3s
+k3s_config_dir: /etc/rancher/k3s
+k3s_config_file: /etc/rancher/k3s/config.yaml
+# k3s applies every file here on a server, and keeps them applied.
+k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+# A server that has joined (or started) a cluster has etcd's data here.
+k3s_etcd_dir: /var/lib/rancher/k3s/server/db/etcd
+k3s_server_ca: /var/lib/rancher/k3s/server/tls/server-ca.crt
+# The service is k3s on a server and k3s-agent on an agent, as upstream's installer names them.
+k3s_services:
+  server: k3s
+  agent: k3s-agent
+# The manifests the role writes to k3s_manifests_dir, by the setting that turns each on.
+k3s_manifest_files:
+  kube_vip: [usas-kube-vip-rbac.yaml, usas-kube-vip.yaml]
+  cloud_provider: [usas-kube-vip-cloud-provider.yaml]
+  readonly: [usas-readonly.yaml]
+# The read-only ServiceAccount and its token's Secret.
+k3s_readonly_account: usas-readonly
+# The API's port, on every server and the VIP.
+k3s_api_port: 6443

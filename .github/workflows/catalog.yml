@@ -7,7 +7,9 @@ name: OS catalog
 # or its keys, a pin that fails fails the check. Weekly, it opens an issue (or updates the open one) when a pin
 # fails or a vendor has a newer build, and closes it once the catalog checks out again; the maintainer then runs
 # make catalog and opens a pull request. It's an issue rather than a pull request: one opened with this workflow's
-# token wouldn't run the other checks, and an app's token would be another secret.
+# token wouldn't run the other checks, and an app's token would be another secret. tools/update_k3s_catalog.py
+# does the same for the k3s catalog (roles/k3s/vars/catalog.yml: k3s' checksums, kube-vip's digests), in the same
+# issue.
 on:  # yamllint disable-line rule:truthy
   schedule:
     - cron: "41 5 * * 1" # weekly, Monday 05:41 UTC
@@ -17,6 +19,8 @@ on:  # yamllint disable-line rule:truthy
       - "roles/os_catalog/vars/catalog.yml"
       - "tools/update_os_catalog.py"
       - "tools/os-catalog-keys/**"
+      - "roles/k3s/vars/catalog.yml"
+      - "tools/update_k3s_catalog.py"
       - ".github/workflows/catalog.yml"
 
 permissions:
@@ -42,12 +46,21 @@ jobs:
         # On the weekly run the issue reports a failure; on a pull request it fails the check.
         continue-on-error: ${{ github.event_name != 'pull_request' }}
 
+      # GitHub's API and GHCR only; the token (read-only here) raises the API's rate limit.
+      - name: Check the k3s catalog against upstream
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/update_k3s_catalog.py --check --report "$RUNNER_TEMP/k3s-catalog-report.md"
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
+
       - name: Keep the report for the issue
         if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: catalog-report
-          path: ${{ runner.temp }}/catalog-report.md
+          path: |
+            ${{ runner.temp }}/catalog-report.md
+            ${{ runner.temp }}/k3s-catalog-report.md
           if-no-files-found: error
           retention-days: 7
 
@@ -71,14 +84,22 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TITLE: "OS catalog: refresh needed"
         run: |
+          # Both catalogs' findings in one issue, a blank line between them; empty if neither found anything.
+          : > report.md
+          for part in catalog-report.md k3s-catalog-report.md; do
+            if [ -s "$part" ]; then
+              if [ -s report.md ]; then echo >> report.md; fi
+              cat "$part" >> report.md
+            fi
+          done
           number="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
             --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
-          if [ -s catalog-report.md ]; then
+          if [ -s report.md ]; then
             if [ -n "$number" ]; then
-              gh issue edit "$number" --body-file catalog-report.md
+              gh issue edit "$number" --body-file report.md
             else
-              gh issue create --title "$TITLE" --body-file catalog-report.md
+              gh issue create --title "$TITLE" --body-file report.md
             fi
           elif [ -n "$number" ]; then
-            gh issue close "$number" --comment "Every pinned image checks out again, and none has a newer build."
+            gh issue close "$number" --comment "Every pin checks out again, and nothing upstream is newer."
           fi

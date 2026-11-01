@@ -1,0 +1,72 @@
+---
+# Builds the k3s clusters the inventory describes (k8s_<cluster>_servers and k8s_<cluster>_agents groups) on servers
+# the baseline has prepared (roles/kubernetes_node), and runs again without changing anything. Every member is
+# checked before any of them changes; each cluster's first server starts it, the other servers join one at a time
+# (each checking etcd's ports first), then the agents. It doesn't upgrade k3s: a member on another release is
+# refused. docs/interfaces.md ("Kubernetes clusters") describes it; make kubernetes.
+
+- name: Check every member and install k3s
+  hosts: k8s_*_servers:k8s_*_agents
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Connect on the SSH port that answers
+      ansible.builtin.import_tasks: tasks/ssh_port.yml
+
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: tasks/classic_sudo.yml
+
+    - name: Gather facts
+      ansible.builtin.setup:
+      tags: [always]
+  roles:
+    - role: k3s
+
+- name: Start each cluster's first server
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Start k3s on the first server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: start
+      when: inventory_hostname == k3s_seed
+
+# One at a time, so etcd keeps its quorum while a server restarts and a new one joins a cluster that's whole.
+- name: Join the other servers, one at a time
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Join the server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: join
+      when: inventory_hostname != k3s_seed
+
+- name: Join the agents
+  hosts: k8s_*_agents
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Join the agent
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: join
+
+- name: Check every node and fetch the read-only kubeconfig
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check the cluster from its first server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: finish
+      when: inventory_hostname == k3s_seed

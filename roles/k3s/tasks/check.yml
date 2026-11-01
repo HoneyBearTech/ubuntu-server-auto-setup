@@ -1,0 +1,184 @@
+---
+# Which cluster the member is in and as what, the other members, the release, the tokens and the cluster's settings:
+# every value checked on every member before anything changes (playbooks/kubernetes.yml stops on the first failure).
+- name: Read the k3s catalog
+  ansible.builtin.include_vars: catalog.yml
+
+- name: Find the member's cluster
+  ansible.builtin.set_fact:
+    k3s_groups: "{{ group_names | select('match', k3s_group_pattern) | list }}"
+
+- name: Check that the member is in one Kubernetes group
+  ansible.builtin.assert:
+    that: k3s_groups | length == 1
+    fail_msg: >-
+      {{ inventory_hostname }} may be in only one k8s_<cluster>_servers or k8s_<cluster>_agents group, not
+      {{ k3s_groups | join(' and ') if k3s_groups else 'none' }}.
+    quiet: true
+
+- name: Note the cluster and its members
+  ansible.builtin.set_fact:
+    k3s_cluster: "{{ k3s_match[0] }}"
+    k3s_role: "{{ k3s_match[1] | regex_replace('s$', '') }}"
+    k3s_members: "{{ k3s_match[0] | k3s_members(groups, hostvars) }}"
+    k3s_service: "{{ k3s_services[k3s_match[1] | regex_replace('s$', '')] }}"
+    # The Vault's names for the cluster's tokens: variable names have no "-".
+    k3s_token_var: vault_k8s_token_{{ k3s_match[0] | replace('-', '_') }}
+    k3s_agent_token_var: vault_k8s_agent_token_{{ k3s_match[0] | replace('-', '_') }}
+  vars:
+    k3s_match: "{{ k3s_groups[0] | regex_search(k3s_group_pattern, '\\1', '\\2') }}"
+
+# kubernetes.yml joins the servers in order, so it needs all of them; agents can be added with --limit.
+- name: Check the members
+  ansible.builtin.assert:
+    that:
+      - k3s_servers | length > 0
+      - k3s_bad_address | length == 0
+      - k3s_members | map(attribute='address') | unique | length == k3s_members | length
+      - k3s_bad_name | length == 0
+      - k3s_servers | difference(ansible_play_hosts_all) | length == 0
+    fail_msg: >-
+      Cluster {{ k3s_cluster }} needs at least one server (k8s_{{ k3s_cluster }}_servers), every member a name that
+      can be a Kubernetes node's (lower-case letters, digits and "-")
+      {{- (', not ' ~ k3s_bad_name | join(', ')) if k3s_bad_name else '' }}, and an IPv4 address of its own, all
+      different (k8s_node_ip, or ansible_host){{ (', not ' ~ k3s_bad_address | join(', ')) if k3s_bad_address else '' }}.
+      {{ ('Run it for every server of the cluster: ' ~ k3s_servers | difference(ansible_play_hosts_all) | join(', ')
+      ~ " isn't in this run.") if k3s_servers | difference(ansible_play_hosts_all) else '' }}
+    quiet: true
+  vars:
+    k3s_servers: "{{ k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host') | list }}"
+    k3s_bad_address: "{{ k3s_members | rejectattr('address', 'match', k3s_ipv4_pattern) | map(attribute='host') | list }}"
+    k3s_bad_name: "{{ k3s_members | rejectattr('host', 'match', k3s_node_name_pattern) | map(attribute='host') | list }}"
+
+- name: Check the cluster's settings
+  ansible.builtin.assert:
+    that:
+      - k8s_version is string and k8s_version is match(k3s_version_pattern)
+      - k8s_version in k3s_catalog | map(attribute='version')
+      - ansible_facts.architecture in k3s_architectures
+      - k8s_api_vip is string and (k8s_api_vip == '' or k8s_api_vip is match(k3s_ipv4_pattern))
+      - k8s_api_vip not in k3s_members | map(attribute='address')
+      - k8s_api_vip_interface is string and (k8s_api_vip_interface == '' or k8s_api_vip_interface is match(k3s_interface_pattern))
+      - k8s_lb_pool is string and (k8s_lb_pool == '' or (k8s_lb_pool is match(k3s_pool_pattern) and k8s_api_vip != ''
+        and 'servicelb' in k8s_disable))
+      - k8s_tls_san is sequence and k8s_tls_san is not string and k8s_tls_san is not mapping
+      - k8s_tls_san | map('string') | reject('match', k3s_san_pattern) | reject('match', k3s_ipv4_pattern) | list | length == 0
+      - k8s_disable is sequence and k8s_disable is not string and k8s_disable is not mapping
+      - k8s_disable | difference(k3s_disable_choices) | length == 0
+      - k8s_flannel_backend in k3s_flannel_backends
+      - k8s_ready_timeout | string is match('^[1-9][0-9]{0,4}\Z')
+    fail_msg: >-
+      {{ inventory_hostname }}: k8s_version must be one of the catalog's releases ({{ k3s_catalog | map(attribute='version')
+      | join(', ') }}), on {{ k3s_architectures | join(' or ') }}; k8s_api_vip empty or an IPv4 address no member has,
+      k8s_api_vip_interface empty or an interface name; k8s_lb_pool empty, or a range (a.b.c.d-a.b.c.e) or network
+      (a.b.c.d/n) with k8s_api_vip set and servicelb in k8s_disable; k8s_tls_san a list of DNS names or IPv4
+      addresses; k8s_disable a list of {{ k3s_disable_choices | join(', ') }}; k8s_flannel_backend
+      {{ k3s_flannel_backends | join(' or ') }}; k8s_ready_timeout a number of seconds.
+    quiet: true
+
+# The settings every member must agree on, as the inventory sets them.
+- name: Check that the members agree on the cluster's release and addresses
+  ansible.builtin.assert:
+    that: k3s_disagree | length == 0
+    fail_msg: >-
+      Cluster {{ k3s_cluster }}'s members must have the same k8s_version, k8s_api_vip and k8s_lb_pool (set them in
+      the group_vars of k8s_{{ k3s_cluster }}): {{ k3s_disagree | join(', ') }} differ from {{ inventory_hostname }}'s.
+    quiet: true
+  vars:
+    k3s_disagree: >-
+      {{ k3s_members | map(attribute='host') | reject('in', [inventory_hostname]) | select('in', ansible_play_hosts_all)
+         | map('extract', hostvars) | selectattr('k8s_version', 'defined') | rejectattr('k8s_version', 'eq', k8s_version)
+         | map(attribute='inventory_hostname') | list
+       + k3s_members | map(attribute='host') | reject('in', [inventory_hostname]) | select('in', ansible_play_hosts_all)
+         | map('extract', hostvars) | selectattr('k8s_api_vip', 'defined') | rejectattr('k8s_api_vip', 'eq', k8s_api_vip)
+         | map(attribute='inventory_hostname') | list
+       + k3s_members | map(attribute='host') | reject('in', [inventory_hostname]) | select('in', ansible_play_hosts_all)
+         | map('extract', hostvars) | selectattr('k8s_lb_pool', 'defined') | rejectattr('k8s_lb_pool', 'eq', k8s_lb_pool)
+         | map(attribute='inventory_hostname') | list }}
+
+# The tokens are only ever read here and in the config's template, under no_log there; this message names them only.
+- name: Check the join tokens in the Vault
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.vars', k3s_token_var, default='') is string
+      - lookup('ansible.builtin.vars', k3s_token_var, default='') is match(k3s_token_pattern)
+      - lookup('ansible.builtin.vars', k3s_agent_token_var, default='') is string
+      - lookup('ansible.builtin.vars', k3s_agent_token_var, default='') is match(k3s_token_pattern)
+      - lookup('ansible.builtin.vars', k3s_token_var) != lookup('ansible.builtin.vars', k3s_agent_token_var)
+    fail_msg: >-
+      Cluster {{ k3s_cluster }} needs two different join tokens in the Vault, {{ k3s_token_var }} for its servers and
+      {{ k3s_agent_token_var }} for its agents: make each with openssl rand -hex 32 (32 to 128 letters and digits).
+    quiet: true
+
+# The baseline's kubernetes_node role writes this file, after opening the firewall between the members.
+- name: Look for the baseline's Kubernetes settings
+  ansible.builtin.stat:
+    path: /etc/sysctl.d/91-usas-kubernetes.conf
+  register: k3s_node_prepared
+
+- name: Fail unless the baseline has prepared the member
+  ansible.builtin.assert:
+    that: k3s_node_prepared.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} isn't prepared for Kubernetes yet: run the baseline (playbooks/baseline.yml) with it in
+      k8s_{{ k3s_cluster }}_{{ k3s_role }}s first, which opens the firewall between the members and sets the kernel up.
+    quiet: true
+
+- name: Look for k3s
+  ansible.builtin.stat:
+    path: "{{ k3s_binary }}"
+  register: k3s_binary_stat
+
+- name: Read the k3s release installed
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", --version]
+  register: k3s_version_output
+  changed_when: false
+  check_mode: false
+  when: k3s_binary_stat.stat.exists
+
+- name: Fail if the member runs another k3s release
+  ansible.builtin.assert:
+    that: k3s_installed in ['', k8s_version]
+    fail_msg: >-
+      {{ inventory_hostname }} runs k3s {{ k3s_installed }}, not {{ k8s_version }}. Moving a cluster to another
+      release is an upgrade, one node at a time, which this playbook doesn't do yet: set k8s_version back to
+      {{ k3s_installed }}.
+    quiet: true
+  vars:
+    k3s_installed: "{{ k3s_version_output.stdout | default('') | k3s_installed_version }}"
+
+- name: Look for the cluster's data on the server
+  ansible.builtin.stat:
+    path: "{{ k3s_etcd_dir }}"
+  register: k3s_etcd
+
+# After every member has looked (the play runs each task on all of them first): the first server that already has
+# the cluster's data starts it, else the first server; the others join through the VIP, or that server's address.
+- name: Work out which server starts the cluster and where the others join
+  ansible.builtin.set_fact:
+    k3s_seed: "{{ k3s_seed_host }}"
+    k3s_started: "{{ k3s_started_servers }}"
+    k3s_join_url: >-
+      https://{{ k8s_api_vip if k8s_api_vip else (k3s_members | selectattr('host', 'eq', k3s_seed_host)
+      | map(attribute='address') | first) }}:{{ k3s_api_port }}
+    k3s_vip_interface: "{{ k8s_api_vip_interface or hostvars[k3s_seed_host].ansible_facts.default_ipv4.interface | default('') }}"
+    k3s_release: "{{ k3s_catalog | selectattr('version', 'eq', k8s_version) | first }}"
+    k3s_arch: "{{ k3s_architectures[ansible_facts.architecture] }}"
+    k3s_selinux: "{{ ansible_facts.selinux.status | default('disabled') == 'enabled' }}"
+  vars:
+    k3s_started_servers: >-
+      {{ k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host')
+         | select('in', ansible_play_hosts_all) | map('extract', hostvars)
+         | selectattr('k3s_etcd.stat.exists', 'defined') | selectattr('k3s_etcd.stat.exists')
+         | map(attribute='inventory_hostname') | list }}
+    k3s_seed_host: "{{ k3s_members | k3s_seed(k3s_started_servers) }}"
+
+- name: Check that kube-vip's interface is on the server
+  ansible.builtin.assert:
+    that: k3s_vip_interface in ansible_facts.interfaces
+    fail_msg: >-
+      {{ inventory_hostname }} has no interface {{ k3s_vip_interface }} for kube-vip to put {{ k8s_api_vip }} on: set
+      k8s_api_vip_interface to the interface every server has on that network.
+    quiet: true
+  when: k3s_role == 'server' and k8s_api_vip != ''

@@ -82,4 +82,4 @@
     k8s_node_comment: usas-k8s {{ k8s_node_cluster }}
     k8s_node_rules: >-
       {{ k8s_node_members | k8s_firewall_rules(inventory_hostname, k8s_api_sources | map('string') | list,
-         k8s_node_flannel_ports[k8s_flannel_backend], 'usas-k8s ' ~ k8s_node_cluster) }}
+         k8s_node_flannel_ports[k8s_flannel_backend], 'usas-k8s ' ~ k8s_node_cluster, k8s_node_pod_cidr) }}

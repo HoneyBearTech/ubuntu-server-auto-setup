@@ -110,13 +110,37 @@ defaults and the advice in the README's "Running it securely" section and in [we
   output is read one field per newline, so no character in a label can make up another field). Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
   in the role), and `vm_spread_group` is checked from the VM list the token already reads.
 - A Kubernetes node's firewall rules (`kubernetes_node`) open k3s' ports to each other member's own address, never
-  to a network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or the
-  pod network. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
-  `k8s_api_sources`. Every address is checked against an IPv4 pattern before a rule is written, so none can add
+  to the LAN's network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or
+  the pod network. The only network allowed is k3s' own pod network (`10.42.0.0/16`), to the kubelet's port and, on
+  servers, the API's, which pods need (both still require the cluster's credentials); etcd stays closed to pods on
+  UFW. On firewalld (the RHEL family) the pod and service networks are in the `trusted` zone, as k3s documents,
+  because firewalld would otherwise reject the pods' forwarded traffic: there a pod can reach any port on its node,
+  etcd's included, which still requires etcd's client certificates. etcd's ports are open to the other servers
+  only, and the API (6443/tcp) to the members and `k8s_api_sources`. Every address is checked against an IPv4 pattern before a rule is written, so none can add
   an option to a UFW or firewalld rule (fuzzed in `tests/fuzz/fuzz_kubernetes_node.py`), and rules for members
   that left are removed. On the RHEL family, `k3s-selinux` comes from Rancher's repository with every package
   checked against Rancher's key, pinned by fingerprint; the repository's metadata isn't signed by Rancher, so
   `repo_gpgcheck` is off for it (the packages are still checked).
+- k3s (`playbooks/kubernetes.yml`) is installed from a binary that must match the SHA-256 the k3s catalog pins;
+  the download is checked before it replaces anything, and nothing is piped to a shell. kube-vip and its cloud
+  provider are pulled by the digest the catalog pins. k3s signs neither its binaries nor its checksum files and
+  kube-vip signs no image, so these pins come over HTTPS from GitHub and GHCR, are reviewed in the pull request
+  that changes them, and are checked against upstream again every week (`tools/update_k3s_catalog.py`). k3s'
+  own system images are pulled by the tags its release names.
+- A cluster's join tokens live only in the Vault and in each member's `/etc/rancher/k3s/config.yaml` (0600,
+  root); the tasks that read or write them log nothing and show no diff, and the tests check that no run's output
+  contains them. Servers and agents have different tokens, and an agent holds only its own, so a compromised agent
+  can't join as a server. The tokens are made by the owner (`openssl rand -hex 32`), never by the playbook.
+  Secrets in etcd are encrypted by default (`k8s_secrets_encryption`).
+- The admin kubeconfig never leaves the servers (`/etc/rancher/k3s/k3s.yaml`, 0600). The optional kubeconfig on
+  the control node (`k8s_fetch_readonly_kubeconfig`) belongs to a ServiceAccount that may only read (the `view`
+  ClusterRole, which has no Secrets, and the nodes), and is written 0600. Every cluster value that reaches
+  `config.yaml` or a manifest (names, addresses, the VIP, the pool, certificate names, the tokens) is checked
+  against a `\Z`-anchored pattern first, and `config.yaml` is written as YAML by a filter, so none can add a key
+  (fuzzed in `tests/fuzz/fuzz_k3s_config.py`). A server joins only after it reached etcd's and the API's ports on
+  every server already in the cluster, and they its etcd peer port, one server at a time, so etcd keeps its
+  quorum.
+- Who has the Vault, or root on any server, controls the cluster; the workloads and what they expose are yours.
 
 <a id="the-proxmox-node-user-optional"></a>
 **The Proxmox node user (optional)**

@@ -1,10 +1,17 @@
 ---
-# The kubelet expects no swap. /etc/fstab's swap lines are commented out, so it stays off after a reboot.
+# The kubelet expects no swap. /etc/fstab's swap lines are commented out, so it stays off after a reboot. A
+# minimal image may have no /etc/fstab at all, and then no swap in it.
+- name: Look for /etc/fstab
+  ansible.builtin.stat:
+    path: /etc/fstab
+  register: k8s_node_fstab
+
 - name: Leave swap off at boot
   ansible.builtin.replace:
     path: /etc/fstab
     regexp: '^(\s*[^#\s]\S*\s+\S+\s+swap\s.*)$'
     replace: '#\1'
+  when: k8s_node_fstab.stat.exists
 
 # In a container swapoff would act on the host's swap: only the fstab line is the container's.
 - name: Read the swap in use

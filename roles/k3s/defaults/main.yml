@@ -1,0 +1,37 @@
+---
+# k3s on the members of each cluster the inventory describes: servers in k8s_<cluster>_servers, agents in
+# k8s_<cluster>_agents, prepared by the baseline first (roles/kubernetes_node). playbooks/kubernetes.yml runs it.
+# Set these for the whole cluster, in the group_vars of a parent of both groups (k8s_<cluster>). The join tokens
+# are in the Vault: vault_k8s_token_<cluster> and vault_k8s_agent_token_<cluster> (a "-" in the cluster's name
+# is "_" there), each made with openssl rand -hex 32. The role never makes them.
+
+# The k3s release, one of the catalog's (roles/k3s/vars/catalog.yml): required. A member that already runs another
+# release is refused, since moving a cluster to another release is an upgrade, one node at a time.
+k8s_version: ""
+# The API's address on the LAN, an IPv4 address no other host has: kube-vip holds it on one server at a time and
+# moves it when that server stops. Empty: no kube-vip, and every member joins through the first server's address.
+k8s_api_vip: ""
+# The network interface kube-vip puts the address on, the same name on every server. Empty: the first server's
+# interface for its default route.
+k8s_api_vip_interface: ""
+# The addresses LoadBalancer services get, from kube-vip's cloud provider: a range (192.0.2.20-192.0.2.29) or a
+# network (192.0.2.32/28). Empty: none. Needs k8s_api_vip (kube-vip announces them) and servicelb in k8s_disable.
+k8s_lb_pool: ""
+# More names or addresses the API's certificate is valid for, besides k8s_api_vip (DNS names or IPv4 addresses).
+k8s_tls_san: []
+# k3s' packaged components to leave out: servicelb, traefik, local-storage, metrics-server.
+k8s_disable: [servicelb]
+# Keep ordinary workloads off the servers (CriticalAddonsOnly=true:NoExecute). k3s' own add-ons still run there.
+k8s_server_taint: true
+# Encrypt Secrets in etcd. Turning it on or off in a running cluster takes k3s' own procedure
+# (k3s secrets-encrypt), not just this setting.
+k8s_secrets_encryption: true
+# The pod network between nodes, as the baseline's firewall rules expect (roles/kubernetes_node, same variable):
+# vxlan or wireguard-native.
+k8s_flannel_backend: vxlan
+# Fetch a kubeconfig of a read-only ServiceAccount (bound to the view ClusterRole) to k8s_readonly_kubeconfig on
+# the control node, mode 0600. The admin kubeconfig never leaves the servers.
+k8s_fetch_readonly_kubeconfig: false
+k8s_readonly_kubeconfig: "{{ inventory_dir }}/kube/{{ k3s_cluster | default('cluster') }}-readonly.yaml"
+# Seconds to wait for a node to be Ready after k3s starts.
+k8s_ready_timeout: 300

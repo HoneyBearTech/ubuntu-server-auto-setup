@@ -1,0 +1,162 @@
+---
+# Checks the cluster tests/kubernetes.sh built (cluster ci, tests/inventory/k3s.yml): every node Ready, three etcd
+# members, the servers tainted, ServiceLB off, kube-vip holding the VIP and a LoadBalancer address from the pool,
+# the files' modes, the binary's hash, the tokens where they belong, and the read-only kubeconfig's rights.
+# tokens_file is the test's tokens (-e tokens_file=...). k3s by its full path: sudo's secure_path on the RHEL
+# family leaves /usr/local/bin out.
+- name: Check every member's files
+  hosts: k8s_ci_servers:k8s_ci_agents
+  become: true
+  gather_facts: false
+  vars:
+    tokens: "{{ lookup('ansible.builtin.file', tokens_file) | from_yaml }}"
+    release: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/../roles/k3s/vars/catalog.yml') | from_yaml).k3s_catalog
+                 | selectattr('version', 'eq', 'v1.36.5+k3s1') | first }}"
+  tasks:
+    - name: Read the CPU architecture
+      ansible.builtin.setup:
+        gather_subset: [min]
+
+    - name: Look at k3s' files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop: [/usr/local/bin/k3s, /etc/rancher/k3s/config.yaml]
+      register: verify_files
+
+    - name: Read the configuration
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/config.yaml
+      register: verify_config
+      no_log: true
+
+    # An agent holds only the agent token, so it can't join as a server.
+    - name: Check the binary, the configuration's mode and its tokens
+      ansible.builtin.assert:
+        that:
+          - verify_files.results[0].stat.checksum == release.binaries[arch].sha256
+          - verify_files.results[1].stat.mode == '0600' and verify_files.results[1].stat.pw_name == 'root'
+          - (tokens.vault_k8s_token_ci in config) == ('k8s_ci_servers' in group_names)
+          - tokens.vault_k8s_agent_token_ci in config
+          - "config is search('(?m)^node-ip: ' ~ k8s_node_ip | regex_escape ~ '$')"
+        quiet: true
+      vars:
+        config: "{{ verify_config.content | b64decode }}"
+        arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
+
+- name: Check the cluster
+  hosts: k3s-s1
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read the nodes
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, get, nodes, -o, json]
+      register: verify_nodes
+      changed_when: false
+
+    # The cloud provider hands Traefik's LoadBalancer service an address once both are up, which can be after every
+    # node is Ready.
+    - name: Read the services and daemon sets, once Traefik has a LoadBalancer address
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, get, "services,daemonsets", --all-namespaces, -o, json]
+      register: verify_objects
+      changed_when: false
+      until: >-
+        (verify_objects.stdout | from_json)['items'] | selectattr('kind', 'eq', 'Service')
+        | selectattr('metadata.name', 'eq', 'traefik') | map(attribute='status.loadBalancer.ingress')
+        | select('defined') | list | length > 0
+      retries: 60
+      delay: 5
+
+    # Every add-on pod reaches the API and its peers: running and ready (or a finished job), and a minute later with
+    # no more restarts, so a crash loop or a node firewall in the way can't pass as healthy.
+    - name: Wait until every pod in kube-system is ready
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - --namespace=kube-system
+          - get
+          - pods
+          - -o
+          - >-
+            jsonpath={range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[*].ready}
+            {.status.containerStatuses[*].restartCount}{"\n"}{end}
+      register: verify_pods
+      changed_when: false
+      until: >-
+        verify_pods.rc == 0 and verify_pods.stdout_lines | reject('search', ' Succeeded ')
+        | select('search', '( false|^\S+ (?!Running ))') | list | length == 0
+      retries: 60
+      delay: 5
+
+    - name: Give the pods a minute to show a crash loop
+      ansible.builtin.pause:
+        seconds: 60
+
+    - name: Read the pods again
+      ansible.builtin.command:
+        argv: "{{ verify_pods.cmd }}"
+      register: verify_pods_later
+      changed_when: false
+
+    - name: Check that no pod restarted or went unready in that minute
+      ansible.builtin.assert:
+        that:
+          - verify_pods_later.stdout_lines | sort == verify_pods.stdout_lines | sort
+        fail_msg: >-
+          kube-system's pods changed (name, phase, ready, restarts): {{ verify_pods.stdout_lines }}, a minute later
+          {{ verify_pods_later.stdout_lines }}
+
+    - name: Look at the admin kubeconfig
+      ansible.builtin.stat:
+        path: /etc/rancher/k3s/k3s.yaml
+      register: verify_admin
+
+    - name: Check the nodes, ServiceLB, the pool and the admin kubeconfig
+      ansible.builtin.assert:
+        that:
+          - nodes | map(attribute='metadata.name') | sort == ['k3s-a1', 'k3s-s1', 'k3s-s2', 'k3s-s3']
+          - nodes | map(attribute='status.conditions') | map('selectattr', 'type', 'eq', 'Ready') | map('first')
+            | map(attribute='status') | unique == ['True']
+          - nodes | selectattr('metadata.labels', 'contains', 'node-role.kubernetes.io/etcd') | list | length == 3
+          - servers | selectattr('spec.taints', 'defined') | list | length == 3
+          - servers | map(attribute='spec.taints') | flatten | map(attribute='key') | unique == ['CriticalAddonsOnly']
+          - nodes | selectattr('metadata.name', 'eq', 'k3s-a1') | selectattr('spec.taints', 'defined') | list | length == 0
+          - objects | selectattr('kind', 'eq', 'DaemonSet') | map(attribute='metadata.name') | select('match', '^svclb')
+            | list | length == 0
+          - traefik.status.loadBalancer.ingress[0].ip in ['10.217.30.101', '10.217.30.102']
+          - verify_admin.stat.mode == '0600'
+        quiet: true
+      vars:
+        nodes: "{{ (verify_nodes.stdout | from_json)['items'] }}"
+        servers: "{{ nodes | rejectattr('metadata.name', 'eq', 'k3s-a1') | list }}"
+        objects: "{{ (verify_objects.stdout | from_json)['items'] }}"
+        traefik: >-
+          {{ objects | selectattr('kind', 'eq', 'Service') | selectattr('metadata.name', 'eq', 'traefik') | first }}
+
+    - name: Copy the read-only kubeconfig to the server
+      ansible.builtin.copy:
+        src: "{{ test_tmp }}/kube/ci-readonly.yaml"
+        dest: /root/ci-readonly.yaml
+        mode: "0600"
+
+    # It may read nodes and pods, and may not create anything or read Secrets.
+    - name: Ask what the read-only account may do
+      ansible.builtin.command:
+        argv: "{{ ['/usr/local/bin/k3s', 'kubectl', '--kubeconfig', '/root/ci-readonly.yaml', 'auth', 'can-i'] + item.split() }}"
+      loop: [list nodes, list pods, create pods, get secrets, delete nodes]
+      register: verify_can
+      changed_when: false
+      failed_when: verify_can.stdout not in ['yes', 'no']
+
+    - name: Check the read-only account's rights
+      ansible.builtin.assert:
+        that: verify_can.results | map(attribute='stdout') | list == ['yes', 'yes', 'no', 'no', 'no']
+        quiet: true
+
+    - name: Remove the copy
+      ansible.builtin.file:
+        path: /root/ci-readonly.yaml
+        state: absent

@@ -1,0 +1,52 @@
+# Managed by Ansible (roles/k3s): the read-only account for k8s_fetch_readonly_kubeconfig. It may read what the view
+# ClusterRole allows, and the nodes (their names and whether they're Ready), nothing else. Deleting the Secret
+# revokes its token; the next run makes a new one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ k3s_readonly_account }}
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ k3s_readonly_account }}-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: {{ k3s_readonly_account }}
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ k3s_readonly_account }}-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ k3s_readonly_account }}-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ k3s_readonly_account }}-nodes
+subjects:
+  - kind: ServiceAccount
+    name: {{ k3s_readonly_account }}
+    namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ k3s_readonly_account }}-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: {{ k3s_readonly_account }}
+type: kubernetes.io/service-account-token
