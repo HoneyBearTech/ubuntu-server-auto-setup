@@ -32,7 +32,10 @@ k8s_refused "may be in only one k8s_<cluster>_servers or k8s_<cluster>_agents gr
   -e ansible_host=127.0.0.1
 cool_down
 
+# Counted in tests/baseline.sh's task coverage, except where only its checks run.
+k8s_coverage=kubernetes_node
 if [ "$k8s_family" = rhel ] && [ "$release" != 9 ]; then
+k8s_coverage=""
 step "a Kubernetes node on EL$release is refused: Rancher has no stable k3s-selinux for it yet"
 k8s_refused "has k3s-selinux only for release 9" playbooks/baseline.yml "${K8S[@]}"
 else

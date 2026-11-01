@@ -249,6 +249,6 @@ step "Task coverage of the baseline roles on $OS"
 # Each run counts its own family's task files: the other family's are left out (docker.yml is UFW's).
 if [ "$family" = rhel ]; then other='*/Debian.yml,roles/firewall/tasks/docker.yml'
 else other='*/RedHat.yml,roles/common/tasks/epel.yml,roles/kubernetes_node/tasks/selinux.yml'; fi
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles common,firewall,ssh_hardening,fail2ban,kubernetes_node \
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles "common,firewall,ssh_hardening,fail2ban${k8s_coverage:+,$k8s_coverage}" \
   --skip-files "$other"
 echo "=== $OS: the baseline passed"
