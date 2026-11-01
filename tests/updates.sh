@@ -166,6 +166,10 @@ fresh() {
   fi
   docker exec -i "$name" sh -c "cat > /home/$user/.ssh/authorized_keys && chown $user: /home/$user/.ssh/authorized_keys \
     && chmod 600 /home/$user/.ssh/authorized_keys" <"$TEST_TMP/id_ed25519.pub"
+  # sshd answers before systemd has finished booting, and until then pam_nologin refuses every user but root
+  # (/run/nologin, removed by systemd-user-sessions), as tests/baseline.sh waits for too.
+  for _ in $(seq 1 120); do docker exec "$name" test ! -e /run/nologin && break; sleep 1; done
+  docker exec "$name" test ! -e /run/nologin || { echo "ERROR: $name never finished booting" >&2; return 1; }
   wait_ssh "$port"
   # Host keys of its own (the image's are shared by every container), so a host key pin tells them apart.
   docker exec "$name" sh -c "rm -f /etc/ssh/ssh_host_*_key* && ssh-keygen -A >/dev/null && systemctl restart $SSH_UNIT"
