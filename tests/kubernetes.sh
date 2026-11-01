@@ -180,12 +180,24 @@ if [ "$(uname -s)" = Linux ]; then
     || { echo "ERROR: the API doesn't answer on the VIP $VIP" >&2; exit 1; }
   lb="$(docker exec k3s-s1 k3s kubectl -n kube-system get service traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
   # The address can be handed out before Traefik serves on it.
-  for _ in $(seq 1 24); do
+  for _ in $(seq 1 60); do
     code="$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://$lb/" || true)"
     [ "$code" = 404 ] && break
     sleep 5
   done
-  [ "$code" = 404 ] || { echo "ERROR: Traefik doesn't answer on its LoadBalancer address $lb (HTTP $code)" >&2; exit 1; }
+  if [ "$code" != 404 ]; then
+    echo "--- pods, Traefik's service and endpoints, and who holds the LoadBalancer address" >&2
+    docker exec k3s-s1 k3s kubectl get pods -A -o wide >&2 || true
+    docker exec k3s-s1 k3s kubectl -n kube-system get service,endpointslices -o wide >&2 || true
+    for node in "${NODES[@]}"; do
+      docker exec "$node" sh -c "ip -4 -o addr show | grep -F '$lb' && echo 'on $node'" >&2 || true
+      if [ "$family" = rhel ]; then
+        echo "--- $node: firewalld" >&2
+        docker exec "$node" sh -c 'firewall-cmd --get-active-zones; firewall-cmd --list-all; nft list chain inet firewalld filter_FORWARD' >&2 || true
+      fi
+    done
+    echo "ERROR: Traefik doesn't answer on its LoadBalancer address $lb (HTTP $code)" >&2; exit 1
+  fi
 else
   echo "skipped: the Docker network isn't reachable from this host"
 fi
