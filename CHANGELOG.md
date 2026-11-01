@@ -8,7 +8,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-31
+## [0.7.0] - 2026-11-01
 
 Servers other than Ubuntu: new VMs install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, and CentOS
 Stream, Rocky Linux and AlmaLinux 9 and 10 from the vendor's cloud image, set up by cloud-init in about a
