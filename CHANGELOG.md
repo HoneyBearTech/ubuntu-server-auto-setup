@@ -272,6 +272,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
+  (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
+  Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
   Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
   `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
