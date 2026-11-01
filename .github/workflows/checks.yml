@@ -125,6 +125,16 @@ jobs:
       - name: Install the Ansible collections
         run: scripts/retry.sh ansible-galaxy collection install -r requirements.yml
 
+      # As in the baseline job below: the runner's AppArmor profiles also confine the test containers' copies, so
+      # the RHEL family's sshd can't log anyone in while unix_chkpwd can't read /etc/shadow.
+      - name: Unload the runner's unix_chkpwd and chronyd AppArmor profiles
+        run: |
+          for profile in unix-chkpwd /usr/sbin/chronyd; do
+            if sudo grep -q "^$profile " /sys/kernel/security/apparmor/profiles; then
+              printf %s "$profile" | sudo tee /sys/kernel/security/apparmor/.remove >/dev/null
+            fi
+          done
+
       # Builds the test image for the release with a signed apt or dnf repository of test updates, runs the updates
       # playbook against two of them (check, apply, reboots, health checks, refusals), checks the results and
       # idempotence, and fails below 80% task coverage of the updates role.
