@@ -27,7 +27,9 @@ def data_disks_state(probes, disks):
         stat = (probe.get("item") or {}).get("stat") or {}
         device = _text(stat.get("lnk_source") or stat.get("path"))
         fields = {}
-        for line in _text(probe.get("stdout")).splitlines():
+        # One field per line, split at newlines only: splitlines() would also split a value at characters such
+        # as \x1d or \x85, and read what follows as another field.
+        for line in _text(probe.get("stdout")).split("\n"):
             key, sep, value = line.partition("=")
             if sep:
                 fields[key.strip()] = value.strip()

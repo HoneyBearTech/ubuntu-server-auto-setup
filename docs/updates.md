@@ -11,10 +11,10 @@ make updates LIMIT=web-01               # install on one server
 make updates ARGS="-e updates_scope=security"
 ```
 
-The playbook supports the apt-family releases of the OS catalog: Ubuntu 22.04, 24.04 and 26.04, and Debian
-12 and 13, with the catalog's end-of-support dates (a server past it still gets updates, with a warning). The
-RHEL family follows. A server on another system or release is skipped with the reason (`unsupported`), never
-updated with a generic fallback.
+The playbook supports every release of the OS catalog: Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13,
+and CentOS Stream, Rocky Linux and AlmaLinux 9 and 10, with the catalog's end-of-support dates (a server past
+it still gets updates, with a warning). A server on another system or release is skipped with the reason
+(`unsupported`), never updated with a generic fallback.
 
 On Debian:
 - **Security updates** are those from Debian-Security (the `<codename>-security` suite), the same rule as
@@ -23,6 +23,27 @@ On Debian:
   `/boot` is compared with the one running, and needrestart (when installed) adds a kernel or services still
   running old code. The report names the kernel (`linux-image-<version>`).
 - **Phased updates** are Ubuntu's; Debian has none.
+
+On the RHEL family (CentOS Stream, Rocky Linux, AlmaLinux), dnf does the work:
+- **Security updates** are those an advisory of type security fixes (`dnf updateinfo`), as Rocky Linux and
+  AlmaLinux publish them. **CentOS Stream publishes no security errata**, so `updates_scope: security` would
+  install nothing there: it installs every update instead, and the report says so (the baseline's
+  dnf-automatic does the same).
+- **What is pending** comes from `dnf repoquery --upgrades`. Before installing, a dry run (`dnf --assumeno
+  upgrade` of the chosen packages) shows what dnf would do, dependencies and new kernels included. dnf
+  checks every package's signature, and the repository's metadata signature where it is turned on
+  (`repo_gpgcheck`), against the keys the server already has. The metadata refresh answers no question: a
+  repository whose key isn't imported yet fails the check rather than being trusted by this playbook.
+- **Held packages** are those locked with dnf versionlock (`/etc/dnf/plugins/versionlock.list`); dnf keeps
+  them where they are, and the report lists them. Nothing is phased or kept back on dnf.
+- **A waiting reboot** comes from `dnf needs-restarting -r` (dnf-plugins-core): core packages (the kernel,
+  glibc, systemd, D-Bus, firmware) updated since the boot. Where dnf-plugins-core isn't installed, the
+  newest kernel in `/boot` is compared with the one running, as on Debian. `dnf needs-restarting -s` lists
+  the services still running old code; on dnf they are only listed (`updates_restart_services` is
+  needrestart's, on Ubuntu and Debian).
+- **Automatic updates** are dnf-automatic's: the report reads `/etc/dnf/automatic.conf` and its timers.
+- **`updates_apt_upgrade`** is apt's; on dnf the chosen packages are upgraded (`dnf upgrade`), and dnf adds
+  their new dependencies and kernels.
 
 ## What a run does
 
@@ -51,7 +72,7 @@ Each server ends with one status:
 | `updated` | Updates were installed, or the server was rebooted. |
 | `nothing` | Nothing to install (held, phased and excluded packages are listed, but don't count). |
 | `pending` | Check runs only: updates are waiting. |
-| `busy` | Automatic updates or another package manager kept apt's lock past `updates_lock_wait`. Run again later. |
+| `busy` | Automatic updates or another package manager kept apt's or rpm's lock past `updates_lock_wait`. Run again later. |
 | `skipped` | Opted out, outside its window, no Python, an update needs a package you excluded, no snapshot when one is required, or not started after an earlier failure. The reason says which. |
 | `unsupported` | A system or release the playbook doesn't update. |
 | `unreachable` | No SSH connection. |
@@ -61,27 +82,29 @@ Each server ends with one status:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `updates_scope` | `all` | `security` installs only updates from a security suite: Ubuntu's `-security` pockets and Ubuntu Pro's ESM. The server's own unattended-upgrades already installs those daily; a full run adds the rest. |
+| `updates_scope` | `all` | `security` installs only updates from a security suite: Ubuntu's `-security` pockets and Ubuntu Pro's ESM, Debian-Security, and on Rocky Linux and AlmaLinux the updates a security advisory fixes (CentOS Stream gets every update). The server's own unattended-upgrades or dnf-automatic already installs those daily; a full run adds the rest. |
 | `updates_apt_upgrade` | `safe` | `safe` works like `apt-get upgrade --with-new-pkgs`: new kernels and new dependencies come in, and nothing is removed (apt stops instead). `dist` installs everything and may remove packages, so it is refused together with `security`, excludes or `updates_kernel: false`. |
 | `updates_exclude_packages` | `[]` | Shell globs (`linux-*`, `postgresql-*`) left alone in this run. Nothing is written to the server: no holds. If an update would need an excluded package, the server is skipped with the packages named, rather than upgraded anyway. |
 | `updates_kernel` | `true` | `false` adds the kernel packages to the excludes. |
 | `updates_restart_services` | `host` | `host` keeps the server's own needrestart setting (Ubuntu 24.04 and later restart services on their own). `list` only lists the services still running old code; `auto` restarts them. |
 
-Packages you hold (`apt-mark hold`) stay held, and Ubuntu's phased updates stay phased. The report lists
-both, apart from what is pending. Signature checks are never turned off: apt checks every package against
-the server's own keyrings as always.
+Packages you hold (`apt-mark hold`, or dnf versionlock) stay held, and Ubuntu's phased updates stay phased.
+The report lists both, apart from what is pending. Signature checks are never turned off: apt and dnf check
+every package against the server's own keys as always.
 
 ## Reboots
 
 `updates_reboot: never` (the default) only reports "reboot pending" when a server needs one. With
-`if_required` the playbook reboots a server that asks for it (`/var/run/reboot-required` on Ubuntu, or
-needrestart reporting a newer kernel), waits up to `updates_reboot_timeout` for it to come back, and
+`if_required` the playbook reboots a server that asks for it (`/var/run/reboot-required` on Ubuntu,
+needrestart reporting a newer kernel, or `dnf needs-restarting -r` on the RHEL family), waits up to
+`updates_reboot_timeout` for it to come back, and
 checks its health. `updates_reboot_window` limits when that may happen. Outside it, the reboot waits and
 the report says so.
 
 **Encrypted VMs.** A VM whose disk unlocks with the TPM (`vm_disk_encryption`, or `tpm2-device` in
 `/etc/crypttab`) is bound to its Secure Boot state, PCR 7. An update to `shim-signed`, the signed GRUB or
-`secureboot-db` (the revocation list) changes that state, and the next boot would wait for the passphrase
+`secureboot-db` (the revocation list), or on the RHEL family `shim` and `grub2-efi`, changes that state, and
+the next boot would wait for the passphrase
 at the console. After such an update the reboot is held, with the packages named. Reboot it from the
 Proxmox console and re-enroll the TPM, as [security.md](security.md#secure-boot-and-disk-encryption)
 ("Recovery") describes.
@@ -295,10 +318,10 @@ Add them to the `other_servers` group, with their own login:
 - **Sudo.** Use passwordless sudo, or a sudo password of the server's own, kept in the Vault. The playbook
   refuses to send the Vault admin password (`vault_admin_password`) to a server outside `servers` (or `ubuntu_servers`)
   with a `pve_vmid`: root on that server could read it. `updates_allow_shared_become_password: true`
-  allows it for a host or group that you trust anyway. A sudo rule limited to apt is still root: package
+  allows it for a host or group that you trust anyway. A sudo rule limited to apt or dnf is still root: package
   scripts run as root. A separate user such as `usas-updates` is for knowing who did what, not for
   limiting what the playbook can do.
-- **Python** must be installed (Ubuntu Server has it); a server without it is skipped.
+- **Python** must be installed (Ubuntu Server and the RHEL family have it); a server without it is skipped.
 - **sudo-rs** (Ubuntu 26.04): with a sudo password, the server needs the classic sudo (`/usr/bin/sudo.ws`,
   from the `sudo` package), as the baseline does. With passwordless sudo, sudo-rs is fine.
 
