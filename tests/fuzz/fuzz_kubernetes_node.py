@@ -5,6 +5,7 @@ Properties, for any cluster members, addresses, API sources and existing firewal
 - with addresses and sources the role's patterns accept, a member's rules open only the flannel port and the
   kubelet's 10250/tcp to the other members, and on a server also 6443/tcp to the other members and the API sources
   and etcd's 2379:2380/tcp to the other servers; never anything from the member itself, an agent never 6443 or etcd;
+  from the pod network, the kubelet's port on every member and the API's on a server, nothing else;
 - every rule renders as a firewalld rich rule the role's own parser reads back, with nothing in it but the address,
   port and protocol;
 - the role's rules as UFW and firewalld list them are never stale; a rule with the role's comment (UFW) or on a k3s
@@ -51,13 +52,17 @@ def one_input(data):
     if len({m["address"] for m in members}) != len(members):
         return
 
-    rules = K8S.k8s_firewall_rules(members, me, sources, port, comment)
+    pods = VARS["k8s_node_pod_cidr"]
+    rules = K8S.k8s_firewall_rules(members, me, sources, port, comment, pods)
     mine = next((m for m in members if m["host"] == me), None)
     server = mine is not None and mine["role"] == "server"
     others = {m["address"]: m["role"] for m in members if m["host"] != me}
     for r in rules:
         assert r["comment"] == comment, r
-        if r["from"] in others and not (r["port"] == "6443" and r["from"] in sources):
+        if r["from"] == pods and r["from"] not in sources:
+            assert mine is not None and (r["port"], r["proto"]) in (
+                {("10250", "tcp"), ("6443", "tcp")} if server else {("10250", "tcp")}), (r, members, me)
+        elif r["from"] in others and not (r["port"] == "6443" and r["from"] in sources):
             allowed = {(port, "udp"), ("10250", "tcp")}
             if server:
                 allowed.add(("6443", "tcp"))
@@ -68,6 +73,9 @@ def one_input(data):
             assert server and (r["port"], r["proto"]) == ("6443", "tcp") and r["from"] in sources, (r, members, me)
         assert mine is None or r["from"] != mine["address"] or r["from"] in sources, (r, me)
     assert len({(r["port"], r["proto"], r["from"]) for r in rules}) == len(rules), rules
+    assert ({"port": "10250", "proto": "tcp", "from": pods, "comment": comment} in rules) == (mine is not None), rules
+    if pods not in sources:
+        assert ({"port": "6443", "proto": "tcp", "from": pods, "comment": comment} in rules) == server, rules
     for a, role in others.items():
         assert {"port": port, "proto": "udp", "from": a, "comment": comment} in rules, (a, rules)
         assert ({"port": "2379:2380", "proto": "tcp", "from": a, "comment": comment} in rules) == \

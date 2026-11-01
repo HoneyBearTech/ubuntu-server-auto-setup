@@ -11,6 +11,11 @@ k8s_node_source_pattern: >-
 k8s_node_flannel_ports:
   vxlan: "8472"
   wireguard-native: "51820"
+# k3s' pod network (its default cluster CIDR; the k3s role keeps it). Pods reach the API and the kubelets from these
+# addresses: through the API's service a pod's packets arrive at a server's 6443 with the pod's own address, and
+# metrics-server reaches each kubelet's 10250 the same way. firewalld drops them otherwise (UFW lets k3s' own
+# iptables rules accept them, firewalld's nftables table doesn't).
+k8s_node_pod_cidr: 10.42.0.0/16
 # Every port the role's rules use, as firewalld writes them: on a member, firewalld rich rules on these are the
 # role's (rich rules carry no comment), except those firewall_allow adds.
 k8s_node_owned_ports: [8472/udp, 51820/udp, 10250/tcp, 6443/tcp, 2379-2380/tcp]
