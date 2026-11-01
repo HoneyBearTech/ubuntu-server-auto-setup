@@ -14,8 +14,12 @@ k8s_node_flannel_ports:
 # k3s' pod network (its default cluster CIDR; the k3s role keeps it). Pods reach the API and the kubelets from these
 # addresses: through the API's service a pod's packets arrive at a server's 6443 with the pod's own address, and
 # metrics-server reaches each kubelet's 10250 the same way, so the rules allow the pod network on those two ports, as
-# k3s' firewall guidance does. Pod traffic between nodes is forwarded and needs no rule.
+# k3s' firewall guidance does.
 k8s_node_pod_cidr: 10.42.0.0/16
+# k3s' service network (its default service CIDR). On firewalld both are sources of the trusted zone, as k3s
+# documents: pod traffic between nodes (and to a LoadBalancer address, once it's redirected to a pod on another node)
+# is forwarded, and firewalld rejects forwarded traffic from interfaces and sources in no zone.
+k8s_node_service_cidr: 10.43.0.0/16
 # Every port the role's rules use, as firewalld writes them: on a member, firewalld rich rules on these are the
 # role's (rich rules carry no comment), except those firewall_allow adds.
 k8s_node_owned_ports: [8472/udp, 51820/udp, 10250/tcp, 6443/tcp, 2379-2380/tcp]

@@ -47,8 +47,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - **Kubernetes node profile:** pods reach the API (through its service) and metrics-server reaches the kubelets with
   their own pod-network addresses, which the firewall rules didn't allow. They now allow k3s' pod network
-  (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, on UFW and firewalld; etcd
-  stays closed to it. A server without `/etc/fstab` no longer fails the swap step.
+  (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, on UFW and firewalld. On
+  firewalld (the RHEL family) pod traffic between nodes was rejected, so a service whose pod ran on another node,
+  a LoadBalancer address included, never answered: the pod and service networks are now in the `trusted` zone
+  there, as k3s documents. A server without `/etc/fstab` no longer fails the swap step.
 
 ## [0.7.0] - 2026-11-01
 
