@@ -159,7 +159,9 @@ def one_input(data):
             if updates:
                 assert not {"admin_sudo_nopasswd", "webui_firewall_allow_host", "manage_hostname",
                             "baseline_allow_unsupported"} & set(host)
-                assert all(isinstance(t, Typed) for t in host["usas_pve_tags"])
+                # A tag that would load as another type ("", "1", "true") is written as a plain quoted string.
+                assert all(isinstance(t, Typed) or (isinstance(t, str) and looks_typed(t))
+                           for t in host["usas_pve_tags"]), host["usas_pve_tags"]
             else:
                 assert host["admin_sudo_nopasswd"] is True
             assert re.match(IPV4, host["ansible_host"]) and host["ansible_host"] not in ("10.0.0.10",)

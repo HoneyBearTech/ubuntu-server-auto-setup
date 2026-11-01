@@ -281,7 +281,7 @@ def warnings(targets: list[Target], tags: list[str], settings: Settings) -> list
         found.append(f"SSH keys in the login user's authorized_keys that aren't {source} or among the extra keys "
                      "are removed (ssh_keys_exclusive). The check run's diff lists them.")
     if (every or "common" in tags) and settings.apt_upgrade != "no":
-        found.append(f"Every package is upgraded (apt_upgrade: {settings.apt_upgrade}).")
+        found.append(f"Every package is upgraded (pkg_upgrade: {settings.apt_upgrade}).")  # apt_upgrade before 0.7.0
     if (every or "ssh" in tags) and settings.ssh_port != 22:
         found.append(f"SSH moves to port {settings.ssh_port}.")
         if not every and "firewall" not in tags:

@@ -1,0 +1,50 @@
+---
+# Automatic updates (apt-daily, dnf-automatic) and anything else holding the package manager's locks: wait, then
+# leave the server alone. The probe takes each lock the way apt and rpm do (fcntl) and lets go at once; a dnf
+# lock file counts while the process it names runs. Nothing here changes the server.
+- name: Wait for automatic updates and other package managers to finish
+  ansible.builtin.command:
+    argv: [python3, -c, "{{ probe }}", "{{ busy | to_json }}"]
+  register: updates_busy
+  changed_when: false
+  check_mode: false
+  until: updates_busy.stdout | default('x') | length == 0
+  retries: "{{ [(updates_lock_wait | int) // 10, 1] | max }}"
+  delay: "{{ [updates_lock_wait | int, 10] | min }}"
+  ignore_errors: true
+  vars:
+    busy: {units: "{{ updates_os_busy_units }}", locks: "{{ updates_os_locks }}", pids: "{{ updates_os_pid_locks | default([]) }}"}
+    probe: |
+      import fcntl, json, os, subprocess, sys
+      todo = json.loads(sys.argv[1])
+      busy = [u for u in todo["units"] if subprocess.run(["systemctl", "is-active", "--quiet", u]).returncode == 0]
+      for path in todo["locks"]:
+          try:
+              f = open(path, "r+")
+          except OSError:
+              continue
+          with f:
+              try:
+                  fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+              except OSError:
+                  busy.append(path)
+      for path in todo["pids"]:
+          try:
+              with open(path) as f:
+                  pid = int(f.read(20).strip())
+          except (OSError, ValueError):
+              continue
+          if pid > 1 and pid != os.getpid() and os.path.exists(f"/proc/{pid}"):
+              busy.append(path)
+      print("\n".join(busy))
+
+- name: Skip a server whose package manager stays busy
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'status': 'busy', 'reason': 'still busy after ' ~ updates_lock_wait
+      ~ ' seconds: ' ~ (updates_busy.stdout_lines | default([]) | map('usas_clean_text', 80) | join(', '))}) }}
+  when: updates_busy is failed
+
+- name: End here for a busy server
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'

@@ -9,7 +9,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | --- | --- | --- | --- |
 | Lint and syntax | yamllint, ansible-lint (`production` profile), a syntax check of every playbook, actionlint, ruff (the web UI's Python), hadolint (the Dockerfile); TypeScript's strict type check of the web UI's app runs with its tests | `make lint`, `make syntax` | every pull request and push to `main` (required) |
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
-| Updates tests | the updates playbook against two servers with updates waiting in a signed test repository, on Ubuntu 22.04, 24.04 and 26.04 and Debian 12 and 13: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
+| Updates tests | the updates playbook against two servers with updates waiting in a signed test repository (apt, or dnf with a security advisory), on Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and CentOS Stream, Rocky Linux and AlmaLinux 9 and 10: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=rocky-9` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`; the RHEL family: `dnf needs-restarting` after a core package is installed again), a release the OS catalog doesn't list refused (and run with `baseline_allow_unsupported`), a move to port 2222, notifications and the mail relay, and the baseline roles' task coverage (each run counting its own family's task files) | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
@@ -162,7 +162,7 @@ from Docker's one address, so the script pauses between some steps.
 ## The updates tests
 
 `tests/updates.sh` runs `playbooks/updates.yml` against two containers built from
-`tests/images/ubuntu-target` (stage `updates`, for the release in `OS`, Ubuntu or Debian): `upd-usas` stands in for a server
+`tests/images/ubuntu-target` (stage `updates`, for the release in `OS`, Ubuntu, Debian or the RHEL family): `upd-usas` stands in for a server
 this project installed (`servers`, sudo with a password), `upd-other` for one it didn't
 (`other_servers`, its own user, passwordless sudo), on `127.0.0.1:2341` and `2342`. The image replaces
 Ubuntu's archive with a repository built at image build time (`test-repo.sh`): small packages with newer
@@ -176,6 +176,17 @@ report the reboot and name `linux-image-<version>`, and removing it clears it. I
 apt checks it as it would Ubuntu's. A container shares the Docker host's kernel, whose boot ID doesn't
 change, so the image writes a new ID to `/run/usas-boot-id` at each start and the tests point
 `updates_boot_time_command` at it; the containers restart on reboot (`--restart=always`).
+
+On the RHEL family the image replaces the distribution's repositories with two dnf repositories built the same
+way (`test-repo-rpm.sh`): the same packages as RPMs, each signed, with signed metadata (`gpgcheck` and
+`repo_gpgcheck` on) and an `updateinfo.xml` whose security advisory names the two security updates. The held
+package is locked with dnf versionlock; the kernel stand-in is listed in
+`/etc/dnf/plugins/needs-restarting.d/`, so `dnf needs-restarting -r` asks for a reboot after its update, as it
+does for a kernel. dnf has no phasing and no `dist` upgrade, so those checks are left out. On CentOS Stream,
+which publishes no errata, the security-only step expects every update and the report's note. A step of its
+own hides `needs-restarting` (as on a server without dnf-plugins-core) and checks the fallback to the kernels in
+`/boot`, a rescue kernel left out. A busy rpm lock (`/var/lib/rpm/.rpm.lock`) stands in for dpkg's. Each run
+counts the task files of its own family for the coverage.
 
 The steps: a check run reports the pending, security, held and phased packages and the automatic-update
 line, and changes nothing; security updates only; everything but an excluded package, whose reboot waits

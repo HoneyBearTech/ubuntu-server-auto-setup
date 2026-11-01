@@ -30,10 +30,12 @@ CACHE="${USAS_IMAGE_CACHE:-$W}"
 mkdir -p "$CACHE"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.secboot.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.ms.fd}"
-# The VM's network card, matched by MAC address in network-config as provisioning matches it. QEMU's user network
-# gives the guest 10.0.2.15 behind 10.0.2.2; the test inventory reaches srv-01 on 127.0.0.1:2201 (and 2222 once
-# the baseline moves SSH there).
+# The VM's network card, matched by MAC address in network-config as provisioning matches it. Its static address
+# is one QEMU's user network doesn't lease (its DHCP gives 10.0.2.15 behind 10.0.2.2), and SSH is forwarded to that
+# address only: an image that ignored network-config and fell back to DHCP can't be reached. The test inventory
+# reaches srv-01 on 127.0.0.1:2201 (and 2222 once the baseline moves SSH there).
 VM_MAC=BC:24:11:00:00:98
+VM_ADDRESS=10.0.2.20
 FIRST_BOOT_TIMEOUT="${FIRST_BOOT_TIMEOUT:-900}"
 qemu_pid=""
 mock_pid=""
@@ -138,7 +140,7 @@ cat >"$W/vars.json" <<EOF
  "admin_user": "sysadmin", "net_mode": "static", "net_dns": ["10.0.2.3"], "net_search": [],
  "provision_password_hash": "$(openssl passwd -6 test-password)",
  "provision_ssh_keys": ["$(cat "$W/id_ed25519.pub")"],
- "provision_nics": [{"key": "net0", "mode": "static", "mac": "$VM_MAC", "mtu": "", "address": "10.0.2.15",
+ "provision_nics": [{"key": "net0", "mode": "static", "mac": "$VM_MAC", "mtu": "", "address": "$VM_ADDRESS",
                      "prefix": 24, "gateway": "10.0.2.2"}]}
 EOF
 ansible-playbook -i localhost, -c local "$W/render.yml" -e "@$W/vars.json" | sed -n '/PLAY RECAP/,$p'
@@ -161,7 +163,7 @@ start_vm() {
     -device virtio-scsi-pci,id=scsihw0 \
     -drive "if=none,id=drive-scsi0,file=$W/disk.qcow2,format=qcow2,discard=unmap" \
     -device scsi-hd,drive=drive-scsi0,bus=scsihw0.0,bootindex=1 \
-    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:2201-:22,hostfwd=tcp:127.0.0.1:2222-:2222" \
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:2201-$VM_ADDRESS:22,hostfwd=tcp:127.0.0.1:2222-$VM_ADDRESS:2222" \
     -device "virtio-net-pci,netdev=net0,mac=$VM_MAC" \
     -device virtio-serial-pci,id=qga0 -chardev "socket,path=$W/qga.sock,server=on,wait=off,id=qga" \
     -device virtserialport,bus=qga0.0,chardev=qga,name=org.qemu.guest_agent.0 \
@@ -197,6 +199,12 @@ for _ in $(seq 1 60); do on_vm test ! -e /run/nologin 2>/dev/null && break; slee
 step "What the first boot left"
 on_vm 'test -e /etc/cloud/cloud-init.disabled && sudo -n test -e /etc/sudoers.d/90-ansible-sysadmin && hostname' \
   | grep -qx srv-01 || { echo "ERROR: cloud-init didn't set up the server as the seed says" >&2; exit 1; }
+# The address and default route from network-config, not a lease (cloud-init skips all of it if it can't read it).
+net="$(on_vm 'ip -4 -o address show scope global; ip -4 route show default')"
+if ! grep -q " inet $VM_ADDRESS/24 " <<<"$net" || ! grep -q '^default via 10.0.2.2 ' <<<"$net" \
+  || grep -q dynamic <<<"$net"; then
+  printf '%s\n' "$net" >&2; echo "ERROR: the VM doesn't have network-config's static address" >&2; exit 1
+fi
 # The baseline deletes cloud-init's cached copies of the seed only when this says disabled (roles/common).
 # Run as root, as the baseline runs it: on the RHEL family /run/cloud-init/cloud.cfg is root's only.
 ci_status="$(on_vm 'sudo -n cloud-init status 2>&1; cloud-init --version 2>&1' || true)"

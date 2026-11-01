@@ -106,7 +106,8 @@ defaults and the advice in the README's "Running it securely" section and in [we
   VM is created and again before the baseline formats a disk, so none can add an option to a Proxmox disk
   (fuzzed in `tests/fuzz/fuzz_data_disks.py`). The baseline formats only a disk on which `blkid -p` finds
   nothing, found by the serial it was created with, never by its kernel name; a disk that holds anything is left
-  as it is. Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
+  as it is, and one is the disk's own only when blkid reports exactly its file system type and label (blkid's
+  output is read one field per newline, so no character in a label can make up another field). Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
   in the role), and `vm_spread_group` is checked from the VM list the token already reads.
 
 <a id="the-proxmox-node-user-optional"></a>
@@ -273,8 +274,12 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - The updates playbook never configures a server: it reads, installs the updates you chose, reboots only
   with `updates_reboot: if_required`, and checks health. It doesn't stop, mask or change automatic updates,
   write holds, or install anything that isn't an update of an installed package or its new dependency.
-- It never turns off package signature checks: apt checks every package against the server's own keyrings
-  (`tests/updates.sh` fails if the role names an option that would turn that off).
+- It never turns off package signature checks: apt and dnf check every package against the server's own
+  keys (`tests/updates.sh` fails if the role names an option that would turn that off). On the RHEL family
+  the metadata refresh answers no question, so a repository whose key isn't imported yet fails the check
+  instead of being trusted by the playbook; the install itself imports a key only as dnf always does, from
+  the `gpgkey` that root configured for the repository. The packages left out (excludes, versionlock) are
+  passed to dnf as excludes too, and a dry run first skips a server whose updates would pull one in.
 - A server outside `servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
   password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
   there could read it. Host keys are checked strictly on every connection, as for every playbook.
@@ -282,7 +287,8 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
   or tags, so it can't pick up another host's variables) and reached only with its host key pinned under its
   VM ID (`usas-<cluster>-<vmid>`): a guest that reports another VM's address gets a refused connection, and
   a key that isn't pinned is reported, never trusted. Stopped, locked, opted-out and other VMs it mustn't
-  update are reported without being contacted.
+  update are reported without being contacted. Its API token is the inventory's own, read from the Vault in
+  `group_vars` as the playbooks read it, so it needn't be copied into the plugin's file.
 - What servers report (package names, versions, services) is checked against the role's patterns, stripped
   of control characters and capped at 5,000 entries per list before it reaches the report, which is
   readable only by the control node's user.

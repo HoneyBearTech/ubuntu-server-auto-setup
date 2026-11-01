@@ -2,8 +2,10 @@
 # Integration tests of the updates playbook: runs playbooks/updates.yml against two containers that have
 # updates waiting in a signed test repository (tests/images/ubuntu-target, stage "updates"), checks what was
 # installed, the reports, reboots and health checks, that a second run changes nothing, and the role's task
-# coverage. OS picks the release (ubuntu-26.04 by default; ubuntu-22.04, ubuntu-24.04, debian-12 and debian-13
-# too; CI runs each). Needs Docker (privileged
+# coverage. OS picks the release (ubuntu-26.04 by default; ubuntu-22.04, ubuntu-24.04, debian-12, debian-13,
+# centos-stream-9, centos-stream-10, rocky-9, rocky-10, alma-9 and alma-10 too; CI runs each). On the RHEL family
+# the repository is a signed dnf one, with a security advisory, and usas-test-held is held with dnf versionlock.
+# Needs Docker (privileged
 # containers, for systemd), Python with requirements-ci.txt and the Ansible collections. Run it with
 # make test-updates. With USAS_LOG_DIR set, a failed run keeps its logs there. See docs/testing.md.
 set -euo pipefail
@@ -12,10 +14,28 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 OS="${OS:-ubuntu-26.04}"
-case "$OS" in ubuntu-22.04|ubuntu-24.04|ubuntu-26.04|debian-12|debian-13) ;;
-  *) echo "OS must be ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, debian-12 or debian-13" >&2; exit 2;; esac
-VERSION="${OS#*-}"
-case "$OS" in ubuntu-*) DISTRO=Ubuntu ;; *) DISTRO=Debian ;; esac
+case "$OS" in
+  ubuntu-22.04|ubuntu-24.04|ubuntu-26.04|debian-12|debian-13) ;;
+  centos-stream-9|centos-stream-10|rocky-9|rocky-10|alma-9|alma-10) ;;
+  *) echo "OS must be ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, debian-12, debian-13, centos-stream-9," \
+       "centos-stream-10, rocky-9, rocky-10, alma-9 or alma-10" >&2; exit 2;; esac
+VERSION="${OS##*-}"
+case "$OS" in
+  ubuntu-*) DISTRO=Ubuntu FAMILY=Debian ;;
+  debian-*) DISTRO=Debian FAMILY=Debian ;;
+  centos-*) DISTRO=CentOS FAMILY=RedHat ;;
+  rocky-*) DISTRO=Rocky FAMILY=RedHat ;;
+  *) DISTRO=AlmaLinux FAMILY=RedHat ;;
+esac
+# CentOS Stream publishes no security errata: there "security only" installs every update (the test repository's
+# advisory is ignored, as the role ignores any on Stream).
+ERRATA=true
+if [ "$DISTRO" = CentOS ]; then ERRATA=false; fi
+if [ "$FAMILY" = RedHat ]; then
+  SSH_UNIT=sshd.service SSH_UNITS=sshd.service PKG_LOCK=/var/lib/rpm/.rpm.lock OTHER_FAMILY=Debian
+else
+  SSH_UNIT=ssh.service SSH_UNITS="ssh.socket ssh.service" PKG_LOCK=/var/lib/dpkg/lock-frontend OTHER_FAMILY=RedHat
+fi
 TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/usas-updates.XXXXXX")"
 export TEST_TMP
 export ANSIBLE_CONFIG="$ROOT/ansible.cfg"
@@ -107,8 +127,12 @@ PY
 
 # The installed version of each test package, as "name=version ...".
 versions() {
-  docker exec "$1" dpkg-query -W -f='${Package}=${Version} ' usas-test-tool usas-test-extra usas-test-kernel \
-    usas-test-pcr7 usas-test-held usas-test-phased usas-test-newdep 2>/dev/null || true
+  if [ "$FAMILY" = RedHat ]; then
+    docker exec "$1" rpm -qa --qf '%{NAME}=%{VERSION} ' 'usas-test-*' 2>/dev/null || true
+  else
+    docker exec "$1" dpkg-query -W -f='${Package}=${Version} ' usas-test-tool usas-test-extra usas-test-kernel \
+      usas-test-pcr7 usas-test-held usas-test-phased usas-test-newdep 2>/dev/null || true
+  fi
 }
 
 expect_versions() {
@@ -142,9 +166,20 @@ fresh() {
   fi
   docker exec -i "$name" sh -c "cat > /home/$user/.ssh/authorized_keys && chown $user: /home/$user/.ssh/authorized_keys \
     && chmod 600 /home/$user/.ssh/authorized_keys" <"$TEST_TMP/id_ed25519.pub"
+  # sshd answers before systemd has finished booting, and until then pam_nologin refuses every user but root
+  # (/run/nologin, removed by systemd-user-sessions). Right after the start /run/nologin may not exist yet, so
+  # wait for systemd to say the boot is over first.
+  local state=""
+  for _ in $(seq 1 120); do
+    state="$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)"
+    case "$state" in running|degraded) docker exec "$name" test ! -e /run/nologin && break ;; esac
+    sleep 1
+  done
+  case "$state" in running|degraded) ;; *) echo "ERROR: $name never finished booting ($state)" >&2; return 1 ;; esac
+  docker exec "$name" test ! -e /run/nologin || { echo "ERROR: $name still refuses logins (/run/nologin)" >&2; return 1; }
   wait_ssh "$port"
   # Host keys of its own (the image's are shared by every container), so a host key pin tells them apart.
-  docker exec "$name" sh -c 'rm -f /etc/ssh/ssh_host_*_key* && ssh-keygen -A >/dev/null && systemctl restart ssh.service'
+  docker exec "$name" sh -c "rm -f /etc/ssh/ssh_host_*_key* && ssh-keygen -A >/dev/null && systemctl restart $SSH_UNIT"
   wait_ssh "$port"
   ssh-keygen -q -R "[127.0.0.1]:$port" -f "$TEST_TMP/known_hosts" >/dev/null 2>&1 || true
   ssh-keyscan -p "$port" 127.0.0.1 2>/dev/null >>"$TEST_TMP/known_hosts"
@@ -168,13 +203,17 @@ step "Check mode reports what each server would install, and changes nothing"
 play --idempotent --check
 expect_versions "$UPD1" usas-test-tool=1.0 usas-test-extra=1.0 usas-test-kernel=1.0
 expect_versions "$UPD2" usas-test-tool=1.0 usas-test-pcr7=1.0
+# apt holds the phased update back; dnf has no phasing. CentOS Stream counts no security updates, and its
+# dnf-automatic installs every update (as the baseline sets it up there).
+if [ "$FAMILY" = RedHat ]; then DEFERRED='[]'; else DEFERRED="['usas-test-phased']"; fi
+if $ERRATA; then SECURITY=2 AUTO='security'; else SECURITY=0 AUTO='all updates'; fi
 report "run['mode'] == 'check'" \
   "all(r['status'] == 'pending' and r['checked'] for r in h.values())" \
   "sorted(h['upd-usas']['planned']) == ['usas-test-extra', 'usas-test-kernel', 'usas-test-newdep', 'usas-test-pcr7', 'usas-test-tool']" \
-  "h['upd-usas']['security_count'] == 2 and h['upd-usas']['held'] == ['usas-test-held']" \
-  "h['upd-usas']['deferred'] == ['usas-test-phased']" \
+  "h['upd-usas']['security_count'] == $SECURITY and h['upd-usas']['held'] == ['usas-test-held']" \
+  "h['upd-usas']['deferred'] == $DEFERRED" \
   "h['upd-usas']['reboot']['expected'] and not h['upd-usas']['reboot']['required']" \
-  "h['upd-usas']['auto_updates'] == 'Automatic: security daily, no reboot'" \
+  "h['upd-usas']['auto_updates'] == 'Automatic: $AUTO daily, no reboot'" \
   "h['upd-usas']['installed_by_usas'] and not h['upd-other']['installed_by_usas']" \
   "h['upd-usas']['os']['facts'].startswith('$DISTRO $VERSION')"
 
@@ -189,12 +228,34 @@ if [ "$DISTRO" = Debian ]; then
   report "not h['upd-usas']['reboot']['required']"
 fi
 
+if [ "$FAMILY" = RedHat ]; then
+  step "Without dnf's needs-restarting, a newer kernel in /boot than the one running wants a reboot"
+  # As on a server without dnf-plugins-core: dnf says it has no such command.
+  docker exec "$UPD1" sh -c 'mkdir -p /root/hidden && mv /usr/lib/python3*/site-packages/dnf-plugins/needs_restarting.py /root/hidden/ \
+    && mkdir -p /boot && touch /boot/vmlinuz-999.0.0-usas-test.x86_64 /boot/vmlinuz-0-rescue-0123456789abcdef'
+  play --idempotent --check --limit upd-usas
+  report "h['upd-usas']['reboot']['required']" \
+    "h['upd-usas']['reboot']['packages'] == ['kernel-999.0.0-usas-test.x86_64']"
+  docker exec "$UPD1" sh -c 'rm /boot/vmlinuz-999.0.0-usas-test.x86_64 /boot/vmlinuz-0-rescue-0123456789abcdef \
+    && mv /root/hidden/needs_restarting.py "$(echo /usr/lib/python3*/site-packages/dnf-plugins)/"'
+  play --idempotent --check --limit upd-usas
+  report "not h['upd-usas']['reboot']['required']"
+fi
+
 step "Security updates only, on a server this project installed"
 play --limit upd-usas -e updates_scope=security
-expect_versions "$UPD1" usas-test-tool=1.2 usas-test-pcr7=1.1 usas-test-newdep=1.0 usas-test-extra=1.0 \
-  usas-test-kernel=1.0 usas-test-held=1.0 usas-test-phased=1.0
-report "h['upd-usas']['status'] == 'updated'" \
-  "sorted(u['name'] for u in h['upd-usas']['upgraded']) == ['usas-test-newdep', 'usas-test-pcr7', 'usas-test-tool']"
+if $ERRATA; then
+  expect_versions "$UPD1" usas-test-tool=1.2 usas-test-pcr7=1.1 usas-test-newdep=1.0 usas-test-extra=1.0 \
+    usas-test-kernel=1.0 usas-test-held=1.0
+  report "h['upd-usas']['status'] == 'updated'" \
+    "sorted(u['name'] for u in h['upd-usas']['upgraded']) == ['usas-test-newdep', 'usas-test-pcr7', 'usas-test-tool']"
+else
+  expect_versions "$UPD1" usas-test-tool=1.2 usas-test-pcr7=1.1 usas-test-newdep=1.0 usas-test-extra=1.1 \
+    usas-test-kernel=1.1 usas-test-held=1.0
+  report "h['upd-usas']['status'] == 'updated'" \
+    "'publishes no security errata: updates_scope security installs every update' in h['upd-usas']['os']['warning']"
+fi
+if [ "$FAMILY" = Debian ]; then expect_versions "$UPD1" usas-test-phased=1.0; fi
 
 step "Everything but an excluded package, on a server this project didn't install: the reboot it needs waits"
 boot="$(boot_id "$UPD2")"
@@ -220,7 +281,7 @@ fresh "$UPD1" 2341 sysadmin
 boot="$(boot_id "$UPD1")"
 python3 -m http.server --bind 127.0.0.1 --directory "$TEST_TMP" 2349 >/dev/null 2>&1 &
 web_pid=$!
-play --limit upd-usas -e updates_reboot=if_required -e '{"updates_health_services": ["ssh.service"],
+play --limit upd-usas -e updates_reboot=if_required -e '{"updates_health_services": ["'"$SSH_UNIT"'"],
   "updates_health_urls": [{"url": "http://127.0.0.1:2349/known_hosts", "status": 200}]}'
 kill "$web_pid"
 web_pid=""
@@ -264,13 +325,13 @@ play_fails 'updates_window.start must be a time' -e '{"updates_window": {"start"
 expect_versions "$UPD1" usas-test-tool=1.0
 
 step "A busy package manager: the server is skipped, then updated once the lock is free"
-docker exec -d "$UPD1" python3 -c 'import fcntl, time
-f = open("/var/lib/dpkg/lock-frontend", "r+")
+docker exec -d "$UPD1" python3 -c "import fcntl, time
+f = open('$PKG_LOCK', 'r+')
 fcntl.lockf(f, fcntl.LOCK_EX)
-time.sleep(45)'
+time.sleep(45)"
 sleep 2
 play --limit upd-usas
-report "h['upd-usas']['status'] == 'busy' and '/var/lib/dpkg/lock-frontend' in h['upd-usas']['reason']"
+report "h['upd-usas']['status'] == 'busy' and '$PKG_LOCK' in h['upd-usas']['reason']"
 expect_versions "$UPD1" usas-test-tool=1.0
 for _ in $(seq 1 60); do docker exec "$UPD1" pgrep -f fcntl.lockf >/dev/null || break; sleep 1; done
 play --limit upd-usas
@@ -289,16 +350,16 @@ report "h['upd-other']['status'] == 'unreachable'"
 # A server that stops answering during its update is unreachable too, not failed: here it comes back from its
 # reboot, then a unit that holds up its start stops SSH while the health check waits for it.
 fresh "$UPD1" 2341 sysadmin
-docker exec "$UPD1" sh -c 'cat >/etc/systemd/system/usas-test-gone.service <<EOF
+docker exec -i "$UPD1" sh -c 'cat >/etc/systemd/system/usas-test-gone.service && systemctl enable usas-test-gone.service' \
+  >/dev/null 2>&1 <<EOF
 [Unit]
 Description=Stops SSH 15 seconds into the next boot (updates tests)
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c "sleep 15; systemctl stop ssh.socket ssh.service; pkill sshd"
+ExecStart=/bin/sh -c "sleep 15; systemctl stop $SSH_UNITS; pkill sshd"
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl enable usas-test-gone.service' >/dev/null 2>&1
 play_fails "couldn't be reached" --limit upd-usas -e updates_reboot=if_required
 report "h['upd-usas']['status'] == 'unreachable' and 'stopped answering after its reboot' in h['upd-usas']['reason']" \
   "h['upd-usas']['reboot']['done']"
@@ -312,11 +373,13 @@ report "sorted(r['status'] for r in h.values()) == ['failed', 'skipped']" \
   "any(r['status'] == 'skipped' and r['reason'].startswith('not started: 1 of 1') for r in h.values())" \
   "any('not running: usas-test-fragile.service' in r['health']['problems'] for r in h.values())"
 
-step "A dist upgrade installs every update but the held one"
-fresh "$UPD2" 2342 ops
-play --limit upd-other -e updates_apt_upgrade=dist
-expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.1 usas-test-kernel=1.1 usas-test-pcr7=1.1 usas-test-held=1.0
-report "h['upd-other']['status'] == 'updated' and h['upd-other']['removals'] == []"
+if [ "$FAMILY" = Debian ]; then
+  step "A dist upgrade installs every update but the held one"
+  fresh "$UPD2" 2342 ops
+  play --limit upd-other -e updates_apt_upgrade=dist
+  expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.1 usas-test-kernel=1.1 usas-test-pcr7=1.1 usas-test-held=1.0
+  report "h['upd-other']['status'] == 'updated' and h['upd-other']['removals'] == []"
+fi
 
 step "Notifications: a summary by mail (STARTTLS, certificate checked) and to a webhook, when something changed"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 -addext "subjectAltName=IP:127.0.0.1" \
@@ -389,6 +452,21 @@ fresh "$UPD2" 2342 ops
 pin_cluster
 ansible-inventory "${INV[@]}" "${CLUSTER[@]}" --graph >"$TEST_TMP/cluster-graph.txt"
 grep -q "vm-4087" "$TEST_TMP/cluster-graph.txt" && { echo "ERROR: the excluded VM 4087 is in the inventory" >&2; exit 1; }
+# The API token in the Vault next to the inventory (group_vars/all/vault.yml), as the web UI and
+# inventory/vault.example.yml keep it: the plugin must read it as the playbooks would.
+mkdir -p "$TEST_TMP/vault-inventory/group_vars/all"
+sed -e 's/^    pve_api_token_id: .*/    pve_api_token_id: "{{ vault_pve_api_token_id }}"/' \
+  -e 's/^    pve_api_token_secret: .*/    pve_api_token_secret: "{{ vault_pve_api_token_secret }}"/' \
+  tests/inventory/updates-cluster.yml >"$TEST_TMP/vault-inventory/hosts.yml"
+grep -q 'vault_pve_api_token_secret' "$TEST_TMP/vault-inventory/hosts.yml"
+printf 'vault_pve_api_token_id: test\nvault_pve_api_token_secret: 00000000-0000-4000-8000-000000000000\n' \
+  >"$TEST_TMP/vault-inventory/group_vars/all/vault.yml"
+printf 'test-vault-password\n' >"$TEST_TMP/vault-pass"
+ansible-vault encrypt --vault-password-file "$TEST_TMP/vault-pass" "$TEST_TMP/vault-inventory/group_vars/all/vault.yml" >/dev/null
+ansible-inventory -i "$TEST_TMP/vault-inventory/hosts.yml" -i "$TEST_TMP/cluster.usas_pve.yml" \
+  --vault-password-file "$TEST_TMP/vault-pass" --graph >"$TEST_TMP/vault-graph.txt"
+grep -q "vm-4093" "$TEST_TMP/vault-graph.txt" \
+  || { cat "$TEST_TMP/vault-graph.txt"; echo "ERROR: the cluster inventory didn't read the token from the Vault" >&2; exit 1; }
 play --idempotent --check "${CLUSTER[@]}" --limit 'all:!upd-other:!vm-4094'
 report "h['upd-usas']['pve']['node'] == 'pve-test-2' and h['upd-usas']['installed_by_usas']" \
   "h['vm-4093']['status'] == 'pending' and not h['vm-4093']['installed_by_usas']" \
@@ -400,8 +478,9 @@ report "h['upd-usas']['pve']['node'] == 'pve-test-2' and h['upd-usas']['installe
 play_fails "couldn't be reached" "${CLUSTER[@]}" --limit 'all:!upd-other' -e updates_scope=security
 report "h['vm-4094']['status'] == 'unreachable' and \"isn't trusted as usas-mock-cluster-4094\" in h['vm-4094']['reason']" \
   "h['vm-4093']['status'] == 'updated' and h['upd-usas']['status'] == 'updated'"
-expect_versions "$UPD1" usas-test-tool=1.2 usas-test-extra=1.0
-expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=1.0
+if $ERRATA; then EXTRA=1.0; else EXTRA=1.1; fi
+expect_versions "$UPD1" usas-test-tool=1.2 usas-test-extra=$EXTRA
+expect_versions "$UPD2" usas-test-tool=1.2 usas-test-extra=$EXTRA
 # A cluster inventory that can't be read stops the run (any_unparsed_is_failed), rather than leaving its VMs out.
 printf 'plugin: usas_pve\nexclude: ["4087; rm -rf /"]\n' >"$TEST_TMP/bad.usas_pve.yml"
 play_fails "exclude has values that aren't plain names" -i tests/inventory/updates-cluster.yml \
@@ -429,6 +508,8 @@ print(f"mock state: {len(sys.argv) - 1} checks passed")
 PY
 }
 SNAP=("${CLUSTER[@]}" -e updates_snapshot=true)
+# On CentOS Stream the security run above installed everything: both servers need updates waiting again.
+if ! $ERRATA; then fresh "$UPD1" 2341 sysadmin; fresh "$UPD2" 2342 ops; pin_cluster; fi
 mock_set '{"vmid": 4093, "set": {"feature_snapshot": false}}'
 play --idempotent "${SNAP[@]}" --limit vm-4093
 report "h['vm-4093']['status'] == 'skipped'" \
@@ -500,6 +581,7 @@ kill "$mock_pid"
 mock_pid=""
 
 step "Task coverage of the updates role"
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles updates
+# Each run counts its own family's task files (tasks/*/Debian.yml or tasks/*/RedHat.yml).
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles updates --skip-files "*/$OTHER_FAMILY.yml"
 
 step "All updates tests passed on $OS"

@@ -34,7 +34,8 @@ Ansible playbooks that install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 
 Linux and AlmaLinux 9 and 10 on fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys,
 and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic security updates. Every
 release installs from its vendor's cloud image, and Ubuntu also from its installer ISO; the baseline also runs
-on servers this project didn't install. Run the playbooks from a
+on servers this project didn't install. Afterwards the updates playbook keeps the servers updated, a wave at a
+time, with health checks and a report, by hand or on a schedule. Run the playbooks from a
 checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
 on Windows, Linux or macOS.
 
@@ -116,7 +117,8 @@ Three playbooks, run from your own machine (the "control node") or from the cont
      [docs/security.md](docs/security.md#optional-hardening-and-notifications).
 
 Afterwards, **`playbooks/updates.yml`** keeps the servers updated, the ones this project installed and any
-others you add to the group `other_servers`. Ubuntu 22.04, 24.04 and 26.04 are supported. It never
+others you add to the group `other_servers`, on every release the baseline supports (Ubuntu, Debian and
+the RHEL family). It never
 configures a server: `make updates-check` reports what each would install (security, held and phased
 packages included) and what its automatic updates already do. `make updates` installs the updates, a wave
 of servers at a time, never two of an update group together. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
