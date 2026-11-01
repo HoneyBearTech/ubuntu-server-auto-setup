@@ -117,7 +117,8 @@ Three playbooks, run from your own machine (the "control node") or from the cont
      [docs/security.md](docs/security.md#optional-hardening-and-notifications).
 
 Afterwards, **`playbooks/updates.yml`** keeps the servers updated, the ones this project installed and any
-others you add to the group `other_servers`. Ubuntu 22.04, 24.04 and 26.04 are supported. It never
+others you add to the group `other_servers`, on every release the baseline supports (Ubuntu, Debian and
+the RHEL family). It never
 configures a server: `make updates-check` reports what each would install (security, held and phased
 packages included) and what its automatic updates already do. `make updates` installs the updates, a wave
 of servers at a time, never two of an update group together. It reboots only with `updates_reboot: if_required`, inside a window you choose, and

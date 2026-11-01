@@ -8,6 +8,7 @@ always the operator's selection applied to names that passed the checks. tests/f
 checks the parsers and the window logic.
 """
 
+import configparser
 import datetime
 import fnmatch
 import re
@@ -20,7 +21,8 @@ description: See the module docstring and roles/updates/tasks/.
 """
 
 # The same patterns as roles/updates/vars/main.yml (tests/fuzz/fuzz_update_reports.py checks they agree).
-PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z")
+# Package names: Debian's (lower case, and :arch) and RPM's (upper case and _ too: NetworkManager, perl-IO-Tty).
+PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z")
 VERSION = re.compile(r"^[A-Za-z0-9.+~:-]{1,128}\Z")
 SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,254}\Z")
 SUITE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}\Z")
@@ -127,6 +129,159 @@ def usas_apt_simulation(stdout, limit=MAX_ENTRIES):
                 else:
                     result["truncated"] = True
     return result
+
+
+# dnf repoquery --qf "%{name}|%{evr}|%{reponame}": one package per line.
+DNF_QUERY = re.compile(r"^([^|\s]+)\|([^|\s]+)\|([^|\s]+)\Z")
+# The sections of dnf's transaction table (dnf --assumeno upgrade ..., in the C locale), and what they do.
+DNF_SECTIONS = {
+    "Upgrading:": "upgrade", "Installing:": "install", "Installing dependencies:": "install",
+    "Installing weak dependencies:": "install", "Reinstalling:": "install", "Downgrading:": "install",
+    "Removing:": "remove", "Removing dependent packages:": "remove", "Removing unused dependencies:": "remove",
+    "Obsoleting:": "remove",
+}
+
+
+def _dnf_query(stdout):
+    """(name, evr, repo) for each line of dnf repoquery --qf "%{name}|%{evr}|%{reponame}" that passes the checks."""
+    for line in _lines(stdout)[: MAX_ENTRIES * 4]:
+        match = DNF_QUERY.match(line.strip())
+        if match and PACKAGE.match(match.group(1)) and VERSION.match(match.group(2)) and SUITE.match(match.group(3)):
+            yield match.groups()
+
+
+def usas_dnf_updates(upgrades, security="", installed="", limit=MAX_ENTRIES):
+    """The pending updates of a dnf host, as usas_apt_simulation's: {"upgrades": [{"name", "current",
+    "candidate", "suites", "security", "new"}], "removals": [], "kept_back": [], "phased": [], "truncated",
+    "skipped"}. upgrades is dnf repoquery --upgrades --latest-limit=1, security the names that repoquery
+    --upgrades --security found (packages an advisory of type security fixes), installed repoquery --installed
+    (the newest installed version is the current one), all with --qf "%{name}|%{evr}|%{reponame}"."""
+    limit = max(min(int(limit), MAX_ENTRIES), 0)
+    result = {"upgrades": [], "removals": [], "kept_back": [], "phased": [], "truncated": False, "skipped": 0}
+    secure = {name for name, _, _ in _dnf_query(security)}
+    current = {}
+    for name, evr, _ in _dnf_query(installed):
+        current[name] = evr
+    seen = set()
+    for line in _lines(upgrades)[: MAX_ENTRIES * 4]:
+        if not line.strip():
+            continue
+        match = DNF_QUERY.match(line.strip())
+        if not match or not PACKAGE.match(match.group(1)) or not VERSION.match(match.group(2)) \
+                or not SUITE.match(match.group(3)):
+            result["skipped"] += 1
+            continue
+        name, candidate, repo = match.groups()
+        if name in seen:
+            continue
+        if len(result["upgrades"]) >= limit:
+            result["truncated"] = True
+            continue
+        seen.add(name)
+        result["upgrades"].append({"name": name, "current": current.get(name, ""), "candidate": candidate,
+                                   "suites": [repo], "security": name in secure, "new": False})
+    return result
+
+
+def usas_dnf_transaction(stdout, limit=MAX_ENTRIES):
+    """What dnf --assumeno upgrade ... would do, from its transaction table in the C locale: {"upgrades":
+    [{"name", "current", "candidate", "suites", "security", "new"}], "removals": [names], "truncated", "skipped"}.
+    A package dnf would newly install (a dependency, a new kernel) is "new". A name too long for its column
+    stands alone on its line, with the rest on the next."""
+    limit = max(min(int(limit), MAX_ENTRIES), 0)
+    result = {"upgrades": [], "removals": [], "truncated": False, "skipped": 0}
+    section, waiting, seen = None, None, set()
+    for line in _lines(stdout)[: MAX_ENTRIES * 4]:
+        if not line.startswith(" "):
+            section, waiting = DNF_SECTIONS.get(line.strip()), None
+            continue
+        if not section:
+            continue
+        words = line.split()
+        if len(words) == 1 and waiting is None:
+            waiting = words[0]
+            continue
+        if waiting is not None:
+            words, waiting = [waiting] + words, None
+        if len(words) < 4:
+            continue
+        name, version, repo = words[0], words[2], words[3]
+        if not PACKAGE.match(name) or not VERSION.match(version):
+            result["skipped"] += 1
+            continue
+        if section == "remove":
+            if name not in result["removals"]:
+                if len(result["removals"]) < limit:
+                    result["removals"].append(name)
+                else:
+                    result["truncated"] = True
+            continue
+        if name in seen:
+            continue
+        if len(result["upgrades"]) >= limit:
+            result["truncated"] = True
+            continue
+        seen.add(name)
+        result["upgrades"].append({"name": name, "current": "", "candidate": version,
+                                   "suites": [repo] if SUITE.match(repo) else [], "security": False,
+                                   "new": section == "install"})
+    return result
+
+
+def usas_versionlock_names(text, limit=MAX_ENTRIES):
+    """The packages dnf versionlock holds, from /etc/dnf/plugins/versionlock.list: "usas-test-held-0:1.0-1.*" is
+    usas-test-held. Exclusions (!name...) and comments aren't locks."""
+    names = []
+    limit = max(min(int(limit), MAX_ENTRIES), 0)
+    for line in _lines(text)[: MAX_ENTRIES * 4]:
+        entry = line.strip()
+        if not entry or entry.startswith(("#", "!")):
+            continue
+        match = re.match(r"^(.+?)-(?:[0-9]+:)?[^-:]+-[^-]+\Z", entry)
+        name = match.group(1) if match else entry
+        if PACKAGE.match(name) and name not in names:
+            if len(names) >= limit:
+                break
+            names.append(name)
+    return names
+
+
+def usas_dnf_auto_updates(conf="", timers=None, installed=False, errata=True):
+    """What dnf-automatic does on a host, as usas_apt_auto_updates: from /etc/dnf/automatic.conf, the is-enabled
+    state of its timers ({unit: output}) and whether it is installed. dnf-automatic.timer installs only with
+    apply_updates; dnf-automatic-install.timer always does; the download and notify-only timers never do.
+    Security on a distribution without errata (CentOS Stream) installs nothing, which the line says."""
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        parser.read_string(str(conf or "")[:200000])
+    except configparser.Error:
+        parser = configparser.ConfigParser(interpolation=None)
+    commands = parser["commands"] if parser.has_section("commands") else {}
+
+    def option(key, default):
+        return usas_clean_text(commands.get(key, default), 32).lower()
+
+    def on(unit):
+        state = str((timers or {}).get(unit, "")).strip()
+        return state in ("enabled", "enabled-runtime", "static", "indirect", "alias")
+
+    applies = option("apply_updates", "no") in ("1", "yes", "true", "on")
+    install_timer, main_timer = on("dnf-automatic-install.timer"), on("dnf-automatic.timer")
+    enabled = bool(installed) and (install_timer or (main_timer and applies))
+    scope = "security" if option("upgrade_type", "default") == "security" else "all updates"
+    reboot = option("reboot", "never")
+    if not enabled:
+        why = ("not installed" if not installed else "timer off" if not (install_timer or main_timer)
+               else "downloads only")
+        line = f"Automatic: off ({why})"
+    else:
+        line = f"Automatic: {scope} daily, " + ("reboot when needed" if reboot == "when-needed"
+                                                 else "reboot after changes" if reboot == "when-changed"
+                                                 else "no reboot")
+        if scope == "security" and not errata:
+            line += " (this distribution publishes no security errata: it installs nothing)"
+    return {"enabled": enabled, "every_days": 1 if enabled else 0, "scope": scope if enabled else "",
+            "reboot": enabled and reboot in ("when-needed", "when-changed"), "reboot_time": "", "line": line}
 
 
 def usas_package_names(stdout, limit=MAX_ENTRIES):
@@ -689,6 +844,10 @@ class FilterModule:
             "usas_clean_text": usas_clean_text,
             "usas_hint_warning": usas_hint_warning,
             "usas_apt_simulation": usas_apt_simulation,
+            "usas_dnf_updates": usas_dnf_updates,
+            "usas_dnf_transaction": usas_dnf_transaction,
+            "usas_versionlock_names": usas_versionlock_names,
+            "usas_dnf_auto_updates": usas_dnf_auto_updates,
             "usas_package_names": usas_package_names,
             "usas_glob_any": usas_glob_any,
             "usas_matching": usas_matching,

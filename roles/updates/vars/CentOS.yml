@@ -1,3 +1,4 @@
 ---
-# CentOS Stream publishes no security errata, so "security only" would install nothing.
+# CentOS Stream publishes no security errata, so "security only" would install nothing: a run with
+# updates_scope: security installs every update there, and the report says so.
 os_security_errata: false
