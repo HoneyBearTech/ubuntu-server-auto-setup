@@ -283,6 +283,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The VMs page's plan said "Every package is upgraded (apt_upgrade: dist)", the setting's name before 0.7.0; it
+  now names `pkg_upgrade`. Found by the v0.7.0 release checklist.
+- The updates playbook run with the container image's own Ansible (`docker exec usas ansible-playbook ...`, as
+  docs/web-ui.md shows) stopped at "Make the report folder": its report went to the project's folder, which is
+  read-only in the image. In the image it now goes to the data volume's `updates/reports`, as the web UI's runs'.
+  Found by the v0.7.0 release checklist.
 - The cluster inventory for the updates playbook (`inventory/pve.usas_pve.yml`) stopped with
   "'vault_pve_api_token_id' is undefined" when the API token was in the Vault next to the inventory
   (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
