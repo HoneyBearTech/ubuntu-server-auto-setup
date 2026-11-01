@@ -274,6 +274,10 @@ rules don't apply to it.
 | `updates_serial` | `25%` | The most servers in a wave: a number (1 to 9999) or a percentage of the servers being updated. Read from the first server: set it for all. |
 | `updates_group_max_parallel`, `updates_node_max_parallel` | `1`, `2` | The most servers of one update group in a wave, and the most that may reboot (`updates_reboot: if_required`) on one Proxmox node (0 to 99, 0 for no limit). Read from the first server: set them for all. |
 | `updates_group` | `""` | The server's update groups: a name or a list (`^[a-z0-9][a-z0-9_.-]{0,62}\Z`, compared in lower case), with the Proxmox tags `usas-group-<name>` of a VM on the cluster. Groups only order the waves. |
+| `updates_k8s_drain` | `true` | For a member of a Kubernetes cluster (in a `k8s_<cluster>_servers` or `_agents` group): cordon and drain its node before a reboot, uncordon it once it's back ([updates.md](updates.md#kubernetes-members)). `false` reboots it without. |
+| `updates_k8s_drain_timeout`, `updates_k8s_ready_timeout` | `300`, `300` | Seconds a drain may take (a drain that doesn't finish uncordons the node and fails the server, unrebooted), and seconds to wait for the node to be Ready again after its reboot. |
+| `updates_k8s_node_name` | the inventory name | The node's name in Kubernetes. |
+| `updates_k8s_wait_longhorn`, `updates_k8s_longhorn_timeout` | `false`, `1800` | After uncordoning a member, wait until every attached Longhorn volume is `healthy` again before the next wave; fail the server after that many seconds. |
 | `updates_notify` | `on-change` | When to notify: `on-change`, `always` or `only-on-error`. |
 | `updates_notify_mail` | `unattended_upgrades_mail` | Mail the run's summary here, through `mail_relay_host` (with `mail_relay_port`, `mail_relay_tls`, `mail_relay_from`, `mail_relay_user`, `mail_relay_password`) from the control node, with the relay's certificate checked. |
 | `updates_webhook_url`, `updates_webhook_format` | `""`, `text` | POST the summary to this http(s) URL (normally from the Vault), as `text` or `json`, as for Fail2Ban. |
@@ -417,6 +421,7 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | `k8s_fetch_readonly_kubeconfig` | `false` | Write a kubeconfig of a read-only account to `k8s_readonly_kubeconfig` on the control node (0600). |
 | `k8s_readonly_kubeconfig` | `<inventory dir>/kube/<cluster>-readonly.yaml` | Where. |
 | `k8s_ready_timeout` | `300` | Seconds to wait for a node to be Ready after k3s starts. |
+| `k8s_drain_timeout` | `300` | Seconds a node's drain may take during an upgrade (`--tags upgrade`). |
 
 `k8s_node_ip` and `k8s_flannel_backend` ([Kubernetes nodes](#kubernetes-nodes)) apply here too: each member's
 `node-ip` is its `k8s_node_ip` (or `ansible_host`), and the node's name in Kubernetes is its inventory name.
@@ -442,10 +447,39 @@ What the playbook does:
   read-only kubeconfig: a ServiceAccount (`kube-system/usas-readonly`) bound to the `view` ClusterRole, plus reading
   nodes. Deleting its Secret (`usas-readonly-token`) revokes the token; the next run makes a new one.
 
-The admin kubeconfig stays on the servers (`/etc/rancher/k3s/k3s.yaml`, 0600): use `sudo k3s kubectl` there. The
-playbook doesn't upgrade k3s yet: a member that runs another release than `k8s_version` is refused. Turning
-kube-vip, the cloud provider or the read-only account off removes their manifests, so k3s stops applying them,
-but what they made stays until you delete it (`sudo k3s kubectl delete ...`).
+The admin kubeconfig stays on the servers (`/etc/rancher/k3s/k3s.yaml`, 0600): use `sudo k3s kubectl` there. A
+run without tags refuses a member that runs another release than `k8s_version`: moving a cluster to another
+release is an upgrade (below). Turning kube-vip, the cloud provider or the read-only account off removes their
+manifests, so k3s stops applying them, but what they made stays until you delete it (`sudo k3s kubectl delete
+...`).
+
+#### Upgrades
+
+`make kubernetes-upgrade` (`playbooks/kubernetes.yml --tags upgrade`) moves each cluster to its `k8s_version`, one
+node at a time. Set the new release in the cluster's `group_vars` and run it; `--tags upgrade` runs on its own
+(with other tags the install would replace every member's binary at once).
+
+- **Checks first, on every member,** as for an install, and then that it already runs k3s and that
+  `k8s_version` is the same release, a newer patch or k3s build of its minor release, or the next minor
+  (`v1.36.5+k3s1` → `v1.37.1+k3s1`). Going back to an older release, or skipping a minor, is refused before
+  anything changes: go through the catalog's releases of each minor in turn.
+- **The lock:** the run creates the ConfigMap `kube-system/usas-upgrade-lock` (its release and start time); the
+  API refuses a second one, so a second run of the same cluster stops before it changes anything, naming the
+  release and time of the one that holds it. The lock is removed when every node is upgraded. A run that
+  fails leaves it: look at the cluster (`sudo k3s kubectl get nodes` on a server; a node may still be
+  cordoned), then delete it (`sudo k3s kubectl --namespace=kube-system delete configmap usas-upgrade-lock`)
+  and run the upgrade again, which leaves the members already on the release alone. Every member must be a
+  Ready node before the run takes the lock.
+- **Servers, one at a time, then the agents, one at a time.** For each member not on the release yet: cordon and
+  drain its node (`k3s kubectl drain --ignore-daemonsets --delete-emptydir-data --timeout=<k8s_drain_timeout>s`)
+  from another server (a cluster's only server drains itself). A server that holds the VIP (kube-vip's lease
+  `kube-system/plndr-cp-lock`) first stops its kube-vip, so that another server takes the address, and the run
+  waits until the API answers there, with k3s' certificate: restarting k3s alone would leave kube-vip running
+  and the address on an API that's down. Then the new binary (only if it matches the catalog's SHA-256;
+  relabelled for SELinux), a restart, and a wait until the node is Ready on the new release and, on a server,
+  its etcd is healthy (`/readyz/etcd`) and the API answers on the VIP again. Then it's uncordoned.
+- A pod that can't be evicted in time (a PodDisruptionBudget that doesn't allow it, a pod no controller manages)
+  stops the upgrade with its node cordoned and the lock held.
 
 ### Vault variables
 
@@ -473,6 +507,7 @@ but what they made stays until you delete it (`sudo k3s kubectl delete ...`).
 | `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
 | `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a wave at a time ([waves](updates.md#waves)). Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
 | `make kubernetes` | `playbooks/kubernetes.yml` | the `k8s_<cluster>_servers` and `_agents` groups | Install k3s on each cluster's members and start it: the first server, the others one at a time, then the agents ([Kubernetes clusters](#kubernetes-clusters)). Changes the binary, its unit, its configuration and kube-vip's manifests; refuses a member on another k3s release. |
+| `make kubernetes-upgrade` | `playbooks/kubernetes.yml --tags upgrade` | as `make kubernetes` | Move each cluster to its `k8s_version`, forward one minor release at a time, under a lock in the cluster: the servers one at a time, then the agents, each drained, the VIP handed to another server first, uncordoned once Ready ([upgrades](#upgrades)). Changes the binary and restarts k3s, one member at a time. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=debian-12` or `OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
@@ -524,7 +559,10 @@ per status) and `hosts`, one object per server with: `host`, `status` (`updated`
 `removed` (taken, then deleted by `updates_snapshot_keep: 0`) or `none`; `name`, `node`, `reason` when there is
 none, `warning`, `deleted`: the names of this playbook's older snapshots it deleted), `wave` (`number` from 1,
 or 0 when the server wasn't planned; `of`, the number of waves; `groups`, its update groups; `ha`, whether
-Proxmox HA manages the VM), `pve` (`vmid`, `node`, `name`, `alias`), `started` and `finished`.
+Proxmox HA manages the VM), `k8s` (`cluster` and `role`, `server` or `agent`, both empty for a server in no
+Kubernetes cluster; `drain`, whether `updates_k8s_drain` is on; `drained` and `uncordoned`, whether this run
+drained the node before its reboot and uncordoned it after; `from`, the server it was drained from; `longhorn`,
+`healthy` once Longhorn's volumes were), `pve` (`vmid`, `node`, `name`, `alias`), `started` and `finished`.
 Names and text in it come from the servers, after the checks described in [updates.md](updates.md#the-report);
 new keys may be added in a minor release, and existing ones keep their meaning.
 
@@ -654,7 +692,7 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | k3s' releases (`github.com/k3s-io/k3s/releases`, redirecting to GitHub's asset host) | Kubernetes members | HTTPS, no authentication; the binary must have the SHA-256 the k3s catalog pins | The k3s binary. |
 | `ghcr.io` and the registries k3s pulls its own images from (`docker.io/rancher/...`) | Kubernetes members (containerd) | HTTPS, no authentication; kube-vip's and the cloud provider's images by the digest the catalog pins, k3s' own images by the tags its release names | Container images. |
 | `rpm.rancher.io` | Kubernetes members on the RHEL family | HTTPS; packages signed by Rancher's key, pinned by fingerprint (`gpgcheck=1`), metadata unsigned | `k3s-selinux`. |
-| Kubernetes members | control node | SSH as `admin_user`, key; sudo. The tokens go only into each member's `config.yaml` | Install and start k3s; `k3s kubectl` on the servers, as root, to wait for nodes and read the read-only account's token. |
+| Kubernetes members | control node | SSH as `admin_user`, key; sudo. The tokens go only into each member's `config.yaml` | Install, start and upgrade k3s; `k3s kubectl` on the servers, as root, to wait for nodes, read the read-only account's token, take and release the upgrade lock, and cordon, drain and uncordon nodes; `k3s crictl` on a server to stop its kube-vip before its upgrade. The updates playbook too, for its drains: `k3s kubectl` on a server of the cluster (`cordon`, `drain`, `uncordon`, reading the node and, with `updates_k8s_wait_longhorn`, Longhorn's volumes); what it reads is parsed by patterns and cut, like every report value. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline or the updates playbook, in check mode first; for real only after that check passed and the user confirmed it. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |

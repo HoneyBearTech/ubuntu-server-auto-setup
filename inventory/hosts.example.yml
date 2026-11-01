@@ -101,7 +101,8 @@ all:
         # cp-3: { ansible_host: 10.10.10.73, pve_vmid: 4073, pve_node: pve-c, vm_spread_group: k8s-lab-servers }
       # A Kubernetes cluster "lab": the baseline gives its members k3s' firewall rules from each other member, its
       # kernel settings and swap off, and Longhorn's prerequisites to the agents (docs/interfaces.md#kubernetes-nodes);
-      # then make kubernetes installs k3s on them (docs/interfaces.md#kubernetes-clusters). Move cp-1 to cp-3 from
+      # then make kubernetes installs k3s on them (docs/interfaces.md#kubernetes-clusters), make kubernetes-upgrade
+      # moves them to a new k8s_version, and make updates drains each before a reboot. Move cp-1 to cp-3 from
       # hosts above into k8s_lab_servers. The join tokens go in the Vault: vault_k8s_token_lab and
       # vault_k8s_agent_token_lab, each from openssl rand -hex 32.
       # children:
