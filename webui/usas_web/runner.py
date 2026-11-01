@@ -42,11 +42,16 @@ PLAYBOOKS = {
     "keys": ("playbooks/baseline.yml", "Re-sync the admin user's SSH keys only", ("--tags", "ssh_keys")),
     "updates-check": ("playbooks/updates.yml", "List each server's pending updates, changing nothing", ("--check",)),
     "updates": ("playbooks/updates.yml", "Install the pending updates on the servers", ()),
+    "kubernetes": ("playbooks/kubernetes.yml", "Build or upgrade a Kubernetes cluster (k3s)", ()),
 }
-# The tags a run of a playbook may pass with --tags (the roles' tags in playbooks/baseline.yml).
+# The tags a run of a playbook may pass with --tags (the roles' tags in playbooks/baseline.yml, and the install and
+# upgrade parts of playbooks/kubernetes.yml).
 PLAYBOOK_TAGS = {
     "baseline": ("ssh_keys", "common", "firewall", "ssh", "fail2ban", "hardening"),
+    "kubernetes": ("install", "upgrade"),
 }
+# Playbooks that run only through a check first (the Defaults page's clusters, main.py), not from the Run page.
+GATED = ("kubernetes",)
 # The variables a run of a playbook may pass with -e, each with the format its value must match. A value is
 # written as !unsafe, so Ansible never templates it. Nothing allows free-form -e. The VMs page's updates runs
 # choose these (vmplan.UPDATE_OPTIONS); the other settings of the updates playbook come from the inventory.

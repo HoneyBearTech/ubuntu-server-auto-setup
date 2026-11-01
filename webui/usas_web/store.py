@@ -5,11 +5,17 @@ command line (with the Vault password file). Every value a user typed is written
 Ansible never treats it as a template, whatever it contains; only the few templates the UI itself writes
 (such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings. The secrets (the admin password,
 the API token, and the mail relay password, webhook URL and disk passphrase when set) are in
-inventory/group_vars/all/vault.yml, encrypted with Ansible Vault.
+inventory/group_vars/all/vault.yml, encrypted with Ansible Vault, and so are the Kubernetes clusters' join tokens.
+
+A Kubernetes cluster is the group k8s_<cluster> (a child of servers) with the cluster's settings as its vars and
+the children k8s_<cluster>_servers and k8s_<cluster>_agents, whose hosts are the members. Whatever else such a
+group holds (a variable the UI has no field for, a value it can't read back, the member groups' own vars, a
+member the Servers page doesn't list) was set by hand and is written back as it was.
 """
 
 import json
 import os
+import re
 import secrets
 import tempfile
 from dataclasses import dataclass, field
@@ -20,10 +26,16 @@ import yaml
 from ansible.parsing.vault import VaultLib, VaultSecret
 
 from .config import Settings
-from .schema import Schema
+from .schema import Invalid, Schema, parse_value
 
 VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_token_secret",
                "vault_mail_relay_password", "vault_fail2ban_webhook_url", "vault_disk_passphrase")
+# A Kubernetes cluster's join tokens (schema.CLUSTER_TOKENS): vault_k8s_token_<cluster> and
+# vault_k8s_agent_token_<cluster>.
+K8S_TOKEN_NAME = re.compile(r"^vault_k8s_(agent_)?token_[a-z][a-z0-9_]{0,30}\Z")
+# A cluster's groups: k8s_<cluster>, and its members' k8s_<cluster>_servers and k8s_<cluster>_agents.
+CLUSTER_GROUP = re.compile(r"^k8s_([a-z][a-z0-9-]{0,30})\Z")
+MEMBER_GROUPS = {"servers": "server", "agents": "agent"}
 # Secrets a server may go without: the inventory refers to them only once they are saved.
 OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "fail2ban_webhook_url": "vault_fail2ban_webhook_url",
@@ -35,6 +47,11 @@ SERVER_TEXT_VARS = ("pve_node", "vm_os", "vm_install_method")
 OLD_NAMES = {"ufw_ssh_limit": "firewall_ssh_limit", "ufw_ssh_sources": "firewall_ssh_sources"}
 # The servers' group, and its name before 0.7.0: an older inventory is read from it and written back as servers.
 SERVER_GROUPS = ("servers", "ubuntu_servers")
+
+
+def vault_name_known(name: str) -> bool:
+    """A name the UI keeps in the Vault: its own secrets and the clusters' join tokens."""
+    return name in VAULT_NAMES or bool(K8S_TOKEN_NAME.match(name))
 
 
 class Unsafe(str):
@@ -106,6 +123,8 @@ class Config:
     servers: list[dict[str, Any]] = field(default_factory=list)
     node_addresses: dict[str, str] = field(default_factory=dict)  # Proxmox node name -> its SSH address
     authorize_ui_key: bool = True
+    # The Kubernetes clusters, in inventory order (Cluster). A server's membership is its k8s_cluster and k8s_role.
+    clusters: list["Cluster"] = field(default_factory=list)
 
     def secret_is_set(self, vault_name: str) -> bool:
         return bool(self.secrets.get(vault_name))
@@ -127,6 +146,22 @@ class Config:
         """The nodes in use, then the others that have an SSH address saved."""
         used = self.nodes_in_use()
         return used + sorted(set(self.node_addresses) - set(used))
+
+
+@dataclass
+class Cluster:
+    """A Kubernetes cluster's group: the settings the Defaults page edits (values) and what it keeps as it was."""
+
+    name: str
+    values: dict[str, Any] = field(default_factory=dict)  # the fields' values (schema.CLUSTER_FIELDS)
+    # Set by hand, written back as read: other vars of k8s_<cluster> (and fields' values the UI can't read),
+    # the vars of the member groups, other children, and members that aren't servers of the Servers page.
+    extra_vars: dict[str, Any] = field(default_factory=dict)
+    member_vars: dict[str, dict[str, Any]] = field(default_factory=dict)  # "servers"/"agents" -> that group's vars
+    other_children: dict[str, Any] = field(default_factory=dict)
+    other_members: dict[str, dict[str, Any]] = field(default_factory=dict)  # "servers"/"agents" -> {host: vars}
+    member_host_vars: dict[str, Any] = field(default_factory=dict)  # a listed server's vars set in a member group
+    under_servers: bool = True  # a child of servers (as the UI writes it), else of all (written by hand)
 
 
 class Store:
@@ -155,10 +190,11 @@ class Store:
         if not path.exists():
             return {}
         data = load_yaml(self._vault().decrypt(path.read_bytes()).decode()) or {}
-        return {k: str(v) for k, v in data.items() if k in VAULT_NAMES and v is not None}
+        return {str(k): str(v) for k, v in data.items() if vault_name_known(str(k)) and v is not None}
 
     def _secrets_text(self, values: dict[str, str]) -> str:
-        return dump_yaml({k: Unsafe(values[k]) for k in VAULT_NAMES if values.get(k)})
+        names = [*VAULT_NAMES, *sorted(k for k in values if K8S_TOKEN_NAME.match(k))]
+        return dump_yaml({k: Unsafe(values[k]) for k in names if values.get(k)})
 
     def write_secrets(self, values: dict[str, str]) -> None:
         write_private(self.settings.vault_file, self._vault().encrypt(self._secrets_text(values).encode()))
@@ -276,7 +312,65 @@ class Store:
                     server[var] = host[var]
             server["firewall_ports"] = host.get("webui_firewall_allow_host", host.get("webui_ufw_allow_host", []))
             config.servers.append(server)
+        self._load_clusters(config, top, children)
         return config
+
+    def _load_clusters(self, config: Config, top: dict[str, Any], children: dict[str, Any]) -> None:
+        """The k8s_<cluster> groups under servers (or all), and each listed server's membership."""
+        servers = {s["name"]: s for s in config.servers}
+        under_servers = (children.get("servers") or {}).get("children") or {}
+        groups = [*under_servers.items(), *((g, b) for g, b in children.items() if g not in under_servers)]
+        fields = {f.name: f for f in self.schema.cluster_fields if f.name != "name"}
+        for group, body in groups:
+            match = CLUSTER_GROUP.match(str(group))
+            if not match or any(c.name == match.group(1) for c in config.clusters):
+                continue
+            body = body if isinstance(body, dict) else {}
+            cluster = Cluster(name=match.group(1), under_servers=group in under_servers)
+            for key, value in (body.get("vars") or {}).items():
+                f = fields.get(str(key))
+                if f is not None and self._readable(f, value):
+                    cluster.values[str(key)] = value
+                else:
+                    cluster.extra_vars[str(key)] = value
+            for child, child_body in (body.get("children") or {}).items():
+                kind = next((k for k in MEMBER_GROUPS if child == f"k8s_{cluster.name}_{k}"), None)
+                if kind is None:
+                    cluster.other_children[str(child)] = child_body
+                    continue
+                child_body = child_body if isinstance(child_body, dict) else {}
+                if child_body.get("vars"):
+                    cluster.member_vars[kind] = child_body["vars"]
+                for host, host_vars in (child_body.get("hosts") or {}).items():
+                    server = servers.get(str(host))
+                    if server is None or server.get("k8s_cluster"):
+                        cluster.other_members.setdefault(kind, {})[str(host)] = host_vars
+                        continue
+                    server.update(k8s_cluster=cluster.name, k8s_role=MEMBER_GROUPS[kind])
+                    if host_vars:
+                        cluster.member_host_vars[str(host)] = host_vars
+            config.clusters.append(cluster)
+
+    @staticmethod
+    def _readable(f: Any, value: Any) -> bool:
+        """Whether the form can show a value read from the inventory as it is (else it is kept as written)."""
+        if f.kind == "bool":
+            return isinstance(value, bool)
+        if f.kind == "int":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if f.kind == "list":
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                return False
+            raw = "\n".join(value)
+        elif isinstance(value, str):
+            raw = value
+        else:
+            return False
+        try:
+            parse_value(f, raw)
+        except Invalid:
+            return False
+        return True
 
     def save(self, config: Config) -> None:
         """Writes the whole inventory and the Vault from config."""
@@ -356,6 +450,11 @@ class Store:
             },
             "hosts": hosts,
         }
+        clusters = self._cluster_groups(config)
+        if any(c.under_servers for c in config.clusters):
+            children["servers"]["children"] = {f"k8s_{c.name}": clusters[f"k8s_{c.name}"] for c in config.clusters
+                                               if c.under_servers}
+        children.update({f"k8s_{c.name}": clusters[f"k8s_{c.name}"] for c in config.clusters if not c.under_servers})
         inventory = {"all": {"vars": all_vars, "children": children}}
         header = (
             "# Written by the ubuntu-server-auto-setup web UI. Changes made here by hand are kept only if\n"
@@ -363,6 +462,32 @@ class Store:
         )
         write_private(s.inventory_file, header + dump_yaml(inventory))
         self.write_secrets(config.secrets)
+
+    def _cluster_groups(self, config: Config) -> dict[str, Any]:
+        """The k8s_<cluster> groups: the fields' values (unsafe, left out at the role default), what was set by
+        hand as it was, and the members from the servers' k8s_cluster and k8s_role."""
+        defaults = {f.name: f.default for f in self.schema.cluster_fields}
+        groups: dict[str, Any] = {}
+        for cluster in config.clusters:
+            variables: dict[str, Any] = dict(cluster.extra_vars)
+            for name, value in cluster.values.items():
+                variables.pop(name, None)
+                if value is not None and value != defaults.get(name):
+                    variables[name] = _mark(value)
+            body: dict[str, Any] = {"vars": variables} if variables else {}
+            members: dict[str, Any] = {}
+            for kind, role in MEMBER_GROUPS.items():
+                hosts = {str(s["name"]): cluster.member_host_vars.get(str(s["name"])) or {} for s in config.servers
+                         if s.get("k8s_cluster") == cluster.name and s.get("k8s_role") == role}
+                hosts.update(cluster.other_members.get(kind) or {})
+                group: dict[str, Any] = {}
+                if cluster.member_vars.get(kind):
+                    group["vars"] = cluster.member_vars[kind]
+                group["hosts"] = hosts
+                members[f"k8s_{cluster.name}_{kind}"] = group
+            body["children"] = {**members, **cluster.other_children}
+            groups[f"k8s_{cluster.name}"] = body
+        return groups
 
     def node_user(self, config: Config) -> str:
         """The user the playbooks and the UI log in to the Proxmox node as (pve_ssh_user, root by default)."""
@@ -373,5 +498,7 @@ class Store:
         config = self.load()
         names = {"all", "servers", "proxmox_nodes", "ungrouped"}
         names.update(s["name"] for s in config.servers)
+        for cluster in config.clusters:
+            names.update(f"k8s_{cluster.name}{suffix}" for suffix in ("", "_servers", "_agents"))
         names.update(name for name, address in config.node_addresses.items() if address)
         return names

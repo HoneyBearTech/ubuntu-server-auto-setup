@@ -9,6 +9,7 @@ import { FieldSet, groupFields, named } from "../components/FieldSet";
 import { ErrorSummary, Loading, Notice, PageHead } from "../components/Parts";
 import { useData } from "../data";
 import { Link } from "../router";
+import { Clusters } from "./Clusters";
 import type { Cluster, Errors, FieldMeta, KeyInfo, Notice as NoticeT, SectionData, Values } from "../types";
 
 interface Reply {
@@ -389,6 +390,7 @@ export function Defaults() {
           </button>
         </div>
       </form>
+      <Clusters />
     </>
   );
 }
