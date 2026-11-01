@@ -5,10 +5,10 @@ updates_scope_values: [all, security]
 updates_apt_upgrade_values: [safe, dist]
 updates_reboot_values: [never, if_required]
 updates_restart_values: [host, list, auto]
-# Debian package names (and :arch), as servers report them.
-updates_package_pattern: '^[a-z0-9][a-z0-9+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z'
-# Shell globs of package names: letters, digits, + . - and the wildcards * and ?.
-updates_package_glob_pattern: '^[a-z0-9*?][a-z0-9+.*?-]{0,127}\Z'
+# Package names as servers report them: Debian's (and :arch) and RPM's, which may have upper case and _.
+updates_package_pattern: '^[A-Za-z0-9][A-Za-z0-9_+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z'
+# Shell globs of package names: letters, digits, _ + . - and the wildcards * and ?.
+updates_package_glob_pattern: '^[A-Za-z0-9*?][A-Za-z0-9_+.*?-]{0,127}\Z'
 # systemd unit names, as in updates_health_services.
 updates_service_pattern: '^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,254}\Z'
 # Health URLs: the same form as the notification webhook (fail2ban_webhook_url_pattern).
@@ -30,14 +30,21 @@ updates_group_pattern: '^[a-z0-9][a-z0-9_.-]{0,62}\Z'
 # At most this many packages are kept per host in a report.
 updates_max_entries: 5000
 
-# Releases the playbook updates, with the end of their support: the OS catalog's apt-family releases and dates
-# (roles/os_catalog/vars/catalog.yml; a test keeps them the same). A release past its end still gets updates,
-# with a warning in the report.
+# Releases the playbook updates, with the end of their support: the OS catalog's releases and dates
+# (roles/os_catalog/vars/catalog.yml; a test keeps them the same), by the distribution's name in the facts
+# (CentOS Stream is CentOS, Rocky Linux is Rocky). A release past its end still gets updates, with a warning
+# in the report.
 updates_supported_releases:
   - {distribution: Ubuntu, version: "22.04", eol: "2027-06-01"}
   - {distribution: Ubuntu, version: "24.04", eol: "2029-05-31"}
   - {distribution: Ubuntu, version: "26.04", eol: "2031-05-29"}
   - {distribution: Debian, version: "12", eol: "2028-06-30"}
   - {distribution: Debian, version: "13", eol: "2030-06-30"}
+  - {distribution: CentOS, version: "9", eol: "2027-05-31"}
+  - {distribution: CentOS, version: "10", eol: "2030-05-31"}
+  - {distribution: Rocky, version: "9", eol: "2032-05-31"}
+  - {distribution: Rocky, version: "10", eol: "2035-05-31"}
+  - {distribution: AlmaLinux, version: "9", eol: "2032-05-31"}
+  - {distribution: AlmaLinux, version: "10", eol: "2035-05-31"}
 # The families the role has task files for (tasks/*/<os_family>.yml).
-updates_families: [Debian]
+updates_families: [Debian, RedHat]

@@ -226,9 +226,12 @@ def test_network_cards_display(sch):
     assert set(sch.roles.var("provision_nic_modes")) == {"static", "dhcp", "none"}
 
 
-def test_the_updates_playbook_supports_the_catalogs_apt_releases():
-    """roles/updates/vars/main.yml lists the OS catalog's Ubuntu and Debian releases, with the same end of support."""
+def test_the_updates_playbook_supports_the_catalogs_releases():
+    """roles/updates/vars/main.yml lists every release of the OS catalog, by the distribution's name in the facts,
+    with the same end of support."""
     catalog = yaml.safe_load((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]
     supported = yaml.safe_load((REPO / "roles/updates/vars/main.yml").read_text())["updates_supported_releases"]
-    apt = sorted((e["name"], str(e["version"]), str(e["eol"])) for e in catalog if e["family"] in ("ubuntu", "debian"))
-    assert sorted((r["distribution"], r["version"], r["eol"]) for r in supported) == apt
+    facts = {"Ubuntu": "Ubuntu", "Debian": "Debian", "CentOS Stream": "CentOS", "Rocky Linux": "Rocky",
+             "AlmaLinux": "AlmaLinux"}
+    releases = sorted((facts[e["name"]], str(e["version"]), str(e["eol"])) for e in catalog)
+    assert sorted((r["distribution"], r["version"], r["eol"]) for r in supported) == releases

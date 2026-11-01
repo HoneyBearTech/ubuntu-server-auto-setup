@@ -71,6 +71,19 @@ python3 tests/webui_smoke.py --url "http://localhost:$APP_PORT" --setup-code "$c
 # The image runs the playbooks with the repository's ansible.cfg, and its 30-second connection timeout.
 docker exec "$APP" ansible-config dump --only-changed | grep -Eq '^DEFAULT_TIMEOUT\(/app/ansible.cfg\) = 30$'
 
+# The updates playbook run with the image's own Ansible (docs/web-ui.md) writes its report to the data volume,
+# as the UI's runs do: the project's folder is read-only in the image.
+docker exec -i "$APP" sh -c 'cat > /tmp/report-dir.yml' <<'EOF'
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_vars: /app/roles/updates/defaults/main.yml
+    - ansible.builtin.assert:
+        that: updates_report_dir == '/data/updates/reports'
+        fail_msg: "updates_report_dir is {{ updates_report_dir }}"
+EOF
+docker exec "$APP" ansible-playbook -i localhost, -c local /tmp/report-dir.yml >/dev/null
+
 # What the UI left in the volume: an encrypted Vault, private files, and a process that isn't root.
 test "$(docker exec "$APP" id -u)" != 0
 docker exec "$APP" sh -c 'head -c 14 /data/inventory/group_vars/all/vault.yml' | grep -q '^\$ANSIBLE_VAULT'

@@ -341,7 +341,9 @@ class InventoryModule(BaseInventoryPlugin):
         from ansible.vars.plugins import get_vars_from_inventory_sources
         all_group = self.inventory.groups["all"]
         sources = getattr(self.inventory, "processed_sources", [])  # the sources parsed before this one
-        found = get_vars_from_inventory_sources(self.loader, sources, [all_group], "inventory")
+        # The "task" stage, as the playbooks see them: with ansible-core's default (RUN_VARS_PLUGINS=demand),
+        # host_group_vars reads nothing at the "inventory" stage, so the Vault in group_vars/all would be missed.
+        found = get_vars_from_inventory_sources(self.loader, sources, [all_group], "task")
         return combine_vars(all_group.get_vars(), found)
 
     def _template(self, value, variables):

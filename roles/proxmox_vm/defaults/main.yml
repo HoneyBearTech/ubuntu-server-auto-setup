@@ -24,7 +24,9 @@ pve_tpmstate_storage: "{{ pve_storage }}"
 pve_bridge: vmbr0              # bridge of the first network card, net0
 pve_vlan: ""                   # VLAN tag of net0 (1-4094), empty for none
 pve_vmid: ""                   # required, fixed per host so reruns can find the VM
-pve_tags: [ubuntu, ansible]
+# Proxmox tags on a new VM: its distribution (vm_os without the release: ubuntu, debian, centos-stream, rocky,
+# alma) and ansible.
+pve_tags: ["{{ vm_os | regex_replace('-[0-9][0-9.]*$', '') }}", ansible]
 # Hosts that share a vm_spread_group (any name, such as k8s-lab-servers) must have their VMs on different nodes,
 # so one node going down takes only one of them. Checked before anything is created, against where existing
 # VMs run now, for every host in the inventory with that group, not only those the run includes. Empty for none.
