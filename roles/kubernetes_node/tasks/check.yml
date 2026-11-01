@@ -58,7 +58,7 @@
     that: k8s_node_conflicts | length == 0
     fail_msg: >-
       {{ inventory_hostname }}: hardening_sysctl or hardening_sysctl_extra sets {{ k8s_node_conflicts | join(', ') }},
-      which a Kubernetes node needs as {{ k8s_node_sysctl | dict2items | selectattr('key', 'in', k8s_node_conflicts)
+      which a Kubernetes node needs as {{ k8s_node_conflicts | zip(k8s_node_conflicts | map('extract', k8s_node_sysctl))
       | map('join', ' = ') | join(', ') }}. Leave them out for this server (hardening_sysctl_extra: {<key>: null}).
     quiet: true
   vars:
