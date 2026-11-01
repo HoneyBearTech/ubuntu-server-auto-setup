@@ -1,0 +1,42 @@
+---
+- name: Check the Kubernetes settings
+  ansible.builtin.import_tasks: check.yml
+
+- name: Note whether the server is a container
+  ansible.builtin.set_fact:
+    k8s_node_in_container: "{{ ansible_facts.virtualization_role == 'guest'
+      and ansible_facts.virtualization_type in k8s_node_container_types }}"
+
+- name: List the services
+  ansible.builtin.service_facts:
+
+# etcd stops trusting a member whose clock drifts; the time service is common's (time_sync_servers, time_sync_pools).
+- name: Check that the clock is kept in time
+  ansible.builtin.assert:
+    that: k8s_node_time_services | select('in', ansible_facts.services) | map('extract', ansible_facts.services)
+      | selectattr('state', 'eq', 'running') | list | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} runs none of {{ k8s_node_time_services | join(', ') }}: a Kubernetes node needs its clock
+      in step with the other members (etcd checks it). Start the OS's time service, or set time_sync_servers or
+      time_sync_pools.
+    quiet: true
+  when: not k8s_node_in_container
+
+- name: Open the ports k3s uses between members
+  ansible.builtin.include_tasks:
+    file: firewall/{{ ansible_facts.os_family }}.yml
+    apply:
+      tags: [always]
+
+- name: Load the kernel modules and set the kernel settings
+  ansible.builtin.import_tasks: kernel.yml
+
+- name: Turn swap off
+  ansible.builtin.import_tasks: swap.yml
+
+- name: Set up Longhorn's prerequisites
+  ansible.builtin.import_tasks: longhorn.yml
+
+- name: Install k3s' SELinux policy
+  ansible.builtin.import_tasks: selinux.yml
+  when: ansible_facts.os_family == 'RedHat'

@@ -1,0 +1,6 @@
+---
+- name: Reload multipathd
+  ansible.builtin.systemd_service:
+    name: multipathd
+    state: reloaded
+  when: "'multipathd.service' in ansible_facts.services and ansible_facts.services['multipathd.service'].state == 'running'"

@@ -236,9 +236,24 @@ the time service's sources checked (`tests/verify-time-sync.yml`: systemd-timesy
 sources in chrony's configuration on the RHEL family), then all off again with the OS's time sources back; on
 Ubuntu and Debian, the time sources on, a rerun and off again once more with chrony installed in place of
 systemd-timesyncd; `firewall_docker_enabled` without Docker (no rules, and a message; on the RHEL family,
-refused before firewalld changes); and at least 80% task coverage of `common`, `firewall`, `ssh_hardening` and
-`fail2ban`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
+refused before firewalld changes); the Kubernetes node profile (below); and at least 80% task coverage of
+`common`, `firewall`, `ssh_hardening`, `fail2ban` and `kubernetes_node`, counting the task files of the server's own family only (`tests/coverage.py --skip-files`; UFW's
 `docker.yml` is left out on the RHEL family).
+
+**The Kubernetes node profile** (`tests/kubernetes-node.sh`, which `tests/run.sh` runs too, on Ubuntu 26.04):
+`tests/inventory/k8s.yml` makes `srv-01` the first server of cluster `test`, with a second server and an agent
+that exist only in the inventory, an API source, Longhorn's prerequisites and the owner's own `firewall_allow`
+rule on the kubelet's port. First the refusals, each before anything changes: `hardening_sysctl_extra` turning
+forwarding off, an API source that isn't an address, members without IPv4 addresses, a server in two clusters.
+Then two runs (the second changes nothing) and `tests/verify-kubernetes-node.yml`: exactly the expected UFW
+rules with the role's comment, or exactly the expected rich rules on the k3s ports (and the owner's) with
+firewalld; the kernel modules and settings files and live forwarding; a swap line in `/etc/fstab` commented out;
+Longhorn's packages; on the RHEL family `k3s-selinux` and `container-selinux` installed, from Rancher's
+repository with `gpgcheck = 1`. Then `tests/inventory/k8s-moved.yml`: the second server gone, the agent moved and
+the `wireguard-native` backend, so their old rules must go, the owner's rule stays and Longhorn's files are
+removed. The container shares the runner's kernel, so modules aren't loaded, swap isn't turned off and the time
+service isn't checked there (the real-cluster rows of the release checklist cover them). On release 10 of the
+RHEL family the role is refused (no stable `k3s-selinux`), and that is what's checked.
 
 ## Secure Boot and disk encryption in a VM
 
@@ -333,6 +348,7 @@ filters and tests, and checks a property for every input the role would accept:
 | `fuzz_configs.py` | the sshd drop-in, `jail.local` and the Fail2Ban webhook action | every setting appears once with exactly the given value; nothing else is added; the webhook URL is the `curl` command's last argument, whole, with nothing Fail2Ban would interpolate |
 | `fuzz_node_plan.py` | `roles/proxmox_vm/filter_plugins/pve_cluster.py`: the node and ISO storage checks and the ISO plan; `provision_hostname_pattern` for node names | exactly the hosts with an unknown node or an unusable storage are reported; each installer ISO a server needs is built in a node-local storage by its node when the node is in the run, and in a shared storage exactly once by a node that needs it there, nothing else; an accepted node name is safe in an API path |
 | `fuzz_data_disks.py` | `roles/data_disks`: the disk patterns and the `data_disks_state` filter; `pve_extra_disks` and `pve_spread_conflicts` in `roles/proxmox_vm/filter_plugins/pve_cluster.py` | a disk the patterns accept becomes exactly one Proxmox disk option with the given storage, size and a serial of at most 20 safe characters; a disk counts as blank (and is formatted) only when `blkid` found nothing, and as ready only with its own file system type and label and no partition table; the spread check reports exactly the groups that would put two VMs on one node, an existing VM counting where it runs |
+| `fuzz_kubernetes_node.py` | `roles/kubernetes_node`: the address and source patterns and the filters in `filter_plugins/kubernetes_node.py` | a member's rules open only the flannel port and 10250/tcp to the other members, and on a server 6443/tcp to them and the API sources and etcd's ports to the other servers, never anything from the member itself; every rule reads back from its firewalld rich rule; the role's own rules are never stale, a rule it no longer needs is exactly once, and one with another comment, on another port or from `firewall_allow` never is |
 | `fuzz_baseline_extras.py` | the `hardening_sysctl_settings` expression and `sysctl.conf.j2`, unattended-upgrades' mail settings, `msmtprc.j2`, the time servers' assert and `chrony.sources.j2` and `timesyncd.conf.j2`, the firewall's Docker port checks and `docker-user.rules.j2` | the merged settings drop exactly the null keys; each sysctl key, apt option and msmtp command appears once with exactly the given value; every accepted time server or pool is one chrony directive with only `iburst` added, and the timesyncd drop-in has only `[Time]` and one `NTP=` line with exactly the given names; for values the role's asserts accept, the DOCKER-USER rules are exactly one line per source and allowed port and protocol, for the right IP version, each value one plain word |
 | `fuzz_cluster_inventory.py` | `plugins/inventory/usas_pve.py`: `plan()` over any cluster listing, configs, agent answers, static inventory and filters; `option_problems` | every host is a static host by `pve_vmid` or `vm-<vmid>`, once; groups are fixed or prefixed; excluded and filtered-out VMs never appear; VMs to leave alone are in `usas_pve_skipped` only; every other VM outside the inventory is pinned by its alias with its own control path and an address it or the inventory reported; static hosts get no address or SSH arguments from the cluster; filter values with spaces, quotes, `;` or line breaks are refused |
 | `fuzz_update_reports.py` | `roles/updates/filter_plugins/usas_updates.py`: the parsers of `apt-get -s`, `apt-mark showhold`, `needrestart -b` and `apt-config dump`, the choice of updates, the health comparison, the summary and notifications, and the maintenance windows; the role's patterns | names and versions match the role's patterns, lists stay under their caps, text is clean; held, excluded, new and (for security) non-security packages are never chosen and every other update lands in exactly one list; a window is open exactly when a minute-by-minute walk of its time zone says so, across daylight-saving changes, and an invalid one never is |

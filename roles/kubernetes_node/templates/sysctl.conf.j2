@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# What k3s needs (kubernetes_node): forwarding, and bridged traffic through iptables.
+{% for key, value in k8s_node_sysctl | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}

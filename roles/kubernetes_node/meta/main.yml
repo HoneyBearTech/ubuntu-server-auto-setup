@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  author: HoneyBearTech
+  description: Prepare a server in a k8s_<cluster>_servers or _agents group for k3s (firewall, kernel, swap, SELinux)
+  license: MIT
+  min_ansible_version: "2.20"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble, resolute]
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: EL
+      versions: ["9"]
+dependencies: []

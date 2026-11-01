@@ -99,6 +99,17 @@ be tagged; replace them with yours.
   qm guest cmd 9002 network-get-interfaces | grep -i -A8 '<net_mac>'   # its ipv4 address
   ```
 
+- [ ] **A Kubernetes node**, if the release touches the firewall, the hardening settings or `kubernetes_node`:
+  two VMs in `k8s_test_servers` and `k8s_test_agents` (one Ubuntu 26.04, one AlmaLinux 9 with SELinux enforcing),
+  `k8s_longhorn_prereqs: true` on the agent. After `site.yml`: each has k3s' ports open to the other's address
+  only, `br_netfilter` and `overlay` loaded, forwarding on, no swap (`swapon --show` prints nothing, also after a
+  reboot), `iscsid` running on the agent, and `k3s-selinux` installed on AlmaLinux; a second run changes nothing:
+
+  ```bash
+  ssh sysadmin@192.0.2.10 'sudo ufw show added | grep usas-k8s; lsmod | grep -E "^(br_netfilter|overlay)"; sysctl net.ipv4.ip_forward; swapon --show'
+  ssh sysadmin@192.0.2.11 'sudo firewall-cmd --list-rich-rules; rpm -q k3s-selinux; systemctl is-active iscsid'
+  ```
+
 - [ ] **An extra disk and a spread group**, if the release touches provisioning or the baseline: `test-01` with
   `vm_extra_disks: [{size_gb: 4, label: data, mount: /srv/data}]` and `vm_spread_group: test`. After
   `provision-vms.yml` the VM has `scsi1` with `serial=usas-data`, and after `site.yml` the disk is ext4 with

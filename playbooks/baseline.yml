@@ -53,3 +53,8 @@
     # Off unless hardening_sysctl_enabled, hardening_auditd_enabled or hardening_apparmor_enabled is set.
     - role: hardening
       tags: [hardening]
+    # Kubernetes nodes only (a k8s_<cluster>_servers or _agents group): firewall rules between the cluster's members,
+    # kernel modules and settings, swap off, Longhorn's prerequisites, k3s' SELinux policy. It doesn't install k3s.
+    - role: kubernetes_node
+      tags: [kubernetes]
+      when: group_names | select('match', '^k8s_[a-z][a-z0-9-]{0,30}_(servers|agents)$') | list | length > 0

@@ -1,0 +1,85 @@
+---
+# Which cluster the server is in, as what, who the other members are and on which addresses, and the firewall rules
+# that follow; every value checked before anything changes.
+- name: Find the server's Kubernetes cluster
+  ansible.builtin.set_fact:
+    k8s_node_groups: "{{ group_names | select('match', k8s_node_group_pattern) | list }}"
+
+- name: Check that the server is in one Kubernetes group
+  ansible.builtin.assert:
+    that: k8s_node_groups | length == 1
+    fail_msg: >-
+      {{ inventory_hostname }} may be in only one k8s_<cluster>_servers or k8s_<cluster>_agents group, not
+      {{ k8s_node_groups | join(' and ') if k8s_node_groups else 'none' }}.
+    quiet: true
+
+# Each member's address is its k8s_node_ip, or its ansible_host: the one its firewall rules allow and k3s' node-ip.
+- name: Note the cluster and its members
+  ansible.builtin.set_fact:
+    k8s_node_cluster: "{{ k8s_node_match[0] }}"
+    k8s_node_role: "{{ k8s_node_match[1] | regex_replace('s$', '') }}"
+    k8s_node_members: >-
+      {{ ((groups['k8s_' ~ k8s_node_match[0] ~ '_servers'] | default([])
+           | map('community.general.dict_kv', 'host') | map('combine', {'role': 'server'}) | list)
+        + (groups['k8s_' ~ k8s_node_match[0] ~ '_agents'] | default([])
+           | map('community.general.dict_kv', 'host') | map('combine', {'role': 'agent'}) | list))
+        | k8s_node_addresses(hostvars) }}
+  vars:
+    k8s_node_match: "{{ k8s_node_groups[0] | regex_search(k8s_node_group_pattern, '\\1', '\\2') }}"
+
+- name: Check the members' addresses
+  ansible.builtin.assert:
+    that:
+      - k8s_node_members | selectattr('role', 'eq', 'server') | list | length > 0
+      - k8s_node_bad | length == 0
+      - k8s_node_members | map(attribute='address') | unique | length == k8s_node_members | length
+    fail_msg: >-
+      Cluster {{ k8s_node_cluster }} needs at least one server (k8s_{{ k8s_node_cluster }}_servers), and every member
+      an IPv4 address of its own, all different: set k8s_node_ip, or ansible_host to an address
+      {{- (', for ' ~ k8s_node_bad | join(', ')) if k8s_node_bad else '' }}.
+    quiet: true
+  vars:
+    k8s_node_bad: "{{ k8s_node_members | rejectattr('address', 'match', k8s_node_ipv4_pattern) | map(attribute='host') | list }}"
+
+- name: Check the Kubernetes settings
+  ansible.builtin.assert:
+    that:
+      - k8s_flannel_backend in k8s_node_flannel_ports
+      - k8s_api_sources is sequence and k8s_api_sources is not string and k8s_api_sources is not mapping
+      - k8s_api_sources | map('string') | reject('match', k8s_node_source_pattern) | list | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: k8s_flannel_backend must be {{ k8s_node_flannel_ports | join(' or ') }}, and
+      k8s_api_sources a list of IPv4 addresses or networks (CIDR), or "any".
+    quiet: true
+
+# The hardening role runs after this one and applies its own settings on every run, so they mustn't differ.
+- name: Check that hardening_sysctl doesn't change what k3s needs
+  ansible.builtin.assert:
+    that: k8s_node_conflicts | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: hardening_sysctl or hardening_sysctl_extra sets {{ k8s_node_conflicts | join(', ') }},
+      which a Kubernetes node needs as {{ k8s_node_conflicts | zip(k8s_node_conflicts | map('extract', k8s_node_sysctl))
+      | map('join', ' = ') | join(', ') }}. Leave them out for this server (hardening_sysctl_extra: {<key>: null}).
+    quiet: true
+  vars:
+    k8s_node_conflicts: >-
+      {{ k8s_node_sysctl | k8s_sysctl_conflicts((hardening_sysctl | default({})) | combine(hardening_sysctl_extra
+         | default({}))) if hardening_sysctl_enabled | default(false) | bool else [] }}
+
+# The RHEL family gets k3s' SELinux policy (tasks/selinux.yml), which Rancher builds for some releases only.
+- name: Check that k3s-selinux has a stable build for the release
+  ansible.builtin.assert:
+    that: ansible_facts.distribution_major_version in k8s_node_selinux_releases
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}: Rancher's
+      stable repository has k3s-selinux only for release {{ k8s_node_selinux_releases | join(', ') }} of the RHEL
+      family so far. Use release {{ k8s_node_selinux_releases | last }} for Kubernetes nodes.
+    quiet: true
+  when: ansible_facts.os_family == 'RedHat'
+
+- name: Work out the firewall rules
+  ansible.builtin.set_fact:
+    k8s_node_comment: usas-k8s {{ k8s_node_cluster }}
+    k8s_node_rules: >-
+      {{ k8s_node_members | k8s_firewall_rules(inventory_hostname, k8s_api_sources | map('string') | list,
+         k8s_node_flannel_ports[k8s_flannel_backend], 'usas-k8s ' ~ k8s_node_cluster) }}

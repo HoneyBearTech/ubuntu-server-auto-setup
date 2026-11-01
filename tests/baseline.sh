@@ -241,9 +241,14 @@ docker exec "$SRV" sh -c '! grep -q DOCKER-USER /etc/ufw/after.rules /etc/ufw/af
   || { echo "ERROR: DOCKER-USER rules were written without Docker" >&2; exit 1; }
 fi
 
+# The Kubernetes node profile (roles/kubernetes_node), shared with tests/run.sh.
+# shellcheck source=tests/kubernetes-node.sh
+. tests/kubernetes-node.sh
+
 step "Task coverage of the baseline roles on $OS"
 # Each run counts its own family's task files: the other family's are left out (docker.yml is UFW's).
-if [ "$family" = rhel ]; then other='*/Debian.yml,roles/firewall/tasks/docker.yml'; else other='*/RedHat.yml,roles/common/tasks/epel.yml'; fi
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles common,firewall,ssh_hardening,fail2ban \
+if [ "$family" = rhel ]; then other='*/Debian.yml,roles/firewall/tasks/docker.yml'
+else other='*/RedHat.yml,roles/common/tasks/epel.yml,roles/kubernetes_node/tasks/selinux.yml'; fi
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles "common,firewall,ssh_hardening,fail2ban${k8s_coverage:+,$k8s_coverage}" \
   --skip-files "$other"
 echo "=== $OS: the baseline passed"

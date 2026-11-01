@@ -1,0 +1,68 @@
+---
+# A minimal EL image has no modules-load.d or sysctl.d until something puts a file there.
+- name: Create the modules-load.d and sysctl.d directories
+  ansible.builtin.file:
+    path: "{{ item | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ k8s_node_modules_file }}"
+    - "{{ k8s_node_sysctl_file }}"
+
+- name: Load the kernel modules at boot
+  ansible.builtin.copy:
+    dest: "{{ k8s_node_modules_file }}"
+    content: |
+      # Managed by Ansible: changes here are overwritten.
+      # What k3s needs (kubernetes_node).
+      {% for module in k8s_node_modules %}
+      {{ module }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0644"
+
+# A container shares the host's kernel and can't load modules.
+- name: Load the kernel modules now
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ k8s_node_modules }}"
+  when: not k8s_node_in_container
+
+- name: Write the kernel settings
+  ansible.builtin.template:
+    src: sysctl.conf.j2
+    dest: "{{ k8s_node_sysctl_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: List the settings this kernel has
+  ansible.builtin.command: sysctl --all --names
+  register: k8s_node_sysctl_names
+  changed_when: false
+  check_mode: false
+
+# Outside a container br_netfilter is loaded by now, so every setting must exist. In one, the bridge settings
+# exist only if the host loaded br_netfilter.
+- name: Fail if the kernel lacks a setting k3s needs
+  ansible.builtin.assert:
+    that: k8s_node_missing | length == 0 or k8s_node_in_container or ansible_check_mode
+    fail_msg: "{{ inventory_hostname }}'s kernel has no {{ k8s_node_missing | join(', ') }}, which k3s needs."
+    quiet: true
+  vars:
+    k8s_node_missing: "{{ k8s_node_sysctl.keys() | reject('in', k8s_node_sysctl_names.stdout_lines) | list }}"
+
+- name: Apply the kernel settings now
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value | string }}"
+    sysctl_file: "{{ k8s_node_sysctl_file }}"
+    sysctl_set: true
+    reload: false
+  loop: "{{ k8s_node_sysctl | dict2items | selectattr('key', 'in', k8s_node_sysctl_names.stdout_lines) }}"
+  loop_control:
+    label: "{{ item.key }} = {{ item.value }}"
