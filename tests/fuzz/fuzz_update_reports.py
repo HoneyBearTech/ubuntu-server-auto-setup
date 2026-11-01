@@ -31,7 +31,7 @@ U = roles.filter_plugin("updates", "usas_updates")
 V = roles.role_vars("updates")
 PACKAGE = re.compile(V["updates_package_pattern"])
 SERVICE = re.compile(V["updates_service_pattern"])
-VERSION = re.compile(r"^[A-Za-z0-9.+~:-]{1,128}\Z")
+VERSION = re.compile(r"^[A-Za-z0-9._+~:-]{1,128}\Z")
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
 NAMES = ["usas-test-tool", "libc6", "linux-image-6.8.0-1-generic", "libfoo:i386", "Bad_Name", "a", "x" * 200,
          "pkg\nInst evil", "", "NetworkManager", "kernel-core", "-rf", "a|b"]
@@ -57,7 +57,7 @@ for name in ("updates_package_pattern", "updates_package_glob_pattern", "updates
 def line(fdp):
     kind = fdp.ConsumeIntInRange(0, 10)
     name = fdp.PickValueInList(NAMES) if fdp.ConsumeBool() else fdp.ConsumeUnicodeNoSurrogates(20)
-    version = fdp.PickValueInList(["1.0", "2:1.2-0ubuntu1~24.04.1", "", "1 0", "[x]"])
+    version = fdp.PickValueInList(["1.0", "2:1.2-0ubuntu1~24.04.1", "2026e-1.el10_2.alma.1", "", "1 0", "[x]"])
     origins = ", ".join(fdp.PickValueInList(SUITES) for _ in range(fdp.ConsumeIntInRange(0, 3)))
     if kind == 0:
         return f"Inst {name} [{version}] ({fdp.PickValueInList(['1.1', '3.0~rc1', ''])} {origins} [amd64])"
@@ -237,5 +237,25 @@ def one_input(data):
     clean(U.usas_window_text(w), 80)
 
 
+# What dnf printed on an AlmaLinux 10.2 server with an older tzdata (the v0.7.0 release checklist): RPM releases
+# have _ (el10_2), and an update whose version had one used to be dropped as malformed, so the server was "nothing";
+# and installed packages are in @System, which used to be dropped too, so the current version was always empty.
+def fixed_cases():
+    found = U.usas_dnf_updates("tzdata|2026e-1.el10_2.alma.1|baseos\n", "tzdata|2026e-1.el10_2.alma.1|baseos\n",
+                               "bash|5.2.26-6.el10|@System\ntzdata|2026c-1.el10_2.alma.1|@System\n")
+    assert found["skipped"] == 0 and found["upgrades"] == [
+        {"name": "tzdata", "current": "2026c-1.el10_2.alma.1", "candidate": "2026e-1.el10_2.alma.1",
+         "suites": ["baseos"], "security": True, "new": False}], found
+    table = "\n".join([
+        "Dependencies resolved.", "=" * 80,
+        " Package          Architecture     Version                       Repository    Size", "=" * 80,
+        "Upgrading:", " tzdata           noarch           2026e-1.el10_2.alma.1         baseos       427 k",
+        "", "Transaction Summary", "=" * 80, "Upgrade  1 Package", "Operation aborted."])
+    transaction = U.usas_dnf_transaction(table)
+    assert transaction["skipped"] == 0 and [(u["name"], u["candidate"]) for u in transaction["upgrades"]] == [
+        ("tzdata", "2026e-1.el10_2.alma.1")], transaction
+
+
+fixed_cases()
 atheris.Setup(sys.argv, one_input)
 atheris.Fuzz()

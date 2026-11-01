@@ -288,6 +288,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
   default, `group_vars` aren't read while an inventory is parsed. It now reads them as the playbooks do. Found by
   the v0.7.0 release checklist.
+- The updates playbook left out every update on Rocky Linux, AlmaLinux and CentOS Stream whose version has an
+  `_`, which is almost all of them (`2026e-1.el10_2.alma.1`): it took the version for malformed, so the server was
+  reported "nothing" and nothing was installed. It also never showed the installed version on those servers (dnf
+  lists installed packages in `@System`, which it skipped too). Found by the v0.7.0 release checklist.
 - Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
   (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
   Found by the v0.7.0 release checklist.

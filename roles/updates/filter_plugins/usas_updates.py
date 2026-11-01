@@ -23,7 +23,8 @@ description: See the module docstring and roles/updates/tasks/.
 # The same patterns as roles/updates/vars/main.yml (tests/fuzz/fuzz_update_reports.py checks they agree).
 # Package names: Debian's (lower case, and :arch) and RPM's (upper case and _ too: NetworkManager, perl-IO-Tty).
 PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+.-]{1,127}(:[a-z0-9][a-z0-9-]{0,31})?\Z")
-VERSION = re.compile(r"^[A-Za-z0-9.+~:-]{1,128}\Z")
+# Versions: Debian's (epoch:, ~ and +) and RPM's, whose releases have _ (2026e-1.el10_2, 1.2-3.el9_8).
+VERSION = re.compile(r"^[A-Za-z0-9._+~:-]{1,128}\Z")
 SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,254}\Z")
 SUITE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}\Z")
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
@@ -143,10 +144,12 @@ DNF_SECTIONS = {
 
 
 def _dnf_query(stdout):
-    """(name, evr, repo) for each line of dnf repoquery --qf "%{name}|%{evr}|%{reponame}" that passes the checks."""
+    """(name, evr, repo) for each line of dnf repoquery --qf "%{name}|%{evr}|%{reponame}" that passes the checks.
+    Installed packages are in the repository @System."""
     for line in _lines(stdout)[: MAX_ENTRIES * 4]:
         match = DNF_QUERY.match(line.strip())
-        if match and PACKAGE.match(match.group(1)) and VERSION.match(match.group(2)) and SUITE.match(match.group(3)):
+        if match and PACKAGE.match(match.group(1)) and VERSION.match(match.group(2)) \
+                and SUITE.match(match.group(3).removeprefix("@")):
             yield match.groups()
 
 
