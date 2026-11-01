@@ -1,0 +1,38 @@
+---
+# Inventory for tests/kubernetes.sh: cluster ci, three servers and an agent, each a container on the test's own
+# Docker network (172.29.30.0/24) with SSH on a local port. The VIP and the LoadBalancer pool are free addresses on
+# that network; the control node reaches it from the network's gateway (.1). The join tokens come from the test
+# (-e @$TEST_TMP/tokens.yml), made fresh for each run.
+all:
+  vars:
+    test_tmp: "{{ lookup('ansible.builtin.env', 'TEST_TMP') }}"
+    ansible_ssh_private_key_file: "{{ test_tmp }}/id_ed25519"
+    ansible_ssh_common_args: "-o UserKnownHostsFile={{ test_tmp }}/known_hosts -o StrictHostKeyChecking=yes"
+    ansible_user: sysadmin
+    ansible_become_password: test-password
+    admin_user: sysadmin
+  children:
+    servers:
+      hosts:
+        k3s-s1: {ansible_host: 127.0.0.1, ansible_port: 2241, k8s_node_ip: 172.29.30.11}
+        k3s-s2: {ansible_host: 127.0.0.1, ansible_port: 2242, k8s_node_ip: 172.29.30.12}
+        k3s-s3: {ansible_host: 127.0.0.1, ansible_port: 2243, k8s_node_ip: 172.29.30.13}
+        k3s-a1: {ansible_host: 127.0.0.1, ansible_port: 2244, k8s_node_ip: 172.29.30.21}
+    k8s_ci:
+      vars:
+        k8s_version: v1.36.5+k3s1
+        k8s_api_vip: 172.29.30.100
+        k8s_lb_pool: 172.29.30.101-172.29.30.102
+        k8s_api_sources: [172.29.30.1]
+        k8s_tls_san: [k8s-api.ci.test]
+        k8s_fetch_readonly_kubeconfig: true
+        k8s_readonly_kubeconfig: "{{ test_tmp }}/kube/ci-readonly.yaml"
+      children:
+        k8s_ci_servers:
+          hosts:
+            k3s-s1:
+            k3s-s2:
+            k3s-s3:
+        k8s_ci_agents:
+          hosts:
+            k3s-a1:

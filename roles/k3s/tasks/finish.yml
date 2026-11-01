@@ -1,0 +1,84 @@
+---
+# On each cluster's first server, once every member has started: every member is a Ready node, and with
+# k8s_fetch_readonly_kubeconfig the read-only account's kubeconfig goes to the control node.
+- name: Wait until every member is a Ready node
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - nodes
+      - -o
+      - jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}
+  register: k3s_nodes
+  until: >-
+    k3s_nodes.rc == 0 and k3s_members | map(attribute='host') | select('in', ansible_play_hosts_all)
+    | map('regex_replace', '$', '=True') | difference(k3s_nodes.stdout_lines) | length == 0
+  retries: "{{ (k8s_ready_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Fetch the read-only kubeconfig
+  when: k8s_fetch_readonly_kubeconfig | bool and not ansible_check_mode
+  block:
+    # The token controller fills the Secret in once k3s has applied the manifest.
+    - name: Read the read-only account's token
+      ansible.builtin.command:
+        argv:
+          - "{{ k3s_binary }}"
+          - kubectl
+          - --namespace=kube-system
+          - get
+          - secret
+          - "{{ k3s_readonly_account }}-token"
+          - -o
+          - jsonpath={.data.token}
+      register: k3s_readonly_token
+      until: k3s_readonly_token.rc == 0 and k3s_readonly_token.stdout | length > 0
+      retries: 30
+      delay: 5
+      changed_when: false
+      no_log: true
+
+    - name: Read the cluster's certificate authority
+      ansible.builtin.slurp:
+        src: "{{ k3s_server_ca }}"
+      register: k3s_ca
+
+    - name: Create the kubeconfig's directory on the control node
+      ansible.builtin.file:
+        path: "{{ k8s_readonly_kubeconfig | dirname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Write the read-only kubeconfig on the control node
+      ansible.builtin.copy:
+        dest: "{{ k8s_readonly_kubeconfig }}"
+        content: "{{ k3s_kubeconfig | to_nice_yaml(indent=2) }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      diff: false
+      no_log: true
+      vars:
+        k3s_kubeconfig:
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: "{{ k3s_cluster }}"
+              cluster:
+                server: "{{ k3s_join_url }}"
+                certificate-authority-data: "{{ k3s_ca.content }}"
+          users:
+            - name: "{{ k3s_readonly_account }}"
+              user:
+                token: "{{ k3s_readonly_token.stdout | b64decode }}"
+          contexts:
+            - name: "{{ k3s_cluster }}-readonly"
+              context:
+                cluster: "{{ k3s_cluster }}"
+                user: "{{ k3s_readonly_account }}"
+          current-context: "{{ k3s_cluster }}-readonly"

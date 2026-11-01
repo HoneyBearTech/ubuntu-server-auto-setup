@@ -785,9 +785,9 @@ play_fails "whose password prompt Ansible doesn't recognise" playbooks/baseline.
 docker exec "$SRV" mv /usr/bin/sudo.ws.hidden /usr/bin/sudo.ws
 
 step "Task coverage"
-# The updates role has its own suite and figure (tests/updates.sh).
+# The updates and k3s roles have their own suites and figures (tests/updates.sh, tests/kubernetes.sh).
 # Ubuntu only here: the RHEL family's task files are tests/baseline.sh's.
-python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates \
+python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates,k3s \
   --skip-files '*/RedHat.yml,roles/common/tasks/epel.yml,roles/kubernetes_node/tasks/selinux.yml'
 
 step "All integration tests passed"

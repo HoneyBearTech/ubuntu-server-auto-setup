@@ -1,0 +1,42 @@
+---
+# Starts k3s on the member, or restarts it when its binary, unit or configuration changed, and waits until the node
+# is Ready. playbooks/kubernetes.yml does this on one server at a time.
+
+# Without blocking: a start that waits on systemd can hang when k3s is slow to report (K0), so the node's Ready
+# below is the check, with its own timeout.
+- name: Start k3s
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service }}"
+    enabled: true
+    state: "{{ 'restarted' if k3s_changed else 'started' }}"
+    no_block: true
+    daemon_reload: "{{ k3s_unit is changed }}"
+  vars:
+    k3s_changed: "{{ k3s_binary_install is changed or k3s_unit is changed or k3s_config_write is changed }}"
+
+# On an agent, from the cluster's first server: an agent has no kubeconfig.
+- name: Wait until the node is Ready
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - node
+      - "{{ inventory_hostname }}"
+      - -o
+      - jsonpath={.status.conditions[?(@.type=="Ready")].status}
+  register: k3s_ready
+  until: k3s_ready.rc == 0 and k3s_ready.stdout == 'True'
+  retries: "{{ (k8s_ready_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  changed_when: false
+  delegate_to: "{{ inventory_hostname if k3s_role == 'server' else k3s_seed }}"
+  when: not ansible_check_mode
+
+# kube-vip runs once the server is Ready and has pulled its image; the other members join through the VIP.
+- name: Wait until the API answers on the VIP
+  ansible.builtin.wait_for:
+    host: "{{ k8s_api_vip }}"
+    port: "{{ k3s_api_port }}"
+    timeout: "{{ k8s_ready_timeout | int }}"
+  when: k8s_api_vip != '' and k3s_role == 'server' and not ansible_check_mode

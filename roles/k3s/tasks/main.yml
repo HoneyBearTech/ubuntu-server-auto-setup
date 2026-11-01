@@ -1,0 +1,9 @@
+---
+# Checks the member and installs k3s on it without starting it. playbooks/kubernetes.yml then starts each cluster's
+# first server (start.yml), joins the other servers one at a time and then the agents (join.yml), and checks every
+# node on the first server (finish.yml).
+- name: Check the member and the cluster's settings
+  ansible.builtin.import_tasks: check.yml
+
+- name: Install k3s
+  ansible.builtin.import_tasks: install.yml

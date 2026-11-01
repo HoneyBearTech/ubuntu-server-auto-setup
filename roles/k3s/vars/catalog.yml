@@ -1,0 +1,35 @@
+---
+# The k3s catalog: the k3s releases the k3s role installs and the kube-vip images it deploys, each pinned like a
+# lock file. A binary is installed only if it matches its SHA-256 here, an image is pulled only by its digest here.
+# k3s publishes its checksums (sha256sum-<arch>.txt) over HTTPS with no signature, and kube-vip its images on
+# GHCR with no signature either, so these pins are taken over HTTPS and reviewed in the pull request that changes
+# them. tools/update_k3s_catalog.py checks them against upstream again, and the weekly OS catalog workflow opens
+# an issue when one no longer matches or upstream has a newer release.
+k3s_catalog:
+  - version: v1.36.5+k3s1
+    binaries:
+      amd64:
+        url: https://github.com/k3s-io/k3s/releases/download/v1.36.5%2Bk3s1/k3s
+        sha256: "d73847bcd3c5fccef0115b372e2f9a91f3032dc84bbf71518a4617565294d313"
+      arm64:
+        url: https://github.com/k3s-io/k3s/releases/download/v1.36.5%2Bk3s1/k3s-arm64
+        sha256: "135e34cb9e8a1cfae3cb55577789e93501efe7edc080a8b2630458a85b07721e"
+  - version: v1.37.1+k3s1
+    binaries:
+      amd64:
+        url: https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s
+        sha256: "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+      arm64:
+        url: https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s-arm64
+        sha256: "a1561ca4aef8b99f5588a840d4468ac39c8c1cd92470bbcb9634823fa221741a"
+
+# kube-vip (the API address and LoadBalancer addresses, by ARP) and its cloud provider (hands out the pool's
+# addresses): multi-arch image indexes, by digest.
+k3s_kube_vip_image:
+  name: ghcr.io/kube-vip/kube-vip
+  tag: v1.3.1
+  digest: sha256:1962f9daf226503f7e6b107f595cb28b7917fd2d0113957075e19a3e5a6c1e33
+k3s_kube_vip_cloud_provider_image:
+  name: ghcr.io/kube-vip/kube-vip-cloud-provider
+  tag: v0.0.13
+  digest: sha256:b8b6a5180e678b410e2c5dba86b87fa8099ada16e2f067d83f04e749f8ea54ab

@@ -7,7 +7,7 @@ LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 CLUSTER_INVENTORY ?= $(wildcard inventory/pve.usas_pve.yml)
 CLUSTER_ARG := $(if $(CLUSTER_INVENTORY),-i $(CLUSTER_INVENTORY),)
 
-.PHONY: help deps app lint syntax test test-updates test-baseline catalog catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check
+.PHONY: help deps app lint syntax test test-updates test-baseline test-kubernetes catalog catalog-check k3s-catalog k3s-catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check kubernetes
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -26,7 +26,7 @@ lint: ## Run yamllint, ansible-lint and ruff
 
 syntax: ## Syntax-check every playbook against the example inventory
 	ansible-playbook -i inventory/hosts.example.yml --syntax-check playbooks/site.yml playbooks/prepare-node.yml \
-	  playbooks/updates.yml
+	  playbooks/updates.yml playbooks/kubernetes.yml
 
 test: ## Integration tests against containers and a mock Proxmox API (needs Docker)
 	tests/run.sh
@@ -37,13 +37,22 @@ test-updates: ## Integration tests of the updates playbook (needs Docker; OS=deb
 test-baseline: ## The baseline on one OS (needs Docker; OS=debian-12 picks the release, debian-13 by default)
 	tests/baseline.sh
 
+test-kubernetes: ## k3s on four containers, three servers and an agent (needs Docker; OS=debian-13 or rocky-9, ubuntu-26.04 by default)
+	tests/kubernetes.sh
+
 catalog: ## Pin the newest image of every supported release in the OS catalog (vendor signatures checked; needs gpgv)
 	python3 tools/update_os_catalog.py
 
 catalog-check: ## Check every image the OS catalog pins against the vendors again, and list newer builds
 	python3 tools/update_os_catalog.py --check
 
-catalog-test: ## Unit tests for tools/update_os_catalog.py, offline (needs gpg; pytest from requirements-dev.txt)
+k3s-catalog: ## Add k3s' newest patch releases and the newest kube-vip images to the k3s catalog (checksums and digests from upstream)
+	python3 tools/update_k3s_catalog.py
+
+k3s-catalog-check: ## Check every pin in the k3s catalog against upstream again, and list newer releases
+	python3 tools/update_k3s_catalog.py --check
+
+catalog-test: ## Unit tests for tools/update_os_catalog.py and tools/update_k3s_catalog.py, offline (needs gpg; pytest from requirements-dev.txt)
 	python3 -m pytest tests/tools -p no:cacheprovider --cov=tools --cov-report=term-missing --cov-fail-under=80
 
 fuzz: ## Atheris fuzz targets, FUZZ_SECONDS each (Linux x86-64; needs requirements-fuzz.txt)
@@ -85,6 +94,9 @@ baseline: ## Apply the server baseline (users, SSH, UFW, Fail2Ban, updates)
 
 keys: ## Re-sync GitHub SSH keys only
 	$(PLAYBOOK) playbooks/baseline.yml --tags ssh_keys $(LIMIT_ARG) $(ARGS)
+
+kubernetes: ## Build the k3s clusters of the k8s_<cluster>_servers and _agents groups (after the baseline)
+	$(PLAYBOOK) playbooks/kubernetes.yml $(LIMIT_ARG) $(ARGS)
 
 updates-check: ## Report the package updates each server would get, changing nothing
 	$(PLAYBOOK) $(CLUSTER_ARG) playbooks/updates.yml --check $(LIMIT_ARG) $(ARGS)
