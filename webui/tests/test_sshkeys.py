@@ -2,6 +2,7 @@
 
 import datetime
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -140,8 +141,10 @@ def test_node_cpu(keys, monkeypatch):
     first = [line for line in cpuinfo.splitlines() if re.match(r"^(model name|flags)\s*:", line)][:2]
     monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: seen.append(argv) or completed("\n".join(first)))
     model, flags = keys.cpu("pve", "root")
-    assert seen[0][seen[0].index("--") + 1:] == ["pve", "grep", "-m", "2", "-E", "^(model name|flags)[[:space:]]*:",
-                                                 "/proc/cpuinfo"]
+    # ssh hands the remote shell one string: the shell must get grep's pattern back as one word.
+    host, remote = seen[0][seen[0].index("--") + 1:]
+    assert host == "pve" and shlex.split(remote) == ["grep", "-m", "2", "-E", "^(model name|flags)[[:space:]]*:",
+                                                     "/proc/cpuinfo"]
     assert model == "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz" and "avx" in flags and "avx2" not in flags
     monkeypatch.setattr(k.subprocess, "run", lambda argv, **kw: completed("", 2, "No such file"))
     assert keys.cpu("pve", "root") == ("", set())

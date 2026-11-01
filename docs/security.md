@@ -458,6 +458,10 @@ them with what the control node sees, and pin them: `known_hosts` entries checke
 in the trust store, and how to do the same in the web UI's data volume. VMs picked on the VMs page are
 pinned by cluster and VM ID instead of address ([host-keys.md](host-keys.md#5-vms-you-didnt-create-the-vms-page)).
 
+On the SSH page the web UI runs only fixed commands on a node: `true` for the login test, a `grep` of
+`/proc/cpuinfo` for the CPU check and a `cat` of the cluster CA certificate. ssh hands the node's shell one
+string, so the UI shell-quotes each word of them (`shlex.join`), and the node's shell can't split or expand any.
+
 ## What it does not protect against
 
 - **A compromised control node.** It holds the Vault password (when you type it), the API token, your SSH
