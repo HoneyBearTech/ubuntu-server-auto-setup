@@ -1,4 +1,13 @@
 ---
+# A minimal EL image has no modules-load.d until something puts a file there.
+- name: Create the modules-load.d directory
+  ansible.builtin.file:
+    path: "{{ k8s_node_modules_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Load the kernel modules at boot
   ansible.builtin.copy:
     dest: "{{ k8s_node_modules_file }}"

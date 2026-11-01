@@ -34,6 +34,15 @@
     state: "{{ omit if k8s_node_in_container else 'started' }}"
   when: k8s_longhorn_prereqs | bool and not (ansible_check_mode and k8s_node_longhorn_install is changed)
 
+- name: Create multipathd's drop-in directory
+  ansible.builtin.file:
+    path: "{{ k8s_node_multipath_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: k8s_longhorn_prereqs | bool and 'multipathd.service' in ansible_facts.services
+
 - name: Leave sd* disks to Longhorn in multipathd
   ansible.builtin.copy:
     dest: "{{ k8s_node_multipath_file }}"
