@@ -87,6 +87,15 @@ def one_input(data):
     assert found == expected, (hosts, vms, found, expected)
 
 
+def fixed_cases():
+    """Inputs the fuzzer found once, checked on every run."""
+    # A label holding \x1d, which str.splitlines() treats as a line break: it isn't the empty label.
+    probe = {"rc": 0, "stdout": "\nTYPE=xfs\nLABEL=\x1d!!\x00\x00\x08", "item": {"stat": {"path": "/dev/disk/by-id/x"}}}
+    state = DISKS.data_disks_state([probe], [{"label": "", "fs": "xfs", "mount": "/srv/data"}])[0]
+    assert state["state"] == "other", state
+
+
 if __name__ == "__main__":
+    fixed_cases()
     atheris.Setup(sys.argv, one_input)
     atheris.Fuzz()

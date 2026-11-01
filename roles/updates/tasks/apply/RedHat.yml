@@ -1,0 +1,21 @@
+---
+# The RHEL family: upgrade what the check chose (only installed packages; dnf adds new dependencies and kernels),
+# with the packages left out excluded as well, so nothing pulls them in. The upgrade runs in the background on
+# the server, so a restarted sshd or a dropped connection doesn't stop it. Signatures are checked as dnf always
+# does (gpgcheck): this role never turns that off (tests/updates.sh checks the role for such options).
+- name: Install the updates with dnf
+  ansible.builtin.dnf:
+    name: "{{ updates_selection.install }}"
+    state: latest
+    update_only: true
+    exclude: "{{ updates_selection.excluded }}"
+    lock_timeout: "{{ updates_lock_wait | int }}"
+  async: "{{ updates_task_timeout | int }}"
+  poll: 10
+  register: updates_upgrade
+
+- name: Check that the server answered while it installed updates
+  ansible.builtin.include_tasks: ../answering.yml
+  vars:
+    updates_answers: "{{ [updates_upgrade] }}"
+    updates_answers_when: while it installed updates

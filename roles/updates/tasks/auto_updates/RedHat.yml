@@ -1,0 +1,26 @@
+---
+# What the server does on its own (dnf-automatic and its timers), as one line for the report. Read only: this
+# playbook never changes it; the baseline sets it up on the servers this project installed.
+- name: Read dnf-automatic's configuration
+  ansible.builtin.slurp:
+    src: /etc/dnf/automatic.conf
+  register: updates_dnf_automatic
+  failed_when: false
+
+- name: Check dnf-automatic's timers
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, dnf-automatic.timer, dnf-automatic-install.timer]
+  register: updates_dnf_timers
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Note the automatic updates
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'auto_updates': (updates_dnf_automatic.content | default('') | b64decode
+      | usas_dnf_auto_updates(timers, updates_dnf_automatic.content is defined, os_security_errata | bool)).line}) }}
+  vars:
+    # systemctl is-enabled prints one line per unit, in order (nothing for a unit that doesn't exist).
+    timer_states: "{{ updates_dnf_timers.stdout_lines | default([]) + ['', ''] }}"
+    timers: {dnf-automatic.timer: "{{ timer_states[0] }}", dnf-automatic-install.timer: "{{ timer_states[1] }}"}

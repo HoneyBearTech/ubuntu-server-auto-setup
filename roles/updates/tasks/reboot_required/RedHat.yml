@@ -1,35 +1,65 @@
 ---
 # The RHEL family: dnf needs-restarting -r (dnf-plugins-core) exits 1 when a reboot would load updated core
-# packages (the kernel, glibc, systemd...), and lists them; -s lists the services still running old code. Sets
-# updates_reboot_status like reboot_required/Debian.yml; the updates playbook adds it to its result, and the
-# baseline (roles/common) reads it too.
+# packages (the kernel, glibc, systemd...), and lists them; -s lists the services still running old code. Where
+# that command is missing (dnf-plugins-core not installed), or with updates_os_reboot_check: kernel, the newest
+# kernel in /boot is compared with the one running instead. Sets updates_reboot_status like
+# reboot_required/Debian.yml; the updates playbook adds it to its result, and the baseline (roles/common) reads
+# it too.
 - name: Ask dnf whether a reboot is needed
   ansible.builtin.command:
     argv: [dnf, needs-restarting, --reboothint]
+  environment:
+    LC_ALL: C
   register: updates_needs_reboot
   changed_when: false
   failed_when: updates_needs_reboot.rc not in [0, 1]
   check_mode: false
+  when: updates_os_reboot_check == 'needs-restarting'
+
+- name: Note whether dnf has needs-restarting
+  ansible.builtin.set_fact:
+    updates_needs_restarting: >-
+      {{ updates_needs_reboot is not skipped and updates_needs_reboot.rc | default(2) in [0, 1]
+      and 'No such command' not in (updates_needs_reboot.stderr | default('') ~ updates_needs_reboot.stdout | default('')) }}
 
 - name: Ask dnf which services run old code
   ansible.builtin.command:
     argv: [dnf, needs-restarting, --services]
+  environment:
+    LC_ALL: C
   register: updates_needs_services
   changed_when: false
   failed_when: false
   check_mode: false
+  when: updates_needs_restarting
+
+- name: List the kernels installed in /boot
+  ansible.builtin.find:
+    paths: /boot
+    patterns: vmlinuz-*
+    excludes: vmlinuz-0-rescue-*
+  register: updates_boot_kernels
+  when: not updates_needs_restarting
 
 - name: Note whether a reboot is needed
   ansible.builtin.set_fact:
     updates_reboot_status:
-      required: "{{ updates_needs_reboot.rc == 1 }}"
+      required: >-
+        {{ (updates_needs_reboot.rc == 1) if updates_needs_restarting
+        else (newest_kernel | length > 0 and newest_kernel != ansible_facts.kernel) }}
       # "  * kernel" lines under "Core libraries or services have been updated since boot-up:".
       packages: >-
-        {{ updates_needs_reboot.stdout_lines | select('match', '^\s+\*\s+\S+') | map('regex_replace', '^\s+\*\s+', '')
-           | map('regex_replace', '\s.*$', '') | join('\n') | usas_package_names(100) }}
+        {{ (updates_needs_reboot.stdout_lines | select('match', '^\s+\*\s+\S+') | map('regex_replace', '^\s+\*\s+', '')
+           | map('regex_replace', '\s.*$', '') | join('\n') | usas_package_names(100)) if updates_needs_restarting
+           else (['kernel-' ~ newest_kernel] if newest_kernel | length > 0 and newest_kernel != ansible_facts.kernel
+           else []) }}
       restart_services: >-
         {{ updates_needs_services.stdout_lines | default([]) | select('match', '^[A-Za-z0-9@._:-]+\.service$')
            | list | unique | sort }}
+  vars:
+    newest_kernel: >-
+      {{ updates_boot_kernels.files | default([]) | map(attribute='path') | map('basename')
+         | map('regex_replace', '^vmlinuz-', '') | community.general.version_sort | last | default('') }}
 
 - name: Add it to the run's result
   ansible.builtin.set_fact:
