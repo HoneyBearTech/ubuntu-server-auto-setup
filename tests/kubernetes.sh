@@ -44,7 +44,9 @@ probe_pid=""
 LAST_LOG=""
 
 # K8S_TEST_KEEP=1 leaves the containers, their volumes and the network after a failure, to look inside
-# (docker exec k3s-s1 k3s kubectl get pods -A); the next run removes them.
+# (docker exec k3s-s1 k3s kubectl get pods -A). A run removes only what it created itself (owned=true): it won't
+# start while another run's network or containers exist, so one can't tear down another.
+owned=false
 cleanup() {
   status=$?
   if [ -n "$probe_pid" ]; then kill "$probe_pid" 2>/dev/null || true; fi
@@ -56,7 +58,7 @@ cleanup() {
       fi
     done
   fi
-  if [ "$status" -eq 0 ] || [ "${K8S_TEST_KEEP:-}" != 1 ]; then
+  if $owned && { [ "$status" -eq 0 ] || [ "${K8S_TEST_KEEP:-}" != 1 ]; }; then
     for node in "${NODES[@]}"; do
       docker rm -f "$node" >/dev/null 2>&1 || true
       docker volume rm "$node-rancher" >/dev/null 2>&1 || true
@@ -112,12 +114,19 @@ ssh-keygen -q -t ed25519 -N '' -C test@ubuntu-server-auto-setup -f "$TEST_TMP/id
 printf 'vault_k8s_token_ci: %s\nvault_k8s_agent_token_ci: %s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" \
   >"$TEST_TMP/tokens.yml"
 docker build -q -t "$IMAGE" --build-arg OS="$OS" --target target tests/images/ubuntu-target >/dev/null
-docker network rm "$NET" >/dev/null 2>&1 || true
-docker network create --subnet 10.217.30.0/24 --gateway 10.217.30.1 "$NET" >/dev/null
+for node in "${NODES[@]}"; do
+  if docker container inspect "$node" >/dev/null 2>&1 || docker volume inspect "$node-rancher" >/dev/null 2>&1; then
+    echo "ERROR: $node (or its volume) exists: another run is using it, or one kept it (K8S_TEST_KEEP). Remove it with" \
+      "docker rm -f k3s-s1 k3s-s2 k3s-s3 k3s-a1; docker volume rm k3s-s1-rancher k3s-s2-rancher k3s-s3-rancher" \
+      "k3s-a1-rancher; docker network rm $NET" >&2
+    exit 1
+  fi
+done
+docker network create --subnet 10.217.30.0/24 --gateway 10.217.30.1 "$NET" >/dev/null \
+  || { echo "ERROR: couldn't create the network $NET: another run may be using it (docker network rm $NET)" >&2; exit 1; }
+owned=true
 : >"$TEST_TMP/known_hosts"
 for node in "${NODES[@]}"; do
-  docker rm -f "$node" >/dev/null 2>&1 || true
-  docker volume rm "$node-rancher" >/dev/null 2>&1 || true
   # k3s' overlayfs snapshotter needs its data on a volume, not on the container's own overlay (K0). Each node gets a
   # cgroup namespace of its own, as k3d does: with the host's (--cgroupns=host, as the baseline tests use), the four
   # kubelets share one cgroup tree and kill each other's pods ("Pod sandbox changed") whenever another node starts.

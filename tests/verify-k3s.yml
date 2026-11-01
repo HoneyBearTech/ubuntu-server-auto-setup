@@ -70,6 +70,46 @@
       retries: 60
       delay: 5
 
+    # Every add-on pod reaches the API and its peers: running and ready (or a finished job), and a minute later with
+    # no more restarts, so a crash loop or a node firewall in the way can't pass as healthy.
+    - name: Wait until every pod in kube-system is ready
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - --namespace=kube-system
+          - get
+          - pods
+          - -o
+          - >-
+            jsonpath={range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[*].ready}
+            {.status.containerStatuses[*].restartCount}{"\n"}{end}
+      register: verify_pods
+      changed_when: false
+      until: >-
+        verify_pods.rc == 0 and verify_pods.stdout_lines | reject('search', ' Succeeded ')
+        | select('search', '( false|^\S+ (?!Running ))') | list | length == 0
+      retries: 60
+      delay: 5
+
+    - name: Give the pods a minute to show a crash loop
+      ansible.builtin.pause:
+        seconds: 60
+
+    - name: Read the pods again
+      ansible.builtin.command:
+        argv: "{{ verify_pods.cmd }}"
+      register: verify_pods_later
+      changed_when: false
+
+    - name: Check that no pod restarted or went unready in that minute
+      ansible.builtin.assert:
+        that:
+          - verify_pods_later.stdout_lines | sort == verify_pods.stdout_lines | sort
+        fail_msg: >-
+          kube-system's pods changed (name, phase, ready, restarts): {{ verify_pods.stdout_lines }}, a minute later
+          {{ verify_pods_later.stdout_lines }}
+
     - name: Look at the admin kubeconfig
       ansible.builtin.stat:
         path: /etc/rancher/k3s/k3s.yaml
