@@ -115,4 +115,8 @@ updates_webhook_url: ""
 updates_webhook_format: text
 
 # Where the run's report goes on the control node: <run id>.json and <run id>.txt, readable by its owner only.
-updates_report_dir: "{{ playbook_dir | dirname }}/reports/updates"
+# In the container image (USAS_DATA_DIR set) the data volume's updates/reports, as the web UI's runs: the project's
+# own folder is read-only there.
+updates_report_dir: >-
+  {{ (lookup('ansible.builtin.env', 'USAS_DATA_DIR') ~ '/updates/reports')
+     if lookup('ansible.builtin.env', 'USAS_DATA_DIR') else (playbook_dir | dirname) ~ '/reports/updates' }}

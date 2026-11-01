@@ -283,6 +283,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The VMs page's plan said "Every package is upgraded (apt_upgrade: dist)", the setting's name before 0.7.0; it
+  now names `pkg_upgrade`. Found by the v0.7.0 release checklist.
+- The updates playbook run with the container image's own Ansible (`docker exec usas ansible-playbook ...`, as
+  docs/web-ui.md shows) stopped at "Make the report folder": its report went to the project's folder, which is
+  read-only in the image. In the image it now goes to the data volume's `updates/reports`, as the web UI's runs'.
+  Found by the v0.7.0 release checklist.
 - The cluster inventory for the updates playbook (`inventory/pve.usas_pve.yml`) stopped with
   "'vault_pve_api_token_id' is undefined" when the API token was in the Vault next to the inventory
   (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
@@ -292,6 +298,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   updates (`updates_snapshot`) were refused with an incomplete API token: the web UI leaves `pve_api_user` out
   while it is the default, `ansible@pve`, and neither had that default. Both now do, as creating VMs does. Found
   by the v0.7.0 release checklist.
+- The updates playbook left out every update on Rocky Linux, AlmaLinux and CentOS Stream whose version has an
+  `_`, which is almost all of them (`2026e-1.el10_2.alma.1`): it took the version for malformed, so the server was
+  reported "nothing" and nothing was installed. It also never showed the installed version on those servers (dnf
+  lists installed packages in `@System`, which it skipped too). Found by the v0.7.0 release checklist.
 - Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
   (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
   Found by the v0.7.0 release checklist.
