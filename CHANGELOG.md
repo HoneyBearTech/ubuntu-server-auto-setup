@@ -272,6 +272,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- A Rocky Linux, AlmaLinux or CentOS Stream VM installed from its cloud image came up on DHCP instead of its
+  static address, so provisioning timed out waiting for SSH: their cloud-init (24.4) can't read a default route
+  written as `to: default` and skipped the whole network configuration. The seed now writes it as `0.0.0.0/0`,
+  which every release's cloud-init and netplan read (the autoinstall user-data too, which spells its network the
+  same way). The weekly cloud-image test missed it because QEMU's DHCP leased the very address it set statically;
+  it now uses another one, reachable only if network-config was applied. Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
   Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
   `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every

@@ -143,7 +143,7 @@ def expected_ethernet(nic, first, values):
     elif nic["mode"] == "static":
         eth["addresses"] = [f"{nic['address']}/{nic['prefix']}"]
         if str(nic["gateway"]):
-            eth["routes"] = [{"to": "default", "via": str(nic["gateway"])}]
+            eth["routes"] = [{"to": "0.0.0.0/0", "via": str(nic["gateway"])}]
     if first and (nic["mode"] == "static" or values["net_dns"] or values["net_search"]):
         eth["nameservers"] = {"addresses": values["net_dns"], "search": values["net_search"]}
     if str(nic["mtu"]):
@@ -248,7 +248,7 @@ def one_input(data):
         assert ethernets[name] == expected_ethernet(nic, i == 0, values), (ethernets[name], nic)
     if values["net_mode"] == "static":
         assert ethernets["primary"]["addresses"] == [f"{values['ansible_host']}/{values['net_prefix']}"]
-    routes = [r for eth in ethernets.values() for r in eth.get("routes", []) if r["to"] == "default"]
+    routes = [r for eth in ethernets.values() for r in eth.get("routes", []) if r["to"] == "0.0.0.0/0"]
     assert len(routes) + (values["net_mode"] == "dhcp") == 1, ethernets
     layout = {"name": values["autoinstall_storage_layout"]}
     if values["autoinstall_storage_layout"] == "lvm":
