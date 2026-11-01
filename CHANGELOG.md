@@ -272,6 +272,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- An extra disk whose file system label held a character such as `\x1d` could be taken for the disk's own file
+  system with an empty label, and mounted: the baseline split blkid's output at every character Python counts as a
+  line break. It now splits at newlines only, so such a disk is left alone as "other". Found by the fuzz targets.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
   Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
   `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
