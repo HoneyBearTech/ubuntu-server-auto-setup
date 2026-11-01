@@ -107,6 +107,15 @@
           if not updates_ignore_window | bool and not updates_reboot_window | usas_in_window
           else '' }}
 
+    - name: Drain the Kubernetes node before the reboot
+      ansible.builtin.include_tasks: k8s_drain.yml
+      when:
+        - usas_updates_result.reboot.required
+        - updates_reboot == 'if_required'
+        - not usas_updates_result.reboot.held
+        - usas_updates_result.k8s.role != ''
+        - usas_updates_result.k8s.drain
+
     - name: Reboot to finish the updates
       ansible.builtin.reboot:
         msg: Rebooting to finish package updates (ubuntu-server-auto-setup)
@@ -129,6 +138,10 @@
     - name: Check the server's health
       ansible.builtin.include_tasks: health.yml
       when: usas_updates_result.upgraded | length > 0 or usas_updates_result.reboot.done
+
+    - name: Put the Kubernetes node back
+      ansible.builtin.include_tasks: k8s_uncordon.yml
+      when: usas_updates_result.k8s.drained
 
     - name: Note the result
       ansible.builtin.set_fact:

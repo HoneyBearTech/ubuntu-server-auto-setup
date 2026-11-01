@@ -1,0 +1,120 @@
+---
+# Moves one member to k8s_version: playbooks/kubernetes.yml --tags upgrade runs this on one server at a time, then
+# on one agent at a time, once the run holds the cluster's lock (upgrade_lock.yml). A member already on the release
+# is left alone, so a run that stopped can be run again. The node is cordoned and drained from another server (the
+# first server drains itself if it's the only one), and a server that holds the API's address (the VIP) first hands
+# it to another server: stopping k3s alone leaves kube-vip running and the address on a dead API (K0). Then the
+# binary is replaced (only if it matches the catalog), k3s restarts, and once the node is Ready on the new release
+# (and a server's etcd is healthy) it's uncordoned.
+- name: Upgrade the member
+  when: k3s_installed != k8s_version
+  vars:
+    k3s_servers: "{{ k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host') | list }}"
+    k3s_helper: "{{ (k3s_servers | reject('eq', inventory_hostname) | list + [inventory_hostname]) | first }}"
+    k3s_moves_vip: "{{ k3s_role == 'server' and k8s_api_vip != '' and k3s_helper != inventory_hostname }}"
+    k3s_kubectl: ["{{ k3s_binary }}", kubectl]
+  block:
+    - name: Cordon the node
+      ansible.builtin.command:
+        argv: "{{ k3s_kubectl + ['cordon', inventory_hostname] }}"
+      register: k3s_cordon
+      changed_when: "'already cordoned' not in k3s_cordon.stdout"
+      delegate_to: "{{ k3s_helper }}"
+
+    - name: Drain the node
+      ansible.builtin.command:
+        argv: >-
+          {{ k3s_kubectl + ['drain', inventory_hostname, '--ignore-daemonsets', '--delete-emptydir-data',
+             '--timeout=' ~ k8s_drain_timeout | int ~ 's'] }}
+      changed_when: true
+      delegate_to: "{{ k3s_helper }}"
+
+    - name: Hand the API's address to another server
+      when: k3s_moves_vip | bool
+      block:
+        # On the server itself, whose API still answers: the lease kube-vip holds the address with names the node
+        # that has it. Its kube-vip is stopped (the kubelet starts it again, as a follower) until another holds it.
+        - name: Stop kube-vip here until another server holds the API's address
+          ansible.builtin.shell:
+            executable: /bin/sh
+            cmd: |
+              holder="$({{ k3s_binary }} kubectl --namespace=kube-system get lease plndr-cp-lock \
+                -o 'jsonpath={.spec.holderIdentity}' 2>/dev/null || true)"
+              if [ "$holder" != '{{ inventory_hostname }}' ]; then echo "held by another server"; exit 0; fi
+              ids="$({{ k3s_binary }} crictl ps --name '^kube-vip$' --state running --quiet)"
+              if [ -n "$ids" ]; then {{ k3s_binary }} crictl stop --timeout 5 $ids >/dev/null; fi
+              echo "stopped kube-vip"
+              exit 1
+          register: k3s_vip_moved
+          until: k3s_vip_moved.rc == 0
+          retries: 30
+          delay: 2
+          changed_when: k3s_vip_moved.attempts | default(1) > 1
+          when: not ansible_check_mode
+
+        - name: Wait until the API answers on its address
+          ansible.builtin.include_tasks: upgrade_vip.yml
+
+    - name: Install the new k3s binary, checked against the catalog
+      ansible.builtin.get_url:
+        url: "{{ k3s_release.binaries[k3s_arch].url }}"
+        checksum: sha256:{{ k3s_release.binaries[k3s_arch].sha256 }}
+        dest: "{{ k3s_binary }}"
+        owner: root
+        group: root
+        mode: "0755"
+      register: k3s_binary_upgrade
+
+    # The new file needs k3s-selinux's label (container_runtime_exec_t) again.
+    - name: Label the new binary for SELinux
+      ansible.builtin.command:
+        argv: [restorecon, -v, "{{ k3s_binary }}"]
+      register: k3s_restorecon
+      changed_when: k3s_restorecon.stdout | length > 0
+      when: k3s_selinux | bool and k3s_binary_upgrade is changed and not ansible_check_mode
+
+    # Without blocking, as at the install: the node's Ready on the new release below is the check.
+    - name: Restart k3s on the new release
+      ansible.builtin.systemd_service:
+        name: "{{ k3s_service }}"
+        state: restarted
+        no_block: true
+
+    - name: Wait until the node is Ready on the new release
+      ansible.builtin.command:
+        argv: >-
+          {{ k3s_kubectl + ['get', 'node', inventory_hostname, '-o',
+             'jsonpath={.status.conditions[?(@.type=="Ready")].status}/{.status.nodeInfo.kubeletVersion}'] }}
+      register: k3s_upgraded
+      until: k3s_upgraded.rc == 0 and k3s_upgraded.stdout == 'True/' ~ k8s_version
+      retries: "{{ (k8s_ready_timeout | int / 5) | round(0, 'ceil') | int }}"
+      delay: 5
+      changed_when: false
+      delegate_to: "{{ k3s_helper }}"
+      when: not ansible_check_mode
+
+    # The server's own API answers once it's back, and says whether its etcd member is healthy.
+    - name: Wait until the server's etcd is healthy
+      ansible.builtin.command:
+        argv: "{{ k3s_kubectl + ['get', '--raw', '/readyz/etcd'] }}"
+      register: k3s_etcd_ready
+      until: k3s_etcd_ready.rc == 0 and k3s_etcd_ready.stdout == 'ok'
+      retries: "{{ (k8s_ready_timeout | int / 5) | round(0, 'ceil') | int }}"
+      delay: 5
+      changed_when: false
+      when: k3s_role == 'server' and not ansible_check_mode
+
+    - name: Check that the API answers on its address after the server's upgrade
+      ansible.builtin.include_tasks: upgrade_vip.yml
+      when: k3s_role == 'server' and k8s_api_vip != ''
+
+    - name: Uncordon the node
+      ansible.builtin.command:
+        argv: "{{ k3s_kubectl + ['uncordon', inventory_hostname] }}"
+      changed_when: true
+      delegate_to: "{{ k3s_helper }}"
+
+    - name: Note the release the member runs now
+      ansible.builtin.set_fact:
+        k3s_installed: "{{ k8s_version }}"
+      when: not ansible_check_mode

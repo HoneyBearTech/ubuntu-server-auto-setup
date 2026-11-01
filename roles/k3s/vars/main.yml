@@ -42,3 +42,5 @@ k3s_manifest_files:
 k3s_readonly_account: usas-readonly
 # The API's port, on every server and the VIP.
 k3s_api_port: 6443
+# The ConfigMap in kube-system an upgrade holds while it runs (tasks/upgrade_lock.yml).
+k3s_upgrade_lock: usas-upgrade-lock

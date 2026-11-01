@@ -7,7 +7,11 @@ Properties, for any list of servers with any groups, nodes and settings:
 - no wave is empty or larger than updates_serial allows (worked out here independently);
 - no wave holds more than updates_group_max_parallel servers of a group, or more than updates_node_max_parallel
   servers that may reboot on one node (0: no limit);
+- no wave holds two servers of a Kubernetes cluster, nor a server with an agent of its cluster;
 - a server is in a later wave only because every earlier wave was full for it;
+- a server's Kubernetes membership comes from its k8s_<cluster>_servers / _agents groups only, servers first;
+- the Longhorn volumes reported unhealthy are exactly the attached ones that aren't healthy, plus "(unreadable)"
+  for a line that isn't one, each once, at most 50, with no control characters;
 - update groups are plain lower-case names, from updates_group and usas-group-<name> tags only.
 
 For any snapshot list, VM config and storage answers Proxmox could send:
@@ -98,6 +102,26 @@ GROUP_NAMES = ["web", "Web", "db", " db ", "a.b-c_d", "", "-x", "x" * 64, "usas-
 TAGS = ["usas-group-web", "USAS-GROUP-db", "usas-group-", "usas-group-<b>", "prod", "usas-groupweb", 3]
 
 
+K8S_GROUPS = ["k8s_lab_servers", "k8s_lab_agents", "k8s_b_servers", "k8s_b_agents", "k8s_Lab_servers", "k8s__servers",
+              "k8s_lab_server", "k8s_lab-1_agents", "servers", "k8s_" + "a" * 32 + "_servers", 7, None]
+
+
+def membership(fdp):
+    names = [fdp.PickValueInList(K8S_GROUPS) if fdp.ConsumeIntInRange(0, 3) else fdp.ConsumeUnicodeNoSurrogates(20)
+             for _ in range(fdp.ConsumeIntInRange(0, 3))]
+    member = U.usas_k8s_member(names)
+    found = [re.fullmatch(r"k8s_([a-z][a-z0-9-]{0,30})_(servers|agents)", n) for n in names if isinstance(n, str)]
+    found = sorted((m[2] != "servers", m[1]) for m in found if m)
+    if not found:
+        assert member == {"cluster": "", "role": ""}, (names, member)
+    else:
+        assert member == {"cluster": found[0][1], "role": "agent" if found[0][0] else "server"}, (names, member)
+    if fdp.ConsumeIntInRange(0, 8) == 0:
+        return fdp.PickValueInList([None, "x", {"cluster": "lab"}, {"cluster": "Lab", "role": "server"},
+                                    {"cluster": 3, "role": "agent"}])
+    return member
+
+
 def server(fdp):
     if fdp.ConsumeIntInRange(0, 15) == 0:
         return fdp.PickValueInList([None, "x", 7, [], {}, {"name": None}, {"name": ""}, {"name": "a\nb"}])
@@ -116,7 +140,8 @@ def server(fdp):
             if fdp.ConsumeIntInRange(0, 3) else fdp.ConsumeUnicodeNoSurrogates(10),
             "groups": groups if fdp.ConsumeIntInRange(0, 5) else fdp.PickValueInList(["web", None, ["Web", 1]]),
             "node": fdp.PickValueInList(["", "pve1", "pve2", None, 3]),
-            "reboot": fdp.PickValueInList([True, False, "true", None])}
+            "reboot": fdp.PickValueInList([True, False, "true", None]),
+            "k8s": membership(fdp)}
 
 
 def check_plan(fdp):
@@ -154,8 +179,21 @@ def check_plan(fdp):
         node = first[name].get("node")
         return node if isinstance(node, str) and node and first[name].get("reboot") is True else ""
 
+    def k8s_of(name):
+        k8s = first[name].get("k8s")
+        if not isinstance(k8s, dict) or k8s.get("role") not in ("server", "agent"):
+            return None
+        cluster = k8s.get("cluster")
+        return (cluster, k8s["role"]) if isinstance(cluster, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,30}", cluster) \
+            else None
+
+    def k8s_clash(wave, name):
+        mine = k8s_of(name)
+        return mine is not None and any(
+            (k8s_of(o) or ("", ""))[0] == mine[0] and "server" in (mine[1], k8s_of(o)[1]) for o in wave)
+
     def fits(wave, name):
-        if len(wave) >= size:
+        if len(wave) >= size or k8s_clash(wave, name):
             return False
         if gmax and any(sum(g in groups_of(o) for o in wave) >= gmax for g in groups_of(name)):
             return False
@@ -170,6 +208,8 @@ def check_plan(fdp):
         if nmax:
             for node in {rebooting_node(n) for n in wave} - {""}:
                 assert sum(rebooting_node(n) == node for n in wave) <= nmax, (node, wave)
+        for i, name in enumerate(wave):
+            assert not k8s_clash(wave[:i] + wave[i + 1:], name), (name, wave)
         for name in wave:
             assert U.usas_wave_number(waves, name) == number + 1
             # More servers in an earlier wave only take room: if it didn't fit then, it doesn't fit now.
@@ -177,9 +217,38 @@ def check_plan(fdp):
     assert U.usas_wave_number(waves, "not-planned\x00") == 0
 
 
+VOLUME_LINES = ["pvc-a=attached/healthy", "pvc-b=attached/degraded", "pvc-c=detached/unknown", "pvc-d=attached/",
+                "pvc-e=attaching/faulted", "PVC=attached/degraded", "x=attached/healthy=1", "pvc-f=attached/faulted",
+                "", "  pvc-g=attached/degraded  ", "a\u202eb=attached/degraded"]
+
+
+def check_longhorn(fdp):
+    lines = [fdp.PickValueInList(VOLUME_LINES) if fdp.ConsumeIntInRange(0, 3) else fdp.ConsumeUnicodeNoSurrogates(40)
+             for _ in range(fdp.ConsumeIntInRange(0, 60))]
+    text = "\n".join(lines)
+    bad = U.usas_longhorn_unhealthy(text)
+    expected = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        found = re.fullmatch(r"([a-z0-9][a-z0-9.-]{0,252})=([a-z]{0,20})/([a-z]{0,20})", line)
+        if not found:
+            entry = "(unreadable)"
+        elif found[2] != "attached" or found[3] == "healthy":
+            continue
+        else:
+            entry = f"{found[1]} ({found[3] or 'unknown'})"
+        if entry not in expected:
+            expected.append(entry)
+    assert bad == expected[:50], (bad, expected)
+    assert all(not CONTROL.search(b) for b in bad), bad
+
+
 def one_input(data):
     fdp = atheris.FuzzedDataProvider(data)
     check_plan(fdp)
+    check_longhorn(fdp)
     snapshots = [snapshot(fdp) for _ in range(fdp.ConsumeIntInRange(0, 12))]
     keep = fdp.PickValueInList([None, "", 0, 1, 2, 5, "1"])
     max_days = fdp.ConsumeIntInRange(1, 365)

@@ -1,0 +1,13 @@
+---
+# Added to tests/inventory/updates.yml by tests/updates.sh's Kubernetes step: the two containers as members of
+# cluster upd, upd-usas a server and upd-other an agent. A fake k3s on each records the drains (tests/updates.sh).
+all:
+  children:
+    k8s_upd:
+      children:
+        k8s_upd_servers:
+          hosts:
+            upd-usas:
+        k8s_upd_agents:
+          hosts:
+            upd-other:

@@ -671,6 +671,12 @@ SERIAL = re.compile(r"^([1-9][0-9]{0,3}|([1-9][0-9]?|100)%)\Z")
 PARALLEL = re.compile(r"^[0-9]{1,2}\Z")
 MAX_GROUPS = 16
 MAX_HOSTS = 5000
+# Kubernetes members (tasks/k8s_drain.yml): the k3s role's groups (roles/k3s/vars/main.yml, k3s_group_pattern).
+K8S_GROUP = re.compile(r"^k8s_([a-z][a-z0-9-]{0,30})_(servers|agents)\Z")
+K8S_CLUSTER = re.compile(r"^[a-z][a-z0-9-]{0,30}\Z")
+# A Longhorn volume's line, as tasks/k8s_uncordon.yml asks kubectl for it: <name>=<state>/<robustness>.
+LONGHORN_VOLUME = re.compile(r"^([a-z0-9][a-z0-9.-]{0,252})=([a-z]{0,20})/([a-z]{0,20})\Z")
+MAX_VOLUMES = 50
 
 
 def usas_update_groups(group, tags=()):
@@ -698,12 +704,34 @@ def _limit(value, default):
     return int(text) if PARALLEL.match(text) else default
 
 
+def usas_k8s_member(group_names):
+    """The Kubernetes cluster a server is a member of, from its inventory groups (k8s_<cluster>_servers or
+    k8s_<cluster>_agents, as the k3s role names them): {"cluster", "role"}, role "server" or "agent", both "" for a
+    server in no such group. In more than one (the k3s role refuses that), the first servers group by name, else
+    the first agents group."""
+    found = sorted(K8S_GROUP.match(g).groups() for g in (group_names if isinstance(group_names, (list, tuple)) else [])
+                   if isinstance(g, str) and K8S_GROUP.match(g))
+    found.sort(key=lambda m: (m[1] != "servers", m[0]))
+    return {"cluster": found[0][0], "role": found[0][1][:-1]} if found else {"cluster": "", "role": ""}
+
+
+def _k8s(value):
+    """A server's Kubernetes membership as the plan reads it: (cluster, role), or None."""
+    if not isinstance(value, dict) or value.get("role") not in ("server", "agent"):
+        return None
+    cluster = value.get("cluster")
+    return (cluster, value["role"]) if isinstance(cluster, str) and K8S_CLUSTER.match(cluster) else None
+
+
 def usas_update_plan(hosts, serial="25%", group_max=1, node_max=2):
     """The waves the servers are updated in, as lists of names. hosts is a list of {"name", "groups", "node",
-    "reboot"} in the order to update them; each goes into the first wave with room for it: fewer than serial
-    servers, fewer than group_max of each of its groups and, for a server that may reboot, fewer than node_max
-    that may reboot on its Proxmox node ("" for a server that isn't on a cluster: no node limit). 0 means no
-    limit for group_max and node_max. A name is planned once; entries without a plain name are left out."""
+    "reboot", "k8s"} in the order to update them; each goes into the first wave with room for it: fewer than
+    serial servers, fewer than group_max of each of its groups and, for a server that may reboot, fewer than
+    node_max that may reboot on its Proxmox node ("" for a server that isn't on a cluster: no node limit). 0 means
+    no limit for group_max and node_max. A Kubernetes cluster's members (k8s, as usas_k8s_member) also limit a
+    wave: at most one of its servers, and never a server with its agents, so that etcd keeps its quorum and the
+    server an agent is drained from isn't rebooting. A name is planned once; entries without a plain name are
+    left out."""
     entries, seen = [], set()
     for host in (hosts if isinstance(hosts, (list, tuple)) else [])[:MAX_HOSTS]:
         name = host.get("name") if isinstance(host, dict) else None
@@ -711,24 +739,52 @@ def usas_update_plan(hosts, serial="25%", group_max=1, node_max=2):
             continue
         seen.add(name)
         node = host.get("node") if isinstance(host.get("node"), str) else ""
-        entries.append((name, usas_update_groups(host.get("groups") or []), node, host.get("reboot") is True))
+        entries.append((name, usas_update_groups(host.get("groups") or []), node, host.get("reboot") is True,
+                        _k8s(host.get("k8s"))))
     size = _wave_size(serial, len(entries))
     group_max, node_max = _limit(group_max, 1), _limit(node_max, 2)
-    waves = []  # (names, {group: count}, {node: count of servers that may reboot})
-    for name, groups, node, reboot in entries:
-        for names, in_group, on_node in waves:
+    waves = []  # (names, {group: count}, {node: count of servers that may reboot}, {cluster: roles in the wave})
+    for name, groups, node, reboot, k8s in entries:
+        for names, in_group, on_node, in_cluster in waves:
             if len(names) < size and not (group_max and any(in_group.get(g, 0) >= group_max for g in groups)) \
-                    and not (node_max and reboot and node and on_node.get(node, 0) >= node_max):
+                    and not (node_max and reboot and node and on_node.get(node, 0) >= node_max) \
+                    and not (k8s and ("server" in in_cluster.get(k8s[0], ()) or k8s[1] == "server"
+                                      and in_cluster.get(k8s[0]))):
                 break
         else:
-            names, in_group, on_node = [], {}, {}
-            waves.append((names, in_group, on_node))
+            names, in_group, on_node, in_cluster = [], {}, {}, {}
+            waves.append((names, in_group, on_node, in_cluster))
         names.append(name)
         for g in groups:
             in_group[g] = in_group.get(g, 0) + 1
         if reboot and node:
             on_node[node] = on_node.get(node, 0) + 1
-    return [names for names, _, _ in waves]
+        if k8s:
+            in_cluster.setdefault(k8s[0], set()).add(k8s[1])
+    return [names for names, _, _, _ in waves]
+
+
+def usas_longhorn_unhealthy(stdout):
+    """The Longhorn volumes that aren't healthy yet, from kubectl's lines <name>=<state>/<robustness>: every
+    attached volume must be healthy (a detached one has no robustness to wait for). A line that isn't one (a
+    cluster member's output is untrusted) counts as "(unreadable)". At most MAX_VOLUMES names."""
+    found = []
+    for line in str(stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = LONGHORN_VOLUME.match(line)
+        if not match:
+            name = "(unreadable)"
+        elif match.group(2) != "attached" or match.group(3) == "healthy":
+            continue
+        else:
+            name = f"{match.group(1)} ({match.group(3) or 'unknown'})"
+        if name not in found:
+            found.append(name)
+        if len(found) >= MAX_VOLUMES:
+            break
+    return found
 
 
 def usas_wave_number(waves, name):
@@ -801,6 +857,11 @@ def usas_updates_summary(results):
             parts.append(f"wave {wave['number']} of {wave['of']}")
         if wave.get("ha"):
             parts.append("HA-managed")
+        k8s = r.get("k8s") if isinstance(r.get("k8s"), dict) else {}
+        if k8s.get("drained"):
+            parts.append("drained, uncordoned" if k8s.get("uncordoned") else "drained, left cordoned")
+        if k8s.get("longhorn") == "healthy":
+            parts.append("Longhorn healthy")
         if r.get("reason"):
             parts.append(usas_clean_text(r.get("reason"), 160))
         lines.append(f"{usas_clean_text(r.get('host'), 64)}: " + "; ".join(parts))
@@ -866,6 +927,8 @@ class FilterModule:
             "usas_in_window": usas_in_window,
             "usas_window_text": usas_window_text,
             "usas_snapshot_cleanup": usas_snapshot_cleanup,
+            "usas_k8s_member": usas_k8s_member,
+            "usas_longhorn_unhealthy": usas_longhorn_unhealthy,
             "usas_disk_storages": usas_disk_storages,
             "usas_full_storages": usas_full_storages,
             "usas_pve_error": usas_pve_error,

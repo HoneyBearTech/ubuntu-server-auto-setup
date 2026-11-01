@@ -101,6 +101,24 @@ updates_node_max_parallel: 2
 # servers of a group that serve the same thing aren't updated, or rebooted, at the same time.
 updates_group: ""
 
+# Kubernetes members (in a k8s_<cluster>_servers or k8s_<cluster>_agents group, as for the k3s role): before a
+# reboot the node is cordoned and drained (k3s kubectl drain --ignore-daemonsets --delete-emptydir-data), from the
+# server itself or, for an agent, from the cluster's first server in the inventory; once it's back, healthy and a
+# Ready node again, it's uncordoned. A drain that doesn't finish in updates_k8s_drain_timeout seconds uncordons the
+# node again and fails the server without a reboot. The waves never hold two servers of a cluster, nor a server
+# with its agents. false reboots a member without draining it (its pods stop with it).
+updates_k8s_drain: true
+updates_k8s_drain_timeout: 300
+# Seconds to wait for the node to be Ready again after its reboot.
+updates_k8s_ready_timeout: 300
+# The node's name in Kubernetes, if it isn't the server's name in the inventory.
+updates_k8s_node_name: "{{ inventory_hostname }}"
+# After uncordoning a member, wait until every attached Longhorn volume is healthy again (its replicas rebuilt)
+# before the server's update counts as done, so that the next wave starts with every volume whole; fails the server
+# after updates_k8s_longhorn_timeout seconds.
+updates_k8s_wait_longhorn: false
+updates_k8s_longhorn_timeout: 1800
+
 # Notifications, sent once per run from the control node (set them for all servers, in group_vars/all):
 # on-change (an apply updated or rebooted a server, a check found updates waiting, or a server failed or
 # couldn't be reached), always, or only-on-error.

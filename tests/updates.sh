@@ -428,6 +428,74 @@ if grep -lE 'relay-secret|tok-secret' "$TEST_TMP"/play.*; then
   exit 1
 fi
 
+step "Kubernetes members: drained before the reboot and uncordoned after, one wave each, Longhorn healthy first"
+# upd-usas is a server of cluster upd, upd-other its agent (tests/inventory/updates-k8s.yml); a fake k3s on each
+# records what it's asked (tests/fake-k3s.sh). The server drains itself; the agent is drained from the server.
+K8S=(-i tests/inventory/updates-k8s.yml -e updates_reboot=if_required -e updates_serial=2)
+fresh "$UPD1" 2341 sysadmin
+fresh "$UPD2" 2342 ops
+for c in "$UPD1" "$UPD2"; do docker cp tests/fake-k3s.sh "$c:/usr/local/bin/k3s"; done
+# A server and its agent never share a wave, even with room for both; nor do two servers of a cluster.
+play --check "${K8S[@]}"
+report "h['upd-usas']['wave']['number'] == 1 and h['upd-other']['wave']['number'] == 2" \
+  "h['upd-usas']['k8s']['cluster'] == 'upd' and h['upd-usas']['k8s']['role'] == 'server'" \
+  "h['upd-other']['k8s']['role'] == 'agent' and not h['upd-other']['k8s']['drained']"
+printf '%s\n' '{"all": {"children": {"k8s_upd_servers": {"hosts": {"upd-usas": {}, "upd-other": {}}}}}}' \
+  >"$TEST_TMP/k8s-servers.json"
+play --check -i "$TEST_TMP/k8s-servers.json" -e updates_reboot=if_required -e updates_serial=2
+report "h['upd-usas']['wave']['number'] == 1 and h['upd-other']['wave']['number'] == 2" \
+  "h['upd-other']['k8s']['role'] == 'server'"
+# A drain that fails uncordons the node again and fails the server, which isn't rebooted.
+boot="$(boot_id "$UPD1")"
+docker exec "$UPD1" touch /etc/usas-fake-k3s-drain-fails
+play_fails "couldn't drain node upd-usas from upd-usas, so it wasn't rebooted" "${K8S[@]}" --limit upd-usas
+[ "$(boot_id "$UPD1")" = "$boot" ] || { echo "ERROR: upd-usas rebooted although its drain failed" >&2; exit 1; }
+report "h['upd-usas']['status'] == 'failed' and 'disruption budget' in h['upd-usas']['reason']" \
+  "not h['upd-usas']['k8s']['drained'] and not h['upd-usas']['reboot']['done']"
+docker exec "$UPD1" sh -c 'rm /etc/usas-fake-k3s-drain-fails && cat /var/log/usas-fake-k3s.log >/var/log/usas-fake-k3s.failed && : >/var/log/usas-fake-k3s.log'
+docker exec "$UPD1" cat /var/log/usas-fake-k3s.failed | awk '{print $4, $5}' | tr '\n' ' ' \
+  | grep -qx 'cordon upd-usas drain upd-usas uncordon upd-usas ' \
+  || { docker exec "$UPD1" cat /var/log/usas-fake-k3s.failed; echo "ERROR: the failed drain wasn't undone" >&2; exit 1; }
+# Both, with Longhorn: wave 1 the server (drain, reboot, uncordon, volumes healthy), then wave 2 the agent.
+play "${K8S[@]}" -e updates_k8s_wait_longhorn=true
+report "all(r['status'] == 'updated' and r['reboot']['done'] for r in h.values())" \
+  "all(r['k8s']['drained'] and r['k8s']['uncordoned'] and r['k8s']['longhorn'] == 'healthy' for r in h.values())" \
+  "h['upd-usas']['wave']['number'] == 1 and h['upd-other']['wave']['number'] == 2"
+docker exec "$UPD1" cat /var/log/usas-fake-k3s.log >"$TEST_TMP/fake-k3s.log"
+docker exec "$UPD2" sh -c 'cat /var/log/usas-fake-k3s.log 2>/dev/null || true' >"$TEST_TMP/fake-k3s-agent.log"
+python3 - "$TEST_TMP/fake-k3s.log" "$TEST_TMP/fake-k3s-agent.log" "$UPD1" \
+  "$(docker inspect -f '{{.State.StartedAt}}' "$UPD1")" "$(docker inspect -f '{{.State.StartedAt}}' "$UPD2")" <<'PY'
+import datetime, sys
+calls = [line.split()[:5] for line in open(sys.argv[1]) if line.strip()]
+assert open(sys.argv[2]).read() == "", "the agent was asked to drain: an agent has no kubectl"
+
+
+def started(text):
+    # Docker's time has nanoseconds; Python reads microseconds.
+    day, rest = text.rstrip("Z").split("T")
+    return datetime.datetime.fromisoformat(f"{day}T{rest[:15]}+00:00").timestamp()
+
+
+booted = {"upd-usas": started(sys.argv[4]), "upd-other": started(sys.argv[5])}
+want = []
+for node in ("upd-usas", "upd-other"):
+    want += [("cordon", node), ("drain", node), ("get", "node"), ("uncordon", node)]
+got = [(c[3], c[4]) for c in calls if c[3] != "--namespace=longhorn-system"]
+# The Ready check may be read more than once.
+squeezed = [g for i, g in enumerate(got) if i == 0 or g != got[i - 1] or g != ("get", "node")]
+assert squeezed == want, (squeezed, want)
+assert all(c[1] == sys.argv[3] for c in calls), "every kubectl call runs on the server"
+for node in booted:
+    drain = next(float(c[0]) for c in calls if c[3:5] == ["drain", node])
+    uncordon = next(float(c[0]) for c in calls if c[3:5] == ["uncordon", node])
+    assert drain < booted[node] < uncordon, (node, drain, booted[node], uncordon)
+reads = [float(c[0]) for c in calls if c[3] == "--namespace=longhorn-system"]
+server_back = next(float(c[0]) for c in calls if c[3:5] == ["uncordon", "upd-usas"])
+agent_cordon = next(float(c[0]) for c in calls if c[3:5] == ["cordon", "upd-other"])
+assert len([r for r in reads if server_back < r < agent_cordon]) == 3, reads
+print("drain order checked: cordon, drain, reboot, Ready, uncordon, Longhorn healthy, then the next wave")
+PY
+
 step "Cluster discovery: every VM on the cluster, pinned by its alias; the ones to leave alone reported, not contacted"
 # The mock Proxmox API lists the cluster of tests/mock_pve.py's UPDATE_FIXTURE_VMS: VM 4091 is upd-usas (by its
 # pve_vmid); 4093 and 4094 are VMs nobody put in the inventory, reached at the addresses

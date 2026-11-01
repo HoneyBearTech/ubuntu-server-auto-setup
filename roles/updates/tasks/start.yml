@@ -41,6 +41,10 @@
         of: 0
         groups: "{{ updates_group | usas_update_groups(usas_pve_tags | default([])) }}"
         ha: "{{ usas_pve_hastate | default('') | length > 0 }}"
+      # A Kubernetes member: drained before a reboot (tasks/k8s_drain.yml), uncordoned after (k8s_uncordon.yml).
+      k8s: >-
+        {{ group_names | usas_k8s_member | combine({'drain': updates_k8s_drain | bool, 'drained': false,
+        'uncordoned': false, 'longhorn': ''}) }}
       pve:
         vmid: "{{ usas_pve_vmid | default(pve_vmid | default('')) }}"
         node: "{{ usas_pve_node | default(pve_node | default('')) }}"
@@ -89,10 +93,13 @@
       - >-
         [updates_refresh_max_age, updates_lock_wait, updates_task_timeout, updates_reboot_timeout,
         updates_post_reboot_delay, updates_health_timeout, updates_max_fail_percentage, updates_snapshot_timeout,
-        updates_snapshot_storage_warn] | map('string') | reject('match', updates_seconds_pattern) | list | length == 0
+        updates_snapshot_storage_warn, updates_k8s_drain_timeout, updates_k8s_ready_timeout,
+        updates_k8s_longhorn_timeout] | map('string') | reject('match', updates_seconds_pattern) | list | length == 0
       - updates_max_fail_percentage | int <= 100
       - updates_snapshot_storage_warn | int <= 100
       - updates_snapshot | string | lower in ['true', 'false']
+      - updates_k8s_drain | string | lower in ['true', 'false']
+      - updates_k8s_wait_longhorn | string | lower in ['true', 'false']
       - updates_snapshot_required | string | lower in ['true', 'false']
       - updates_snapshot_keep | string is match(updates_snapshot_keep_pattern)
       - updates_snapshot_max_age | string is match(updates_snapshot_age_pattern)
@@ -110,7 +117,8 @@
       a list of package-name globs (letters, digits, + . - * ?), updates_health_services and
       updates_health_ignore_services lists of systemd unit names, updates_health_urls a list of {url, status} with
       http(s) URLs, the waits, timeouts, updates_max_fail_percentage and updates_snapshot_storage_warn whole
-      numbers, updates_snapshot and updates_snapshot_required true or false, updates_snapshot_keep 0 to 10 and
+      numbers, updates_snapshot, updates_snapshot_required, updates_k8s_drain and updates_k8s_wait_longhorn true
+      or false, updates_snapshot_keep 0 to 10 and
       updates_snapshot_max_age 1 to 365 (days), updates_serial a number of servers or a percentage,
       updates_group_max_parallel and updates_node_max_parallel 0 to 99, and updates_group a name or a list of names
       (letters, digits, _ . -).
@@ -126,6 +134,20 @@
       and pve_api_token_secret (from the Vault) in the inventory, as for creating VMs.
     quiet: true
   when: updates_snapshot | bool
+
+# A member is drained from a server of its cluster: the server itself, or for an agent the cluster's first server.
+- name: Check that a Kubernetes member can be drained
+  ansible.builtin.assert:
+    that:
+      - updates_k8s_node_name is string and updates_k8s_node_name is match(updates_k8s_node_name_pattern)
+      - groups['k8s_' ~ usas_updates_result.k8s.cluster ~ '_servers'] | default([]) | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} is a member of Kubernetes cluster {{ usas_updates_result.k8s.cluster }}: it's drained
+      before a reboot from a server of the cluster, so k8s_{{ usas_updates_result.k8s.cluster }}_servers must have
+      one in the inventory, and updates_k8s_node_name must be its node's name (lower-case letters, digits and "-").
+      Or set updates_k8s_drain: false for it.
+    quiet: true
+  when: usas_updates_result.k8s.role != '' and updates_k8s_drain | bool
 
 - name: Check the update windows
   ansible.builtin.assert:
