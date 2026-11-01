@@ -44,3 +44,24 @@ k3s_readonly_account: usas-readonly
 k3s_api_port: 6443
 # The ConfigMap in kube-system an upgrade holds while it runs (tasks/upgrade_lock.yml).
 k3s_upgrade_lock: usas-upgrade-lock
+
+# The admin kubeconfig k3s writes on a server, for Helm (k3s kubectl finds it itself).
+k3s_admin_kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+# The Argo CD bootstrap (k8s_bootstrap_argocd). The repository is an https:// URL of a DNS name or an IPv4 address,
+# an optional port and a path, with no user name or password, query or fragment, and no "." or ".." segment; the
+# path a relative folder with no "." or ".." segment (or "." for the top); the revision a Git branch, tag or commit
+# with no "..", "//" or ending "/" or ".". tests/fuzz/ reads these from here.
+k3s_bootstrap_url_pattern: >-
+  ^https://([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*|((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/(?!\.\.?(/|\Z))[A-Za-z0-9._~-]{1,100}){1,16}/?\Z
+k3s_bootstrap_path_pattern: '^(\.|[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,15})\Z'
+k3s_bootstrap_revision_pattern: '^(?!.*\.\.)(?!.*//)[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}(?<![/.])\Z'
+# One or more PEM certificates, nothing else.
+k3s_bootstrap_ca_pattern: '^(-----BEGIN CERTIFICATE-----\r?\n([A-Za-z0-9+/=]{1,76}\r?\n){1,200}-----END CERTIFICATE-----\r?\n?){1,10}\Z'
+# Where Helm and Argo CD's chart are kept on the first server, and the names homelab-kube's apps/argocd.yaml adopts:
+# the release argocd in the namespace argocd. The root Application is root, as homelab-kube's.
+k3s_bootstrap_dir: /usr/local/lib/usas-argocd
+k3s_helm_binary: /usr/local/bin/helm
+k3s_argocd_release: argocd
+k3s_argocd_namespace: argocd
+k3s_argocd_root_app: root
