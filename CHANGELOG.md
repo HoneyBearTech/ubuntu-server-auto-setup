@@ -272,6 +272,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
+  Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
+  `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
+  command it runs on a node over SSH. Found by the v0.7.0 release checklist.
 - A Debian 12 VM installed from its cloud image never finished its first boot: Debian 12's cloud kernel has no SATA
   driver, and the seed was an IDE CD-ROM, which q35 puts on its SATA controller, so cloud-init never saw it. The
   seed is now a SCSI CD-ROM (`scsi30`), and `vm_extra_disks` takes up to 29 disks (`scsi1` to `scsi29`). Found by

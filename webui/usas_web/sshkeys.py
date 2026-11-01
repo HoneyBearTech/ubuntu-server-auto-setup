@@ -14,6 +14,7 @@ updates use the same pins.
 import base64
 import hashlib
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -269,7 +270,9 @@ class Keys:
             argv += ["-o", f"HostKeyAlias={alias}"]
         if port != 22:
             argv += ["-p", str(port)]
-        argv += ["-l", user, "--", host, *command]
+        # ssh joins the command's words with spaces for the remote shell, which would split and parse them again:
+        # quote them, so each reaches the remote program as one argument.
+        argv += ["-l", user, "--", host, shlex.join(command)]
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, check=False)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired) as exc:
