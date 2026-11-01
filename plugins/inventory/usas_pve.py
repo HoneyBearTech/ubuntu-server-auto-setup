@@ -59,7 +59,7 @@ options:
     description: The API's port. Default, the inventory's pve_api_port, or 8006.
     type: int
   api_user:
-    description: The API user, such as ansible@pve. Default, the inventory's pve_api_user.
+    description: The API user. Default, the inventory's pve_api_user, or ansible@pve (as for creating VMs).
     type: str
   api_token_id:
     description: The token's name. Default, the inventory's pve_api_token_id.
@@ -322,7 +322,9 @@ class InventoryModule(BaseInventoryPlugin):
             return default
 
         api = {"host": setting("api_host", "pve_api_host"), "port": setting("api_port", "pve_api_port", 8006),
-               "user": setting("api_user", "pve_api_user"), "token_id": setting("api_token_id", "pve_api_token_id"),
+               # The web UI leaves pve_api_user out while it's the proxmox_vm role's default.
+               "user": setting("api_user", "pve_api_user", "ansible@pve"),
+               "token_id": setting("api_token_id", "pve_api_token_id"),
                "secret": setting("api_token_secret", "pve_api_token_secret"),
                "validate": setting("validate_certs", "pve_validate_certs", True),
                "ca_file": self.get_option("ca_file"), "timeout": int(self.get_option("timeout"))}

@@ -14,7 +14,7 @@
         ~ '/api2/json') }}
       headers:
         Authorization: >-
-          PVEAPIToken={{ pve_api_user | default('') }}!{{ pve_api_token_id | default('') }}={{
+          PVEAPIToken={{ pve_api_user | default('ansible@pve') }}!{{ pve_api_token_id | default('') }}={{
           pve_api_token_secret | default('') }}
       vmid: "{{ usas_updates_result.pve.vmid | string }}"
       node: ""

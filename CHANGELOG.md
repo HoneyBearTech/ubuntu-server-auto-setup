@@ -294,6 +294,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
   default, `group_vars` aren't read while an inventory is parsed. It now reads them as the playbooks do. Found by
   the v0.7.0 release checklist.
+- The cluster inventory stopped with "missing: user" on an inventory the web UI wrote, and snapshots before
+  updates (`updates_snapshot`) were refused with an incomplete API token: the web UI leaves `pve_api_user` out
+  while it is the default, `ansible@pve`, and neither had that default. Both now do, as creating VMs does. Found
+  by the v0.7.0 release checklist.
 - The updates playbook left out every update on Rocky Linux, AlmaLinux and CentOS Stream whose version has an
   `_`, which is almost all of them (`2026e-1.el10_2.alma.1`): it took the version for malformed, so the server was
   reported "nothing" and nothing was installed. It also never showed the installed version on those servers (dnf
