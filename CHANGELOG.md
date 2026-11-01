@@ -755,7 +755,7 @@ and a pre-release checklist on real Proxmox VE.
   streams without moving focus; and axe-core's WCAG 2.1 A and AA rules with real layout, so with contrast,
   on every page in the dark, light and system themes. See [docs/testing.md](docs/testing.md#the-browser-tests).
 - A screen-reader walk-through with VoiceOver and NVDA, with what each step should announce and a table for
-  each release's results ([docs/accessibility.md](docs/accessibility.md#screen-reader-walk-through)), now part
+  each release's results ([docs/accessibility.md](docs/accessibility.md#known-gaps)), now part
   of the pre-release checklist. It hasn't been run yet.
 
 - Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
