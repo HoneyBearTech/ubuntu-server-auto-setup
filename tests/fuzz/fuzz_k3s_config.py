@@ -136,7 +136,10 @@ def one_input(data):
             assert config.get("disable", []) == disable, config
         else:
             assert set(config) <= AGENT_KEYS, config
-            assert config["token"] == agent_token and token not in text, config
+            # No value is the server's token (the text round-trips to config, above); the text check too, unless
+            # the agent token happens to contain the server's as a substring.
+            assert config["token"] == agent_token and token not in config.values(), config
+            assert token in agent_token or token not in text, config
             assert config["server"] == cluster["join_url"], config
 
         checks = K3S.k3s_join_checks(members, m["host"], started)
