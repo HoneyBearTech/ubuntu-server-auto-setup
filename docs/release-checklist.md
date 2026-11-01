@@ -115,7 +115,7 @@ be tagged; replace them with yours.
   agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), `k8s_api_vip` and `k8s_lb_pool` set to
   free addresses, both tokens in the Vault. After `site.yml` and `make kubernetes LIMIT=k8s_test`: every node
   Ready, the API answers on the VIP, Traefik has a pool address, the agent on AlmaLinux runs a pod with no AVC
-  denial. Stop the VM that holds the VIP: the API answers on it again within about 15 s, from another server, and
+  denial. Stop the VM that holds the VIP: the API answers on it again within about 30 s, from another server, and
   `etcd` keeps working with two of three. A second `make kubernetes` changes nothing. Remove the VMs, their disks
   and the read-only kubeconfig afterwards:
 

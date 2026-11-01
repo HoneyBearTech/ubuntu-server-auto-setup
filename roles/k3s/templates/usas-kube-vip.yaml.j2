@@ -1,7 +1,8 @@
 # Managed by Ansible (roles/k3s): kube-vip on every server, as `kube-vip manifest daemonset --inCluster --taint
-# --controlplane --services --arp --leaderElection` writes it, with the image by digest and the shorter lease the
-# K0 spike tested (a dead holder's address moves in about 11 s). It announces the LoadBalancer pool's addresses too
-# when k8s_lb_pool is set.
+# --controlplane --services --arp --leaderElection` writes it, with the image by digest and kube-vip's own lease
+# timing (a dead holder's address moves in about 15 to 20 s). The K0 spike's shorter lease (5/3/1 s, about 11 s)
+# made kube-vip give up and restart whenever the API was slow for 3 s. It announces the LoadBalancer pool's
+# addresses too when k8s_lb_pool is set.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -63,11 +64,11 @@ spec:
             - name: vip_leasename
               value: plndr-cp-lock
             - name: vip_leaseduration
-              value: "5"
+              value: "15"
             - name: vip_renewdeadline
-              value: "3"
+              value: "10"
             - name: vip_retryperiod
-              value: "1"
+              value: "2"
             - name: address
               value: "{{ k8s_api_vip }}"
             - name: prometheus_server
