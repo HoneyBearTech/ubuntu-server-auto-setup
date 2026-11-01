@@ -47,7 +47,7 @@
       - --from-literal=started={{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}
   register: k3s_lock
   changed_when: k3s_lock.rc == 0
-  failed_when: k3s_lock.rc != 0 and 'AlreadyExists' not in k3s_lock.stderr
+  failed_when: k3s_lock.rc != 0 and 'already exists' not in k3s_lock.stderr
 
 # What another run wrote, read back from the cluster: only the characters a release and a time have.
 - name: Read who holds the lock
