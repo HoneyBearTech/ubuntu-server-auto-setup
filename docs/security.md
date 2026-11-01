@@ -110,8 +110,9 @@ defaults and the advice in the README's "Running it securely" section and in [we
   output is read one field per newline, so no character in a label can make up another field). Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
   in the role), and `vm_spread_group` is checked from the VM list the token already reads.
 - A Kubernetes node's firewall rules (`kubernetes_node`) open k3s' ports to each other member's own address, never
-  to a network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or the
-  pod network. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
+  to the LAN's network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or
+  the pod network. The only network allowed is k3s' own pod network (`10.42.0.0/16`), to the kubelet's port and, on
+  servers, the API's, which pods need (both still require the cluster's credentials); etcd stays closed to pods. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
   `k8s_api_sources`. Every address is checked against an IPv4 pattern before a rule is written, so none can add
   an option to a UFW or firewalld rule (fuzzed in `tests/fuzz/fuzz_kubernetes_node.py`), and rules for members
   that left are removed. On the RHEL family, `k3s-selinux` comes from Rancher's repository with every package

@@ -302,7 +302,7 @@ without `--tags upgrade` on the new release, `--tags upgrade` with another tag, 
 a test catalog), and a run while a lock made by hand (another run's) is in the cluster, which stays there. Then
 the upgrade itself, while the control node asks the VIP's `/ping` every half second: the run's log must show
 each node cordoned, drained, given the new binary and uncordoned exactly once, the three servers before the
-agent, and kube-vip handed over by at least one server; the VIP may not go unanswered for more than 15 s; the
+agent, and kube-vip handed over by at least one server; the VIP may not go unanswered for more than 30 s (kube-vip's lease is 15 s); the
 lock is gone; `tests/verify-k3s.yml` with `verify_version=v1.37.1+k3s1` checks every node on the new release,
 none cordoned, and the binary's hash. A second upgrade, and a run without tags on the new release, change
 nothing; going back to v1.36.5+k3s1 is refused. The containers share the runner's kernel, so CI loads `br_netfilter` and `overlay` on the runner first.

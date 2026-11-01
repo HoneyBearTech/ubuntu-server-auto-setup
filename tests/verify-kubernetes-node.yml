@@ -3,7 +3,8 @@
 # tests/inventory/k8s-moved.yml): exactly the firewall rules k3s needs from the other members, the owner's own rule
 # on the kubelet's port still there, the kernel modules and settings, swap commented out of /etc/fstab, Longhorn's
 # prerequisites (or their files gone), and k3s' SELinux policy on the RHEL family. The expected rules are written
-# out here, not worked out with the role's filters. tests/baseline.sh runs it.
+# out here, not worked out with the role's filters: srv-01 is a server, so the pod network may reach its API and
+# kubelet too. tests/baseline.sh runs it.
 - name: Verify the Kubernetes node
   hosts: srv-01
   become: true
@@ -11,12 +12,13 @@
   vars:
     expect_moved: false
     verify_rules: >-
-      {{ [['51820', 'udp', '192.0.2.22'], ['10250', 'tcp', '192.0.2.22'], ['6443', 'tcp', '192.0.2.22']]
+      {{ ([['51820', 'udp', '192.0.2.22'], ['10250', 'tcp', '192.0.2.22'], ['6443', 'tcp', '192.0.2.22']]
          if expect_moved | bool else
          [['8472', 'udp', '192.0.2.12'], ['10250', 'tcp', '192.0.2.12'], ['6443', 'tcp', '192.0.2.12'],
           ['2379:2380', 'tcp', '192.0.2.12'],
           ['8472', 'udp', '192.0.2.21'], ['10250', 'tcp', '192.0.2.21'], ['6443', 'tcp', '192.0.2.21'],
-          ['6443', 'tcp', '198.51.100.0/24']] }}
+          ['6443', 'tcp', '198.51.100.0/24']])
+         + [['10250', 'tcp', '10.42.0.0/16'], ['6443', 'tcp', '10.42.0.0/16']] }}
     verify_owner_rule: ['10250', 'tcp', '203.0.113.9']
   pre_tasks:
     - name: Use a sudo that Ansible can give the password to

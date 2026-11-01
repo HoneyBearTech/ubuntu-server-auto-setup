@@ -48,11 +48,12 @@ def k8s_sysctl_conflicts(wanted, others):
     return sorted(k for k, v in wanted.items() if others.get(k) is not None and _text(others[k]) != _text(v))
 
 
-def k8s_firewall_rules(members, me, api_sources, flannel_port, comment):
+def k8s_firewall_rules(members, me, api_sources, flannel_port, comment, pod_cidr=""):
     """The rules one member needs, from the cluster's members ([{"host", "address", "role"}], role "server" or
     "agent") and this member's host name: the flannel port (udp) and the kubelet's 10250/tcp from every other
     member; on a server also 6443/tcp from every other member and each of api_sources, and etcd's 2379:2380/tcp
-    from the other servers. Never from this member itself, never twice, sorted."""
+    from the other servers. With pod_cidr (the pod network), the kubelet's port from it on a member and the API's
+    on a server too. Never from this member itself, never twice, sorted."""
     mine = [m for m in members if _text(m.get("host")) == _text(me)]
     server = bool(mine) and _text(mine[0].get("role")) == "server"
     others = [m for m in members if _text(m.get("host")) != _text(me)]
@@ -68,6 +69,10 @@ def k8s_firewall_rules(members, me, api_sources, flannel_port, comment):
     if server:
         for source in api_sources or []:
             wanted.add(("6443", "tcp", _text(source)))
+    if mine and _text(pod_cidr):
+        wanted.add(("10250", "tcp", _text(pod_cidr)))
+        if server:
+            wanted.add(("6443", "tcp", _text(pod_cidr)))
     return [{"port": p, "proto": pr, "from": f, "comment": comment} for p, pr, f in sorted(wanted)]
 
 
