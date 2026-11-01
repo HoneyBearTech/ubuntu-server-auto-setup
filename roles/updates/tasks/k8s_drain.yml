@@ -1,0 +1,59 @@
+---
+# Before a Kubernetes member's reboot (apply.yml): cordon and drain its node from a server of its cluster, the
+# server itself or, for an agent, the cluster's first server (the waves never reboot that one at the same time).
+# A drain that fails uncordons the node again and fails the server's update before the reboot.
+- name: Drain the node
+  vars:
+    updates_k8s_from: >-
+      {{ inventory_hostname if usas_updates_result.k8s.role == 'server'
+      else groups['k8s_' ~ usas_updates_result.k8s.cluster ~ '_servers'] | first }}
+  block:
+    - name: Cordon the node
+      ansible.builtin.command:
+        argv: ["{{ updates_k8s_binary }}", kubectl, cordon, "{{ updates_k8s_node_name }}"]
+      changed_when: true
+      delegate_to: "{{ updates_k8s_from }}"
+
+    - name: Note that the node is cordoned
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'k8s': usas_updates_result.k8s | combine({'drained': true,
+          'from': updates_k8s_from})}) }}
+
+    - name: Drain the node before the reboot
+      ansible.builtin.command:
+        argv:
+          - "{{ updates_k8s_binary }}"
+          - kubectl
+          - drain
+          - "{{ updates_k8s_node_name }}"
+          - --ignore-daemonsets
+          - --delete-emptydir-data
+          - --timeout={{ updates_k8s_drain_timeout | int }}s
+      register: updates_k8s_drained
+      changed_when: true
+      delegate_to: "{{ updates_k8s_from }}"
+
+  rescue:
+    - name: Uncordon the node after the failed drain
+      ansible.builtin.command:
+        argv: ["{{ updates_k8s_binary }}", kubectl, uncordon, "{{ updates_k8s_node_name }}"]
+      register: updates_k8s_undo
+      changed_when: updates_k8s_undo.rc == 0
+      failed_when: false
+      delegate_to: "{{ updates_k8s_from }}"
+      when: usas_updates_result.k8s.drained
+
+    - name: Note that the node isn't cordoned any more
+      ansible.builtin.set_fact:
+        usas_updates_result: >-
+          {{ usas_updates_result | combine({'k8s': usas_updates_result.k8s | combine({'drained': false})}) }}
+      when: updates_k8s_undo.rc | default(1) == 0
+
+    # The kubectl output names pods and what's in the way: cleaned and cut, as any text a server sends.
+    - name: Fail the update before the reboot
+      ansible.builtin.fail:
+        msg: >-
+          couldn't drain node {{ updates_k8s_node_name }} from {{ updates_k8s_from }}, so it wasn't rebooted:
+          {{ (ansible_failed_result.stderr | default('') or ansible_failed_result.msg | default('failed'))
+          | usas_clean_text(200) }}

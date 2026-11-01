@@ -6,7 +6,9 @@
 # changes (an unprepared member, a missing token, an unknown release, a binary that doesn't match the catalog), a
 # server that can't reach etcd's peer port stopped with the hosts named, then the cluster itself
 # (tests/verify-k3s.yml), kube-vip's addresses from the control node, the tokens in no log, a second run that changes
-# nothing, and a change of release refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
+# nothing; then the upgrade to the catalog's next release (--tags upgrade): the refusals (without the tag, a minor
+# skipped, another run's lock), every node cordoned, drained, upgraded and uncordoned once, servers first, the API
+# answering on the VIP throughout, a second upgrade that changes nothing, and going back refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
 # and rocky-9). Needs Docker (privileged containers, for systemd and k3s), Python with requirements-ci.txt and the
 # Ansible collections, and on Linux the br_netfilter and overlay modules loaded on the host. Run it with
 # make test-kubernetes OS=<id>. See docs/testing.md.
@@ -36,8 +38,12 @@ declare -A PORT=([k3s-s1]=2241 [k3s-s2]=2242 [k3s-s3]=2243 [k3s-a1]=2244)
 VIP=172.29.30.100
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
 
+probe_pid=""
+LAST_LOG=""
+
 cleanup() {
   status=$?
+  if [ -n "$probe_pid" ]; then kill "$probe_pid" 2>/dev/null || true; fi
   if [ "$status" -ne 0 ]; then
     for node in "${NODES[@]}"; do
       if docker exec "$node" true 2>/dev/null; then
@@ -63,6 +69,7 @@ play() {
   local idempotent=false
   if [ "$1" = "--idempotent" ]; then idempotent=true; shift; fi
   local log; log="$(mktemp "$TEST_TMP/play.XXXXXX")"
+  LAST_LOG="$log"
   if ! ansible-playbook "${INV[@]}" "$@" >"$log" 2>&1; then
     cat "$log"; echo "ERROR: ansible-playbook $* failed" >&2; return 1
   fi
@@ -199,8 +206,92 @@ step "a second run changes nothing"
 play --idempotent playbooks/kubernetes.yml
 cool_down
 
-step "moving the cluster to another release is refused (upgrades come later), and nothing changes"
-refused "runs k3s v1.36.5+k3s1, not v1.37.1+k3s1" playbooks/kubernetes.yml -e k8s_version=v1.37.1+k3s1
+step "another release is refused without --tags upgrade, and --tags upgrade only on its own"
+refused "runs k3s v1.36.5+k3s1, not v1.37.1+k3s1. Moving a cluster to another release is an upgrade" \
+  playbooks/kubernetes.yml -e k8s_version=v1.37.1+k3s1
+refused "--tags upgrade runs on its own" playbooks/kubernetes.yml --tags upgrade,install -e k8s_version=v1.37.1+k3s1
+cool_down
+
+step "an upgrade skipping a minor release is refused, and so is one while another run holds the cluster's lock"
+python3 - "$TEST_TMP/later-catalog.json" <<'EOF2'
+import json, sys, yaml
+catalog = yaml.safe_load(open("roles/k3s/vars/catalog.yml"))["k3s_catalog"]
+later = json.loads(json.dumps(catalog[-1]).replace(catalog[-1]["version"], "v1.38.0+k3s1"))
+json.dump({"k3s_catalog": catalog + [later]}, open(sys.argv[1], "w"))
+EOF2
+refused "and v1.38.0+k3s1 is more than one minor release ahead" playbooks/kubernetes.yml --tags upgrade \
+  -e "@$TEST_TMP/later-catalog.json" -e k8s_version=v1.38.0+k3s1
+docker exec k3s-s1 k3s kubectl --namespace=kube-system create configmap usas-upgrade-lock \
+  --from-literal=run=another --from-literal=release=v1.37.1+k3s1 --from-literal=started=2026-11-01T02:00:00Z >/dev/null
+refused "Another upgrade of cluster ci holds its lock (kube-system/usas-upgrade-lock: to v1.37.1+k3s1, started 2026-11-01T02:00:00Z)" \
+  playbooks/kubernetes.yml --tags upgrade -e k8s_version=v1.37.1+k3s1
+# The other run's lock is still there, and no node was touched.
+docker exec k3s-s1 k3s kubectl --namespace=kube-system get configmap usas-upgrade-lock -o 'jsonpath={.data.run}' \
+  | grep -qx another || { echo "ERROR: the refused run removed another run's lock" >&2; exit 1; }
+docker exec k3s-s1 k3s kubectl --namespace=kube-system delete configmap usas-upgrade-lock >/dev/null
+docker exec k3s-s1 k3s kubectl get nodes -o 'jsonpath={.items[*].spec.unschedulable}' | grep -q true \
+  && { echo "ERROR: the refused run cordoned a node" >&2; exit 1; }
+cool_down
+
+step "the upgrade to v1.37.1+k3s1: servers then the agent, one at a time, each cordoned and uncordoned once"
+# From outside the cluster, every half second: the API on the VIP, which must keep answering while servers restart.
+probe_vip() {
+  while :; do
+    if curl -fsSk --max-time 1 "https://$VIP:6443/ping" >/dev/null 2>&1; then echo "$(date +%s.%N) up"
+    else echo "$(date +%s.%N) down"; fi
+    sleep 0.5
+  done
+}
+if [ "$(uname -s)" = Linux ]; then probe_vip >"$TEST_TMP/vip.log" & probe_pid=$!; fi
+play playbooks/kubernetes.yml --tags upgrade -e k8s_version=v1.37.1+k3s1
+if [ -n "$probe_pid" ]; then kill "$probe_pid"; probe_pid=""; fi
+python3 - "$LAST_LOG" <<'EOF2'
+import collections, re, sys
+task, done = "", collections.defaultdict(list)
+for line in open(sys.argv[1]):
+    found = re.match(r"^TASK \[k3s : (.*)\] \*", line)
+    if found:
+        task = found[1]
+    found = re.match(r"^(changed|ok): \[([a-z0-9-]+)", line)
+    if found and found[1] == "changed":
+        done[task].append(found[2])
+nodes = ["k3s-s1", "k3s-s2", "k3s-s3", "k3s-a1"]
+for name in ("Cordon the node", "Drain the node", "Uncordon the node", "Install the new k3s binary, checked against the catalog"):
+    assert done[name] == nodes, (name, done[name])
+assert 1 <= len(done["Stop kube-vip here until another server holds the API's address"]) <= 3, dict(done)
+assert all(h.startswith("k3s-s") for h in done["Stop kube-vip here until another server holds the API's address"])
+print("each node was cordoned, drained, upgraded and uncordoned once, servers first; kube-vip handed over",
+      len(done["Stop kube-vip here until another server holds the API's address"]), "time(s)")
+EOF2
+if [ -s "$TEST_TMP/vip.log" ]; then
+  python3 - "$TEST_TMP/vip.log" <<'EOF2'
+import sys
+probes = [(float(t), state) for t, state in (line.split() for line in open(sys.argv[1]) if line.strip())]
+longest, down_since = 0.0, None
+for moment, state in probes:
+    if state == "down" and down_since is None:
+        down_since = moment
+    elif state == "up" and down_since is not None:
+        longest, down_since = max(longest, moment - down_since), None
+if down_since is not None:
+    longest = max(longest, probes[-1][0] - down_since)
+assert probes and longest <= 15, f"the API on the VIP didn't answer for {longest:.1f} s during the upgrade"
+print(f"the VIP answered throughout ({len(probes)} probes, longest gap {longest:.1f} s)")
+EOF2
+fi
+docker exec k3s-s1 k3s kubectl --namespace=kube-system get configmap usas-upgrade-lock >/dev/null 2>&1 \
+  && { echo "ERROR: the upgrade left its lock behind" >&2; exit 1; }
+cool_down
+play tests/verify-k3s.yml -e "tokens_file=$TEST_TMP/tokens.yml" -e verify_version=v1.37.1+k3s1
+cool_down
+
+step "a second upgrade, and a run without tags on the new release, change nothing; going back is refused"
+play --idempotent playbooks/kubernetes.yml --tags upgrade -e k8s_version=v1.37.1+k3s1
+cool_down
+play --idempotent playbooks/kubernetes.yml -e k8s_version=v1.37.1+k3s1
+cool_down
+refused "runs k3s v1.37.1+k3s1, newer than v1.36.5+k3s1: k3s can't move to an older release" \
+  playbooks/kubernetes.yml --tags upgrade
 
 step "Task coverage of the k3s role on $OS"
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles k3s

@@ -7,7 +7,7 @@ LIMIT_ARG := $(if $(LIMIT),--limit $(LIMIT),)
 CLUSTER_INVENTORY ?= $(wildcard inventory/pve.usas_pve.yml)
 CLUSTER_ARG := $(if $(CLUSTER_INVENTORY),-i $(CLUSTER_INVENTORY),)
 
-.PHONY: help deps app lint syntax test test-updates test-baseline test-kubernetes catalog catalog-check k3s-catalog k3s-catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check kubernetes
+.PHONY: help deps app lint syntax test test-updates test-baseline test-kubernetes catalog catalog-check k3s-catalog k3s-catalog-check catalog-test fuzz webui-test webui-browser image smoke webui-vms ui site prepare-node build-installer provision baseline keys updates updates-check kubernetes kubernetes-upgrade
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -97,6 +97,9 @@ keys: ## Re-sync GitHub SSH keys only
 
 kubernetes: ## Build the k3s clusters of the k8s_<cluster>_servers and _agents groups (after the baseline)
 	$(PLAYBOOK) playbooks/kubernetes.yml $(LIMIT_ARG) $(ARGS)
+
+kubernetes-upgrade: ## Move the clusters to their k8s_version, one node at a time (servers first, drained, uncordoned)
+	$(PLAYBOOK) playbooks/kubernetes.yml --tags upgrade $(LIMIT_ARG) $(ARGS)
 
 updates-check: ## Report the package updates each server would get, changing nothing
 	$(PLAYBOOK) $(CLUSTER_ARG) playbooks/updates.yml --check $(LIMIT_ARG) $(ARGS)

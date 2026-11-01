@@ -1,5 +1,5 @@
 """Filters for k3s on a cluster's members: who the members are, which server starts the cluster, what each node's
-config.yaml says, and which connections a joining server needs.
+config.yaml says, which connections a joining server needs, and whether a member may move to another release.
 
 A member is {"host", "role", "address"}: role "server" or "agent", address the IPv4 address the others reach it on
 (as roles/kubernetes_node's k8s_node_addresses). tests/fuzz/fuzz_k3s_config.py checks the properties described
@@ -16,6 +16,8 @@ description: See the module docstring and roles/k3s/tasks.
 
 # What `k3s --version` prints first: "k3s version v1.36.5+k3s1 (d73847bc)".
 _VERSION = re.compile(r"^k3s version (v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+)(?: |$)")
+# A release, as k8s_version and the catalog name it (roles/k3s/vars/main.yml, k3s_version_pattern).
+_RELEASE = re.compile(r"^v([0-9]{1,4})\.([0-9]{1,4})\.([0-9]{1,4})\+k3s([0-9]{1,4})\Z")
 
 
 def _text(value):
@@ -118,6 +120,28 @@ def k3s_installed_version(output):
     return ""
 
 
+def _release(value):
+    found = _RELEASE.match(_text(value))
+    return tuple(int(part) for part in found.groups()) if found else None
+
+
+def k3s_upgrade_step(installed, target):
+    """How a member on release installed gets to release target: "same"; "forward" to a newer patch or k3s build
+    of its minor release, or to the next minor; "skip" for more than one minor (or another major) ahead, which
+    Kubernetes doesn't support; "downgrade" to an older release, which k3s can't do; "" when either isn't a
+    release."""
+    have, want = _release(installed), _release(target)
+    if have is None or want is None:
+        return ""
+    if want == have:
+        return "same"
+    if want < have:
+        return "downgrade"
+    if want[0] != have[0] or want[1] - have[1] > 1:
+        return "skip"
+    return "forward"
+
+
 class FilterModule:
     def filters(self):
         return {
@@ -127,4 +151,5 @@ class FilterModule:
             "k3s_config": k3s_config,
             "k3s_unreached": k3s_unreached,
             "k3s_installed_version": k3s_installed_version,
+            "k3s_upgrade_step": k3s_upgrade_step,
         }

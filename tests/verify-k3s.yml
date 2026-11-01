@@ -2,7 +2,8 @@
 # Checks the cluster tests/kubernetes.sh built (cluster ci, tests/inventory/k3s.yml): every node Ready, three etcd
 # members, the servers tainted, ServiceLB off, kube-vip holding the VIP and a LoadBalancer address from the pool,
 # the files' modes, the binary's hash, the tokens where they belong, and the read-only kubeconfig's rights.
-# tokens_file is the test's tokens (-e tokens_file=...).
+# tokens_file is the test's tokens (-e tokens_file=...); verify_version the release every node must run
+# (v1.36.5+k3s1 unless -e verify_version=... says otherwise, after an upgrade), and no node is left cordoned.
 - name: Check every member's files
   hosts: k8s_ci_servers:k8s_ci_agents
   become: true
@@ -10,7 +11,7 @@
   vars:
     tokens: "{{ lookup('ansible.builtin.file', tokens_file) | from_yaml }}"
     release: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/../roles/k3s/vars/catalog.yml') | from_yaml).k3s_catalog
-                 | selectattr('version', 'eq', 'v1.36.5+k3s1') | first }}"
+                 | selectattr('version', 'eq', verify_version | default('v1.36.5+k3s1')) | first }}"
   tasks:
     - name: Look at k3s' files
       ansible.builtin.stat:
@@ -68,7 +69,7 @@
         path: /etc/rancher/k3s/k3s.yaml
       register: verify_admin
 
-    - name: Check the nodes, ServiceLB, the pool and the admin kubeconfig
+    - name: Check the nodes, their release, ServiceLB, the pool and the admin kubeconfig
       ansible.builtin.assert:
         that:
           - nodes | map(attribute='metadata.name') | sort == ['k3s-a1', 'k3s-s1', 'k3s-s2', 'k3s-s3']
@@ -81,6 +82,8 @@
           - objects | selectattr('kind', 'eq', 'DaemonSet') | map(attribute='metadata.name') | select('match', '^svclb')
             | list | length == 0
           - traefik.status.loadBalancer.ingress[0].ip in ['172.29.30.101', '172.29.30.102']
+          - nodes | map(attribute='status.nodeInfo.kubeletVersion') | unique == [verify_version | default('v1.36.5+k3s1')]
+          - nodes | selectattr('spec.unschedulable', 'defined') | selectattr('spec.unschedulable') | list | length == 0
           - verify_admin.stat.mode == '0600'
         quiet: true
       vars:

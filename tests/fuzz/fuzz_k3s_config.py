@@ -8,9 +8,13 @@ Properties, for any members, addresses, names, tokens and cluster settings that 
   agent only the agent token, so an agent can never join as a server;
 - a joining server checks every server before it (and those already started) on 2379, 2380 and 6443, each of those
   reaches its 2380, never itself and never an agent; an agent checks nothing;
-- the release `k3s --version` prints reads back as itself.
+- the release `k3s --version` prints reads back as itself;
+- an upgrade step (k3s_upgrade_step) is "same" only for the same release, "downgrade" exactly when the target is
+  older, "forward" only to a newer release of the same major at most one minor ahead, "skip" otherwise, and ""
+  for anything the version pattern refuses (worked out here independently).
 """
 
+import re
 import sys
 
 import atheris
@@ -56,8 +60,38 @@ def san(fdp):
     return address(fdp) if fdp.ConsumeBool() else word(fdp, "abz09-.:\n *", 20)
 
 
+def release(fdp):
+    if fdp.ConsumeIntInRange(0, 9):
+        return "v{}.{}.{}+k3s{}".format(*(fdp.ConsumeIntInRange(0, 3 if i < 2 else 12) for i in range(4)))
+    return word(fdp, "v1.2+k3s0 \n-", 16)
+
+
+def check_upgrade_step(fdp):
+    have, want = release(fdp), release(fdp)
+    step = K3S.k3s_upgrade_step(have, want)
+    parsed = []
+    for value in (have, want):
+        found = re.fullmatch(r"v([0-9]{1,4})\.([0-9]{1,4})\.([0-9]{1,4})\+k3s([0-9]{1,4})", value)
+        parsed.append(tuple(int(p) for p in found.groups()) if found else None)
+    a, b = parsed
+    if a is None or b is None:
+        assert step == "", (have, want, step)
+        return
+    assert roles.matches(VARS["k3s_version_pattern"], have) and roles.matches(VARS["k3s_version_pattern"], want)
+    if a == b:
+        expected = "same"
+    elif b < a:
+        expected = "downgrade"
+    elif b[0] == a[0] and b[1] - a[1] <= 1:
+        expected = "forward"
+    else:
+        expected = "skip"
+    assert step == expected, (have, want, step, expected)
+
+
 def one_input(data):
     fdp = atheris.FuzzedDataProvider(data)
+    check_upgrade_step(fdp)
     members = [{"host": name(fdp), "role": fdp.PickValueInList(["server", "server", "agent"]),
                 "address": address(fdp)} for _ in range(fdp.ConsumeIntInRange(0, 5))]
     names = [m["host"] for m in members]
