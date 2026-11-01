@@ -4,7 +4,8 @@
 Description=A service an update breaks (updates tests)
 
 [Service]
-ExecStart=/bin/sh -c 'dpkg -s usas-test-kernel | grep -qx "Version: 1.0" && exec sleep infinity'
+# dpkg on Ubuntu and Debian, rpm on the RHEL family ($$ and %% keep systemd from expanding them, and \ the shell).
+ExecStart=/bin/sh -c '{ dpkg-query -W -f=\$${Version} usas-test-kernel || rpm -q --qf "%%{VERSION}" usas-test-kernel; } 2>/dev/null | grep -qx 1.0 && exec sleep infinity'
 
 [Install]
 WantedBy=multi-user.target
