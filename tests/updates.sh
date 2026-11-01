@@ -389,6 +389,21 @@ fresh "$UPD2" 2342 ops
 pin_cluster
 ansible-inventory "${INV[@]}" "${CLUSTER[@]}" --graph >"$TEST_TMP/cluster-graph.txt"
 grep -q "vm-4087" "$TEST_TMP/cluster-graph.txt" && { echo "ERROR: the excluded VM 4087 is in the inventory" >&2; exit 1; }
+# The API token in the Vault next to the inventory (group_vars/all/vault.yml), as the web UI and
+# inventory/vault.example.yml keep it: the plugin must read it as the playbooks would.
+mkdir -p "$TEST_TMP/vault-inventory/group_vars/all"
+sed -e 's/^    pve_api_token_id: .*/    pve_api_token_id: "{{ vault_pve_api_token_id }}"/' \
+  -e 's/^    pve_api_token_secret: .*/    pve_api_token_secret: "{{ vault_pve_api_token_secret }}"/' \
+  tests/inventory/updates-cluster.yml >"$TEST_TMP/vault-inventory/hosts.yml"
+grep -q 'vault_pve_api_token_secret' "$TEST_TMP/vault-inventory/hosts.yml"
+printf 'vault_pve_api_token_id: test\nvault_pve_api_token_secret: 00000000-0000-4000-8000-000000000000\n' \
+  >"$TEST_TMP/vault-inventory/group_vars/all/vault.yml"
+printf 'test-vault-password\n' >"$TEST_TMP/vault-pass"
+ansible-vault encrypt --vault-password-file "$TEST_TMP/vault-pass" "$TEST_TMP/vault-inventory/group_vars/all/vault.yml" >/dev/null
+ansible-inventory -i "$TEST_TMP/vault-inventory/hosts.yml" -i "$TEST_TMP/cluster.usas_pve.yml" \
+  --vault-password-file "$TEST_TMP/vault-pass" --graph >"$TEST_TMP/vault-graph.txt"
+grep -q "vm-4093" "$TEST_TMP/vault-graph.txt" \
+  || { cat "$TEST_TMP/vault-graph.txt"; echo "ERROR: the cluster inventory didn't read the token from the Vault" >&2; exit 1; }
 play --idempotent --check "${CLUSTER[@]}" --limit 'all:!upd-other:!vm-4094'
 report "h['upd-usas']['pve']['node'] == 'pve-test-2' and h['upd-usas']['installed_by_usas']" \
   "h['vm-4093']['status'] == 'pending' and not h['vm-4093']['installed_by_usas']" \
