@@ -100,7 +100,7 @@
         apply:
           tags: [install]
       tags: [install]
-      when: inventory_hostname == k3s_seed and k8s_bootstrap_argocd | bool and not ansible_check_mode
+      when: inventory_hostname == k3s_seed and k8s_bootstrap_argocd | default(false) | bool and not ansible_check_mode
 
 # An upgrade (--tags upgrade; a run without tags skips these plays): each cluster's lock first, so that no other
 # run upgrades it at the same time.
