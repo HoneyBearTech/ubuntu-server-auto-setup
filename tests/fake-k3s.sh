@@ -3,7 +3,7 @@
 # /var/log/usas-fake-k3s.log, which survives the container's reboot, and answers what the updates role asks:
 # cordon, drain (fails while /etc/usas-fake-k3s-drain-fails exists), uncordon, a node's Ready and the Longhorn
 # volumes (one attached volume degraded for the first two reads, then healthy).
-echo "$(date +%s.%N) $(hostname) $*" >>/var/log/usas-fake-k3s.log
+echo "$(date +%s.%N) $(cat /proc/sys/kernel/hostname) $*" >>/var/log/usas-fake-k3s.log
 [ "$1" = kubectl ] || exit 1
 shift
 case "$*" in
