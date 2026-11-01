@@ -49,11 +49,19 @@
       register: verify_nodes
       changed_when: false
 
-    - name: Read the services and daemon sets
+    # The cloud provider hands Traefik's LoadBalancer service an address once both are up, which can be after every
+    # node is Ready.
+    - name: Read the services and daemon sets, once Traefik has a LoadBalancer address
       ansible.builtin.command:
         argv: [k3s, kubectl, get, "services,daemonsets", --all-namespaces, -o, json]
       register: verify_objects
       changed_when: false
+      until: >-
+        (verify_objects.stdout | from_json)['items'] | selectattr('kind', 'eq', 'Service')
+        | selectattr('metadata.name', 'eq', 'traefik') | map(attribute='status.loadBalancer.ingress')
+        | select('defined') | list | length > 0
+      retries: 60
+      delay: 5
 
     - name: Look at the admin kubeconfig
       ansible.builtin.stat:
