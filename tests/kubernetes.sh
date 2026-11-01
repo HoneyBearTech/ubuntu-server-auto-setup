@@ -189,6 +189,10 @@ if [ "$(uname -s)" = Linux ]; then
     echo "--- pods, Traefik's service and endpoints, and who holds the LoadBalancer address" >&2
     docker exec k3s-s1 k3s kubectl get pods -A -o wide >&2 || true
     docker exec k3s-s1 k3s kubectl -n kube-system get service,endpointslices -o wide >&2 || true
+    echo "--- the last lines of each restarted pod's previous run" >&2
+    docker exec k3s-s1 sh -c 'k3s kubectl -n kube-system get pods --no-headers \
+      | awk "\$4 > 0 {print \$1}" | while read -r pod; do echo "# $pod"; \
+      k3s kubectl -n kube-system logs --previous --tail=8 "$pod" 2>&1; done' >&2 || true
     for node in "${NODES[@]}"; do
       docker exec "$node" sh -c "ip -4 -o addr show | grep -F '$lb' && echo 'on $node'" >&2 || true
       if [ "$family" = rhel ]; then

@@ -59,6 +59,19 @@
         fail_msg: "firewalld's rich rules on srv-01: {{ verify_rich.stdout_lines }}"
       when: ansible_facts.os_family == 'RedHat'
 
+    - name: List the trusted zone's sources
+      ansible.builtin.command:
+        argv: [firewall-cmd, --permanent, --zone=trusted, --list-sources]
+      register: verify_trusted
+      changed_when: false
+      when: ansible_facts.os_family == 'RedHat'
+
+    - name: Check that k3s' pod and service networks are trusted
+      ansible.builtin.assert:
+        that: verify_trusted.stdout.split() | sort == ['10.42.0.0/16', '10.43.0.0/16']
+        fail_msg: "firewalld's trusted zone on srv-01: {{ verify_trusted.stdout }}"
+      when: ansible_facts.os_family == 'RedHat'
+
     - name: Read the kernel settings and modules files
       ansible.builtin.slurp:
         src: "{{ item }}"
