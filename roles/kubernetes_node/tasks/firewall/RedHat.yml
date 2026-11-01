@@ -3,7 +3,7 @@
 # (k8s_node_owned_ports): a rich rule on one of them from an address the cluster doesn't need is removed, unless
 # firewall_allow adds it. And k3s' pod and service networks in the trusted zone, as k3s documents for firewalld:
 # pod traffic between nodes is forwarded, and firewalld rejects forwarded traffic from sources in no zone, which
-# rich rules in the default zone can't change (CoreDNS, metrics-server and Traefik kept restarting without it).
+# rich rules in the default zone can't change (a LoadBalancer address never answered when its pod ran on another node).
 - name: Look for firewalld
   ansible.builtin.stat:
     path: /usr/bin/firewall-cmd

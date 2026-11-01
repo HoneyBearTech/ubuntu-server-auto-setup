@@ -100,11 +100,12 @@ inventory to a running cluster.
 
 ### Fixed
 
-- **Kubernetes node profile:** pods couldn't reach the API or the kubelets on a member with firewalld (the RHEL
-  family), so k3s' own add-ons (CoreDNS, metrics-server, Traefik) kept restarting. The rules now allow k3s' pod
-  network (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, and on firewalld
-  put the pod and service networks in the `trusted` zone, as k3s documents (firewalld rejects forwarded pod traffic
-  otherwise). A server without `/etc/fstab` no longer fails the swap step.
+- **Kubernetes node profile:** pods reach the API (through its service) and metrics-server reaches the kubelets with
+  their own pod-network addresses, which the firewall rules didn't allow. They now allow k3s' pod network
+  (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, on UFW and firewalld. On
+  firewalld (the RHEL family) pod traffic between nodes was rejected, so a service whose pod ran on another node,
+  a LoadBalancer address included, never answered: the pod and service networks are now in the `trusted` zone
+  there, as k3s documents. A server without `/etc/fstab` no longer fails the swap step.
 
 ## [0.7.0] - 2026-11-01
 
