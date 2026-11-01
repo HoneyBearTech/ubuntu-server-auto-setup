@@ -14,7 +14,7 @@
     # Argo CD syncs on its own: the run only created the Application.
     - name: Wait until the root Application is Synced and Healthy
       ansible.builtin.command:
-        argv: [k3s, kubectl, -n, argocd, get, applications.argoproj.io, root, -o,
+        argv: [/usr/local/bin/k3s, kubectl, -n, argocd, get, applications.argoproj.io, root, -o,
                "jsonpath={.status.sync.status}/{.status.health.status}"]
       register: verify_root_status
       until: verify_root_status.stdout == 'Synced/Healthy'
@@ -24,7 +24,7 @@
 
     - name: Read the root Application, the synced ConfigMap, Argo CD's service and its initial password's Secret
       ansible.builtin.command:
-        argv: "{{ ['k3s', 'kubectl', '-n', 'argocd', 'get', '-o', 'json'] + item.split() }}"
+        argv: "{{ ['/usr/local/bin/k3s', 'kubectl', '-n', 'argocd', 'get', '-o', 'json'] + item.split() }}"
       loop:
         - applications.argoproj.io root
         - configmap usas-handoff
@@ -37,7 +37,7 @@
 
     - name: Read Argo CD's Helm release
       ansible.builtin.command:
-        argv: [helm, list, --namespace, argocd, --output, json]
+        argv: [/usr/local/bin/helm, list, --namespace, argocd, --output, json]
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
       register: verify_release
@@ -45,7 +45,7 @@
 
     - name: Read the release's values
       ansible.builtin.command:
-        argv: [helm, get, values, argocd, --namespace, argocd, --output, json]
+        argv: [/usr/local/bin/helm, get, values, argocd, --namespace, argocd, --output, json]
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
       register: verify_values
