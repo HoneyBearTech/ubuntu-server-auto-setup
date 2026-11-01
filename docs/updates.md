@@ -109,6 +109,34 @@ at the console. After such an update the reboot is held, with the packages named
 Proxmox console and re-enroll the TPM, as [security.md](security.md#secure-boot-and-disk-encryption)
 ("Recovery") describes.
 
+## Kubernetes members
+
+A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group (the groups the
+[k3s playbook](interfaces.md#kubernetes-clusters) uses; a cluster built another way can be listed in them too,
+with its servers in the inventory) is a node of that cluster. With `updates_k8s_drain: true` (the default),
+before a reboot the playbook cordons and drains its node with `k3s kubectl drain --ignore-daemonsets
+--delete-emptydir-data`: on the server itself, or for an agent on the cluster's first server in the inventory.
+After the reboot and the [health checks](#health-checks) it waits until the node is Ready again and uncordons
+it. The waves keep a cluster's servers apart and its agents away from its servers (see [waves](#waves)), so etcd
+keeps its quorum and the server that drains an agent is up.
+
+- Nothing is drained when the update needs no reboot: k3s and its pods keep running through package updates.
+- A drain that doesn't finish within `updates_k8s_drain_timeout` (300 s; a PodDisruptionBudget, a pod no
+  controller manages) uncordons the node again and fails the server without a reboot, with kubectl's reason in
+  the report.
+- A node that doesn't come back Ready within `updates_k8s_ready_timeout`, or a server whose health check fails
+  after its reboot, stays cordoned: the server fails, and no later wave starts.
+- `updates_k8s_wait_longhorn: true` also waits, after uncordoning, until every attached Longhorn volume is
+  `healthy` (its replicas rebuilt) before the server's update counts as done, so that the next wave starts with
+  every volume whole; after `updates_k8s_longhorn_timeout` (1800 s) the server fails. Detached volumes are left
+  out.
+- The node's name in Kubernetes is the server's inventory name, or `updates_k8s_node_name`.
+- A reboot moves the API's address (kube-vip) by itself: kube-vip stops with the server, unlike when only k3s
+  restarts, as during an upgrade.
+
+The report says "drained, uncordoned" (or "left cordoned") and "Longhorn healthy". `false` reboots a member
+without draining it, so its pods stop with it.
+
 ## Health checks
 
 After an update or a reboot, the server must:
@@ -205,6 +233,11 @@ connecting to them. In inventory order, each server goes into the first wave tha
   each Proxmox node**, so that one node doesn't boot many VMs at once. The node is the one the VM runs on
   now (with the [cluster inventory](#every-vm-on-the-cluster)), otherwise its `pve_node`; a server that isn't
   on a cluster has no node limit.
+
+- **At most one server of each Kubernetes cluster, and never a server together with that cluster's agents**
+  (members of `k8s_<cluster>_servers` and `k8s_<cluster>_agents`, as for [k3s](interfaces.md#kubernetes-clusters)),
+  whatever the limits above: etcd keeps its quorum, and the server an agent is drained from isn't rebooting at
+  the same time ([Kubernetes members](#kubernetes-members)).
 
 `0` turns off either limit. The run takes these three settings from the first server, so set them for all
 servers (`group_vars/all`, or `-e`). A wave starts once the one before has finished, and when a server fails,
