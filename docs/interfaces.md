@@ -397,7 +397,7 @@ options, all optional except `plugin`:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `plugin` | (required) | `usas_pve`. |
-| `api_host`, `api_port`, `api_user`, `api_token_id`, `api_token_secret`, `validate_certs` | the inventory's `pve_api_host`, `pve_api_port` (8006), `pve_api_user`, `pve_api_token_id`, `pve_api_token_secret`, `pve_validate_certs` (true), with its group_vars and Vault | The Proxmox API connection. The secret can also come from `USAS_PVE_TOKEN_SECRET`. |
+| `api_host`, `api_port`, `api_user`, `api_token_id`, `api_token_secret`, `validate_certs` | the inventory's `pve_api_host`, `pve_api_port` (8006), `pve_api_user` (`ansible@pve`), `pve_api_token_id`, `pve_api_token_secret`, `pve_validate_certs` (true), with its group_vars and Vault | The Proxmox API connection. The secret can also come from `USAS_PVE_TOKEN_SECRET`. |
 | `ca_file` | the system's CAs | A CA bundle for the API's certificate. |
 | `timeout` | `10` | Seconds per API call. Guest agents get at most 5 seconds each, 4 at a time, 15 seconds in all. |
 | `cluster` | the name `/cluster/status` reports, or `pve` | The cluster's name in host key aliases (`^[a-z0-9][a-z0-9-]{0,31}\Z`). |

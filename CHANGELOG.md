@@ -288,6 +288,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   (`group_vars/all/vault.yml`), as the web UI and `inventory/vault.example.yml` keep it: with ansible-core's
   default, `group_vars` aren't read while an inventory is parsed. It now reads them as the playbooks do. Found by
   the v0.7.0 release checklist.
+- The cluster inventory stopped with "missing: user" on an inventory the web UI wrote, and snapshots before
+  updates (`updates_snapshot`) were refused with an incomplete API token: the web UI leaves `pve_api_user` out
+  while it is the default, `ansible@pve`, and neither had that default. Both now do, as creating VMs does. Found
+  by the v0.7.0 release checklist.
 - Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
   (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
   Found by the v0.7.0 release checklist.
