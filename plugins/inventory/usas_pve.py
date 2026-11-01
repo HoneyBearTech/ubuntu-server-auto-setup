@@ -119,6 +119,14 @@ options:
     type: list
     elements: str
     default: []
+  exclude_addresses:
+    description:
+      - Addresses a guest agent may report that are never a VM's own (an address, a range a-b or a network).
+        The k8s_api_vip and k8s_lb_pool of the static inventory's k8s_* groups are left out without being
+        listed here, and so is every /32 address (kube-vip moves them between VMs).
+    type: list
+    elements: str
+    default: []
 """
 
 EXAMPLES = r"""
@@ -157,6 +165,11 @@ GROUP_NAME = re.compile(r"[^a-z0-9_]")
 TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}\Z")
 GLOB = re.compile(r"^[A-Za-z0-9*?.\[\]_-]{1,64}\Z")
 EXCLUDE = re.compile(r"^([0-9]{3,9}|[A-Za-z0-9][A-Za-z0-9._-]{0,63})\Z")
+ADDRESSES = re.compile(r"^[0-9.]{7,15}(/[0-9]{1,2}|-[0-9.]{7,15})?\Z")
+# The static inventory's Kubernetes groups (k8s_<cluster>, k8s_<cluster>_servers/_agents) and the variables that
+# hold addresses kube-vip moves between their members.
+K8S_GROUP = re.compile(r"^k8s_[a-z][a-z0-9_-]{0,40}\Z")
+K8S_ADDRESS_VARS = ("k8s_api_vip", "k8s_lb_pool")
 WORKERS = 4
 BUDGET_SECONDS = 15
 
@@ -183,6 +196,11 @@ def option_problems(opts):
         bad = [str(v) for v in opts.get(name) or [] if not pattern.match(str(v))]
         if bad:
             problems.append(f"{name} has values that aren't plain names: {', '.join(V.text(b, 40) for b in bad)}")
+    bad = [str(v) for v in opts.get("exclude_addresses") or []
+           if not (ADDRESSES.match(str(v)) and V.address_ranges([str(v)]))]
+    if bad:
+        problems.append("exclude_addresses has values that aren't an IPv4 address, range a-b or network: "
+                        + ", ".join(V.text(b, 40) for b in bad))
     if opts.get("cluster") and not V.CLUSTER_PATTERN.match(str(opts["cluster"])):
         problems.append("cluster must be lowercase letters, digits and -, starting with a letter or digit")
     return problems
@@ -283,14 +301,16 @@ class InventoryModule(BaseInventoryPlugin):
         super().parse(inventory, loader, path, cache)
         self._read_config_data(path)
         opts = {name: self.get_option(name) for name in
-                ("nodes", "tags_any", "tags_all", "pools", "name_patterns", "exclude", "cluster")}
+                ("nodes", "tags_any", "tags_all", "pools", "name_patterns", "exclude", "exclude_addresses",
+                 "cluster")}
         problems = option_problems(opts)
         if problems:
             raise AnsibleParserError(f"{path}: " + "; ".join(problems))
         api = self._api_settings()
         vms = V.parse_resources(self._get(api, "/cluster/resources?type=vm"))
         cluster = opts["cluster"] or self._cluster_name(api)
-        configs, agents = self._details(api, [vm for vm in vms if vm.type == "qemu" and not vm.template])
+        exclude = V.address_ranges(list(opts["exclude_addresses"] or []) + self._k8s_addresses())
+        configs, agents = self._details(api, [vm for vm in vms if vm.type == "qemu" and not vm.template], exclude)
         static_hosts = {name: {"pve_vmid": host.vars.get("pve_vmid"), "ansible_host": host.vars.get("ansible_host")}
                         for name, host in self.inventory.hosts.items()}
         hosts, conflicts = plan(vms, configs, agents, static_hosts, cluster, opts)
@@ -338,6 +358,17 @@ class InventoryModule(BaseInventoryPlugin):
         api["validate"] = str(api["validate"]).lower() not in ("false", "no", "0", "off")
         return api
 
+    def _k8s_addresses(self):
+        """The API addresses and LoadBalancer pools the static inventory's Kubernetes groups set, as written (a
+        template is left out: an address is never worked out from one here)."""
+        found = []
+        for name, group in self.inventory.groups.items():
+            if not K8S_GROUP.match(name):
+                continue
+            values = group.get_vars()
+            found += [str(values[k]) for k in K8S_ADDRESS_VARS if values.get(k) and "{" not in str(values[k])]
+        return found
+
     def _inventory_vars(self):
         from ansible.utils.vars import combine_vars
         from ansible.vars.plugins import get_vars_from_inventory_sources
@@ -380,7 +411,7 @@ class InventoryModule(BaseInventoryPlugin):
                 return str(entry.get("name") or V.DEFAULT_CLUSTER)
         return V.DEFAULT_CLUSTER
 
-    def _details(self, api, vms):
+    def _details(self, api, vms, exclude=()):
         """Each VM's config, and for running VMs with an agent its addresses and OS, 4 calls at a time within a
         15-second budget (an agent that doesn't answer in time leaves only the config)."""
         configs, agents = {}, {}
@@ -402,7 +433,7 @@ class InventoryModule(BaseInventoryPlugin):
                 osinfo = V.parse_osinfo((self._get(api, f"{base}/agent/get-osinfo", min(5, left)) or {}).get("result"))
             except (ApiError, AttributeError):
                 return vm.vmid, config, None
-            return vm.vmid, config, (V.parse_interfaces(interfaces), osinfo)
+            return vm.vmid, config, (V.parse_interfaces(interfaces, exclude=exclude), osinfo)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:
             for vmid, config, agent in pool.map(one, vms):

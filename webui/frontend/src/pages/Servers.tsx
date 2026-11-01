@@ -21,6 +21,7 @@ function ServersForm({ data, reload, status, setStatus }: {
   setStatus: (n: NoticeT | null) => void;
 }) {
   const { columns, nodes } = data;
+  const clusters = data.clusters ?? [];
   // The Defaults page's choices, which an empty OS or install method stands for.
   const defaults: Record<string, string> = { vm_os: data.default_os, vm_install_method: data.default_install_method };
   const blank = () => Object.fromEntries(columns.map((c) => [c.name, ""]));
@@ -100,7 +101,17 @@ function ServersForm({ data, reload, status, setStatus }: {
                     };
                     return (
                       <td key={c.name}>
-                        {c.name === "pve_node" && nodes.length ? (
+                        {c.name === "k8s_cluster" ? (
+                          // The Defaults page's clusters; empty: not a member.
+                          <div className="select">
+                            <select {...common} defaultValue={value}>
+                              <option value="">None</option>
+                              {(value && !clusters.includes(value) ? [...clusters, value] : clusters).map((n) => (
+                                <option key={n} value={n}>{n}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : c.name === "pve_node" && nodes.length ? (
                           // The cluster's nodes from the last connection test; empty is the default node.
                           <div className="select">
                             <select {...common} defaultValue={value}>
@@ -166,6 +177,9 @@ function ServersForm({ data, reload, status, setStatus }: {
             method: the Ubuntu installer (Ubuntu only) or the vendor's cloud image (every release; the ISO storage
             must allow Import content); the default is the one on the Defaults page. Rocky Linux 10 and CentOS
             Stream 10 need a node whose CPU is x86-64-v3 (AVX2): the SSH page's login test reads each node's CPU.
+            Kubernetes cluster and role: a cluster from the Defaults page{clusters.length ? ""
+              : " (add one there first)"}, and server (control plane and etcd) or agent (worker); a member needs
+            its IP address here, also on DHCP, and a lowercase name.
           </p>
           <div aria-live="polite">{status ? <Notice notice={status} /> : null}</div>
         </div>

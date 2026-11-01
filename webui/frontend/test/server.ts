@@ -26,6 +26,7 @@ export function defaultRoutes(): Record<string, Handler> {
     "GET /api/defaults": () => fixtures.defaults,
     "GET /api/hardening": () => fixtures.hardening,
     "GET /api/servers": () => fixtures.servers,
+    "GET /api/clusters": () => fixtures.clusters,
     "GET /api/ssh": () => fixtures.ssh,
     "GET /api/run": () => fixtures.runPage,
     "GET /api/runs": () => ({ runs: fixtures.runs }),

@@ -167,9 +167,43 @@ def subnet(gateway: Any, prefix: Any) -> ipaddress.IPv4Network | None:
         return None
 
 
-def parse_interfaces(result: Any, network: ipaddress.IPv4Network | None = None) -> list[str]:
+def address_ranges(values: Any) -> tuple[tuple[int, int], ...]:
+    """The address ranges a VM's address must not be taken from, as (first, last) integers: a Kubernetes cluster's
+    API address (k8s_api_vip) and LoadBalancer pool (k8s_lb_pool), each an address, a range a-b or a network.
+    kube-vip puts them on whichever member holds them, so its guest agent reports them as its own. Values that
+    are none of these are left out."""
+    found = []
+    for value in values if isinstance(values, (list, tuple, set)) else [values]:
+        item = str(value or "").strip()
+        try:
+            if "/" in item:
+                net = ipaddress.IPv4Network(item, strict=False)
+                found.append((int(net.network_address), int(net.broadcast_address)))
+            elif "-" in item:
+                first, last = (int(ipaddress.IPv4Address(part.strip())) for part in item.split("-", 1))
+                if first <= last:
+                    found.append((first, last))
+            elif item:
+                found.append((int(ipaddress.IPv4Address(item)),) * 2)
+        except ValueError:
+            continue
+    return tuple(found)
+
+
+def excluded(address: str, ranges: tuple[tuple[int, int], ...]) -> bool:
+    """Whether address is in one of ranges (address_ranges)."""
+    try:
+        number = int(ipaddress.IPv4Address(address))
+    except ValueError:
+        return False
+    return any(first <= number <= last for first, last in ranges)
+
+
+def parse_interfaces(result: Any, network: ipaddress.IPv4Network | None = None,
+                     exclude: tuple[tuple[int, int], ...] = ()) -> list[str]:
     """The usable IPv4 addresses of an agent's network-get-interfaces result, those in network first; container
-    and loopback interfaces are skipped."""
+    and loopback interfaces are skipped, and so are /32 addresses (kube-vip's, which move between VMs) and those
+    in exclude (address_ranges)."""
     found: list[str] = []
     if not isinstance(result, list):
         return []
@@ -183,6 +217,8 @@ def parse_interfaces(result: Any, network: ipaddress.IPv4Network | None = None) 
             if not isinstance(entry, dict) or entry.get("ip-address-type") != "ipv4":
                 continue
             address = str(entry.get("ip-address", ""))
+            if str(entry.get("prefix", "")) == "32" or excluded(address, exclude):
+                continue
             if usable_ipv4(address) and address not in found:
                 found.append(address)
             if len(found) >= MAX_ADDRESSES:

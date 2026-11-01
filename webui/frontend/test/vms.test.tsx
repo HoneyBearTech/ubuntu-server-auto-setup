@@ -4,7 +4,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BACKOFF_MS, FILL_MS, POLL_MS, arrange, bytes, compareVms, matches, statusLabel } from "../src/pages/Vms";
+import { BACKOFF_MS, FILL_MS, NO_CLUSTER, POLL_MS, arrange, bytes, compareVms, matches, statusLabel } from "../src/pages/Vms";
 import type { Vm } from "../src/types";
 import * as fixtures from "./fixtures";
 import { FakeApi, reply, renderAt } from "./server";
@@ -248,8 +248,12 @@ describe("the helpers", () => {
   });
 
   it("matches every word of the search", () => {
-    const none = { text: "", node: "", status: "", support: "" };
+    const none = { text: "", node: "", status: "", support: "", cluster: "" };
     expect(matches(vm, { ...none, text: "web ubuntu" })).toBe(true);
+    expect(matches(vm, { ...none, cluster: NO_CLUSTER })).toBe(true);
+    expect(matches(vm, { ...none, cluster: "lab" })).toBe(false);
+    expect(matches({ ...vm, k8s: { cluster: "lab", role: "agent", inventory: true, drain: false } },
+      { ...none, cluster: "lab" })).toBe(true);
     expect(matches(vm, { ...none, text: "web debian" })).toBe(false);
     expect(matches(vm, { ...none, text: "192.168.50" })).toBe(true);
     expect(matches(vm, { ...none, support: "unsupported" })).toBe(false);

@@ -19,7 +19,12 @@ import yaml
 from .problems import Problem
 
 ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
-         "hardening", "updates")
+         "hardening", "updates", "kubernetes_node", "k3s")
+
+# The k3s catalog (roles/k3s/vars/catalog.yml): a cluster's version field (choices_var=K3S_CATALOG) offers its
+# releases, which the k3s role installs.
+K3S_CATALOG_FILE = Path("roles/k3s/vars/catalog.yml")
+K3S_CATALOG = "k3s_catalog"
 
 # The OS catalog (roles/os_catalog/vars/catalog.yml): an OS field (choices_var=OS_CATALOG) offers its releases that
 # are still supported and that this release can install, with one of these methods.
@@ -64,10 +69,27 @@ NOT_FORM_FORMATS = frozenset({
     "updates_package_pattern", "updates_url_pattern", "updates_seconds_pattern", "updates_snapshot_name_pattern",
     "updates_snapshot_marker_pattern", "updates_group_pattern", "updates_max_entries", "updates_supported_releases",
     "updates_families",
-    # Spread groups and Kubernetes groups: no form fields yet, so set in the inventory (host_vars). The extra disks'
-    # formats are the data_disks role's, which has no form fields yet either.
-    "provision_spread_group_pattern", "provision_k8s_group_pattern",
+    # Spread groups: no form field yet, so set in the inventory (host_vars). The extra disks' formats are the
+    # data_disks role's, which has no form fields yet either. The Kubernetes groups are the Servers page's
+    # cluster and role columns: the UI writes k8s_<cluster>_servers/_agents itself, with a name checked by
+    # CLUSTER_NAME (tests/test_schema.py ties it to these three patterns).
+    "provision_spread_group_pattern", "provision_k8s_group_pattern", "k8s_node_group_pattern", "k3s_group_pattern",
+    # A member's address is its ansible_host, which the Servers page checks with provision_ipv4_pattern.
+    "k8s_node_ipv4_pattern",
+    # The kubernetes_node and k3s roles' files, ports, packages, services and platforms: not settings.
+    "k8s_node_flannel_ports", "k8s_node_owned_ports", "k8s_node_firewalld_zone", "k8s_node_modules",
+    "k8s_node_modules_file", "k8s_node_sysctl", "k8s_node_sysctl_file", "k8s_node_time_services",
+    "k8s_node_container_types", "k8s_node_longhorn_packages", "k8s_node_longhorn_modules_file",
+    "k8s_node_multipath_file", "k8s_node_rancher_key_url", "k8s_node_rancher_key_fingerprint",
+    "k8s_node_rancher_repo_url", "k8s_node_selinux_releases", "k8s_node_selinux_packages",
+    "k3s_architectures", "k3s_binary", "k3s_config_dir", "k3s_config_file", "k3s_manifests_dir", "k3s_etcd_dir",
+    "k3s_server_ca", "k3s_services", "k3s_manifest_files", "k3s_readonly_account", "k3s_api_port",
 })
+# A Kubernetes cluster's name, as k3s_group_pattern, k8s_node_group_pattern and provision_k8s_group_pattern take
+# it between "k8s_" and "_servers"/"_agents".
+CLUSTER_NAME = r"^[a-z][a-z0-9-]{0,30}\Z"
+# The Servers page's Kubernetes role of a server: none, or a member of its cluster as a server or an agent.
+K8S_ROLES = ("none", "server", "agent")
 
 # The roles/proxmox_vm/vars/main.yml formats an extra network card is checked against (parse_nic).
 NIC_FORMATS = ("provision_bridge_pattern", "provision_vlan_pattern", "provision_ipv4_pattern",
@@ -111,7 +133,7 @@ class Spec:
     minimum: int | None = None
     maximum: int | None = None
     required: bool = False
-    vault: str | None = None  # stored in the Vault under this name instead of the inventory
+    vault: str | None = None  # stored in the Vault under this name ({cluster}: the cluster's) instead of the inventory
     help: str = ""  # used when the defaults file has no comment for the variable
     advanced: bool = False
     default: Any = None  # for variables no role defines (Vault values), or whose role default is a template
@@ -389,7 +411,50 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
            "via a gateway), optionally mtu, model and mac. Example: vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 dhcp."),
     S("firewall_ports", "Extra firewall rules", "list", ui_pattern="ufw_rule", default=[],
       help="Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24."),
+    S("k8s_cluster", "Kubernetes cluster", "text", ui_pattern=CLUSTER_NAME, default="",
+      help="One of the clusters on the Defaults page; empty: not a member."),
+    S("k8s_role", "Kubernetes role", "choice", ui_choices=K8S_ROLES, default="none",
+      help="server (the control plane and etcd) or agent (a worker); none: not a member."),
 )
+
+
+# A Kubernetes cluster's fields (the Defaults page's Clusters section): the group_vars of its k8s_<cluster> group,
+# which the k3s and kubernetes_node roles read, and its two join tokens in the Vault. "name" is the cluster's name.
+CLUSTER_FIELDS: tuple[Spec, ...] = (
+    S("name", "Name", "text", ui_pattern=CLUSTER_NAME, required=True, default="",
+      help="Lowercase letters, digits and -, starting with a letter: the groups are k8s_<name>_servers and "
+           "k8s_<name>_agents."),
+    S("k8s_version", "k3s version", "choice", "k3s", choices_var=K3S_CATALOG, pattern_var="k3s_version_pattern",
+      required=True),
+    S("k8s_api_vip", "API address (VIP)", "text", "k3s", pattern_var="k3s_ipv4_pattern"),
+    S("k8s_lb_pool", "LoadBalancer pool", "text", "k3s", pattern_var="k3s_pool_pattern"),
+    S("k8s_api_sources", "API allowed from", "list", "kubernetes_node", pattern_var="k8s_node_source_pattern"),
+    S("k8s_server_taint", "Keep workloads off the servers", "bool", "k3s"),
+    S("k8s_flannel_backend", "Pod network between nodes", "choice", "k3s", choices_var="k3s_flannel_backends"),
+    S("k8s_longhorn_prereqs", "Longhorn's prerequisites", "bool", "kubernetes_node"),
+    S("k8s_disable", "Packaged components to leave out", "list", "k3s", choices_var="k3s_disable_choices"),
+    S("k8s_api_vip_interface", "VIP network interface", "text", "k3s", pattern_var="k3s_interface_pattern",
+      advanced=True),
+    S("k8s_tls_san", "More certificate names", "list", "k3s", pattern_var="k3s_san_pattern", advanced=True),
+    S("k8s_secrets_encryption", "Encrypt Secrets in etcd", "bool", "k3s", advanced=True),
+    S("k8s_fetch_readonly_kubeconfig", "Fetch a read-only kubeconfig", "bool", "k3s", advanced=True,
+      help="Kept in the data folder for kubectl from the container; the web UI never shows or offers it."),
+    S("k8s_ready_timeout", "Seconds to wait for a node to be Ready", "int", "k3s", minimum=30, maximum=3600,
+      advanced=True),
+)
+# The join tokens: write-only, in the Vault under the cluster's name ("-" written as "_"), never read back.
+CLUSTER_TOKENS: tuple[Spec, ...] = (
+    S("k8s_token", "Server join token", "secret", pattern_var="k3s_token_pattern", vault="vault_k8s_token_{cluster}",
+      default="", help="Servers join with it. 32 to 128 letters and digits, such as openssl rand -hex 32 makes."),
+    S("k8s_agent_token", "Agent join token", "secret", pattern_var="k3s_token_pattern",
+      vault="vault_k8s_agent_token_{cluster}", default="",
+      help="Agents join with it, so a worker can't join as a server. Not the server token."),
+)
+
+
+def token_vault_name(spec: "Spec | Field", cluster: str) -> str:
+    """The Vault name of a cluster's token: vault_k8s_token_<cluster>, a "-" in the name written as "_"."""
+    return str(spec.vault).format(cluster=cluster.replace("-", "_"))
 
 
 class Schema:
@@ -403,9 +468,13 @@ class Schema:
         self.os_images = {str(e["id"]): {str(m): str(image["file"]) for m, image in e["methods"].items()}
                           for e in catalog}
         self.os_names = {str(e["id"]): f"{e['name']} {e['version']}" for e in catalog}
+        k3s = yaml.safe_load((project_dir / K3S_CATALOG_FILE).read_text(encoding="utf-8"))["k3s_catalog"]
+        self.k3s_versions = tuple(str(e["version"]) for e in k3s)
         self.sections = {name: [self._resolve(spec) for spec in specs] for name, specs in SECTIONS.items()}
         self.server_columns = [self._resolve(spec) for spec in SERVER_COLUMNS]
         self.by_name = {f.name: f for fields in self.sections.values() for f in fields}
+        self.cluster_fields = [self._resolve(spec) for spec in CLUSTER_FIELDS]
+        self.cluster_tokens = [self._resolve(spec) for spec in CLUSTER_TOKENS]
 
     def _resolve(self, spec: Spec) -> Field:
         if spec.role:
@@ -424,6 +493,8 @@ class Schema:
                   else INSTALL_METHOD_LABELS if spec.choices_var == INSTALL_METHOD_VAR else {})
         if spec.choices_var == OS_CATALOG:
             choices: tuple[str, ...] | None = tuple(labels)
+        elif spec.choices_var == K3S_CATALOG:
+            choices = self.k3s_versions
         elif spec.choices_var:
             choices = tuple(str(c) for c in self.roles.var(spec.choices_var))
         else:
@@ -436,11 +507,13 @@ class Schema:
                      formats=formats, choice_labels=labels)
 
     def pattern_vars_used(self) -> set[str]:
-        specs = [s for specs in SECTIONS.values() for s in specs] + list(SERVER_COLUMNS)
-        used = set()
+        specs = ([s for specs in SECTIONS.values() for s in specs] + list(SERVER_COLUMNS) + list(CLUSTER_FIELDS)
+                 + list(CLUSTER_TOKENS))
+        # A cluster member's name must also be a Kubernetes node name (parse_servers checks it).
+        used = {"k3s_node_name_pattern"}
         for s in specs:
             used.update((s.pattern_var,) if isinstance(s.pattern_var, str) else (s.pattern_var or ()))
-            if s.choices_var and s.choices_var != OS_CATALOG:
+            if s.choices_var and s.choices_var not in (OS_CATALOG, K3S_CATALOG):
                 used.add(s.choices_var)
             if s.ui_pattern == "network_cards":
                 used.update(NIC_FORMATS)
@@ -581,6 +654,11 @@ def parse_value(f: Field, raw: Any) -> Any:
                     _check(f.patterns, label, f"'{item}'")
             else:
                 _check(f.patterns, item, f"'{item}'")
+        if f.choices is not None:
+            unknown = [item for item in items if item not in f.choices]
+            if unknown:
+                raise Invalid(f"{f.label} takes only {', '.join(f.choices)}, not {unknown[0][:40]}.")
+            return [c for c in f.choices if c in items]
         if f.pattern == "ufw_rule":
             return [parse_ufw_rule(item) for item in items]
         if f.pattern == "network_cards":
@@ -608,6 +686,7 @@ def parse_value(f: Field, raw: Any) -> Any:
     if f.kind == "choice":
         if text not in (f.choices or ()):
             raise Invalid(f"{f.label} must be one of: {', '.join(f.choices or ())}.")
+        _check(f.patterns, text, f.label)
         return text
     _check(f.patterns, text, f.label)
     return text

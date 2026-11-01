@@ -15,15 +15,21 @@ def answers(ui) -> dict:
     post(ui, "/proxmox", {"action": "save", **PROXMOX, "pve_node": "hephaestus"})
     post(ui, "/defaults", {"action": "save", **DEFAULTS})
     post(ui, "/hardening", HARDENING)
+    post(ui, "/clusters", {"cluster_count": "1", "clusters-0-name": "lab", "clusters-0-k8s_version": "v1.36.5+k3s1",
+                           "clusters-0-k8s_api_vip": "10.0.0.99", "clusters-0-k8s_disable": "servicelb",
+                           "clusters-0-k8s_flannel_backend": "vxlan", "clusters-0-k8s_server_taint": "on",
+                           "clusters-0-k8s_secrets_encryption": "on", "clusters-0-k8s_token": "a" * 64})
     post(ui, "/servers", {"server_count": "2", "servers-0-name": "web-01", "servers-0-ansible_host": "10.0.0.61",
                           "servers-0-pve_vmid": "4061", "servers-0-firewall_ports": "443/tcp",
+                          "servers-0-k8s_cluster": "lab", "servers-0-k8s_role": "server",
                           "servers-1-name": "db-01",
                           "servers-1-ansible_host": "10.0.0.70", "servers-1-pve_vmid": "4070",
                           "servers-1-vm_memory_mb": "8192", "servers-1-pve_node": "ares",
                           "servers-1-vm_os": "debian-13", "servers-1-vm_install_method": "cloud_image"})
     ui.app_state.store.save_cluster("olympus", {"hephaestus": "online", "ares": "online", "hermes": "offline"},
                                     {"local": "dir", "synology-nfs": "nfs, shared"}, ["synology-nfs"])
-    data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers", "updates")}
+    data = {k: ui.get(f"/api/{k}").json() for k in ("proxmox", "defaults", "hardening", "servers", "updates",
+                                                "clusters")}
     data["defaults"]["timezones"] = ["America/Chicago", "Etc/UTC", "Europe/Berlin"]  # a few are enough
     data["updates"]["timezones"] = data["defaults"]["timezones"]
     return data

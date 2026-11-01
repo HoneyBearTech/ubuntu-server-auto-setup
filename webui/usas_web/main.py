@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import zoneinfo
@@ -32,14 +33,14 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, nodes, scheduler, status, vmplan, vms
+from . import __version__, clusters, nodes, scheduler, status, vmplan, vms
 from .audit import AuditLog, session_fingerprint
 from .auth import Auth, csrf_ok, password_problem
 from .config import LOOPBACK_HOSTS, Settings, from_env
 from .passkeys import MAX_NAME, MAX_PASSKEYS, PasskeyError, Passkeys, clean_name, loggable
 from .remote import PveApi, RemoteProblem, VmLister, keys_url, preview_keys, test_proxmox, tls_verify
-from .runner import PLAYBOOKS, UPDATE_ACTIONS, Run, RunError, Runner
-from .schema import Field, Invalid, Schema, display_value, parse_value
+from .runner import GATED, PLAYBOOKS, UPDATE_ACTIONS, Run, RunError, Runner
+from .schema import Field, Invalid, Schema, display_value, parse_value, token_vault_name
 from .sshkeys import (
     KeyProblem,
     Keys,
@@ -88,6 +89,9 @@ PLAN_TTL = 600  # a reviewed plan can be run for 10 minutes
 CHECK_TTL = 1800  # a real run needs a passing check run of the same plan from the last 30 minutes
 # The kinds of run the VMs page starts (Run.kind), and the playbook each runs.
 VM_RUNS = {"vms": "baseline", "updates": "updates"}
+# A Kubernetes run (Run.kind) of playbooks/kubernetes.yml, and what each tag does.
+K8S_KIND = "kubernetes"
+K8S_ACTIONS = {"install": "Build the cluster, or add new members", "upgrade": "Upgrade the cluster to its version"}
 # Sign-ins and passkey changes, in the container's log (python -m usas_web sets it up).
 log = logging.getLogger("usas_web")
 
@@ -208,7 +212,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
             found = ((runner.hosts(run.id) or {}).get("updates") or {}).get("hosts")
             if isinstance(found, dict) and found:
                 remember_updates(run, found)
-        if run.kind in VM_RUNS:
+        if run.kind in (*VM_RUNS, K8S_KIND):
             data = runner.hosts(run.id) or {}
             hosts = data.get("hosts") or {}
             results = {name: {k: r.get(k) for k in ("ok", "changed", "failed", "unreachable")}
@@ -971,7 +975,38 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
             if f"servers-{i}-vm_os" not in errors and f"servers-{i}-vm_install_method" not in errors:
                 for p in os_problems(config, row):
                     errors.setdefault(f"servers-{i}-{p.field}", p.message)
+            member_problems(row, config, errors)
         return rows, errors
+
+    def member_problems(row: dict[str, Any], config: Config, errors: dict[str, str]) -> None:
+        """A server's Kubernetes cluster and role: a cluster of the Defaults page, a name Kubernetes takes, and an
+        address that is the server's own (roles/kubernetes_node and roles/k3s check them again)."""
+        i = row["_index"]
+        cluster, role = row.get("k8s_cluster") or "", row.get("k8s_role") or "none"
+        address = str(row.get("ansible_host") or "")
+        problem = clusters.address_problem(address, config)
+        if problem and f"servers-{i}-ansible_host" not in errors:
+            errors[f"servers-{i}-ansible_host"] = problem
+        if f"servers-{i}-k8s_cluster" in errors or f"servers-{i}-k8s_role" in errors:
+            return
+        if bool(cluster) != (role != "none"):
+            errors[f"servers-{i}-k8s_role" if cluster else f"servers-{i}-k8s_cluster"] = (
+                "Choose both the cluster and the role (server or agent), or neither.")
+            return
+        if not cluster:
+            return
+        if cluster not in {c.name for c in config.clusters}:
+            errors[f"servers-{i}-k8s_cluster"] = (f"There is no cluster {cluster}: add it under Kubernetes clusters "
+                                                  "on the Defaults page first.")
+            return
+        name = str(row.get("name") or "")
+        if name and not re.match(schema.roles.var("k3s_node_name_pattern"), name):
+            errors.setdefault(f"servers-{i}-name", "A Kubernetes member's name is its node name: lowercase letters, "
+                                                   "digits and -, at most 63.")
+        if not address:
+            errors.setdefault(f"servers-{i}-ansible_host", (
+                "A Kubernetes member needs its address here, the one reserved for it on DHCP: the other members' "
+                "firewall rules allow exactly that address."))
 
     @dataclass(frozen=True)
     class OsProblem:
@@ -1063,6 +1098,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         require_login(request)
         config = store.load()
         return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config),
+                     clusters=[c.name for c in config.clusters],
                      nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node,
                      default_os=str(setting(config, "vm_os")),
                      default_install_method=str(setting(config, "vm_install_method")))
@@ -1078,6 +1114,80 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         config.servers = [{k: v for k, v in r.items() if not k.startswith("_")} for r in parsed]
         store.save(config)
         return reply(message=f"Saved {len(config.servers)} server(s).")
+
+    # --- Kubernetes clusters ---------------------------------------------------------------------------------
+
+    def cluster_json(config: Config, cluster: clusters.Cluster) -> dict[str, Any]:
+        """A cluster as the Defaults page shows it: its fields' values, whether each token is saved (never the
+        token), its members, and the variables set by hand that the page keeps as they are."""
+        values = {f.name: value_json(f, cluster.values.get(f.name, f.default)) for f in schema.cluster_fields
+                  if f.name != "name"}
+        values["name"] = cluster.name
+        names = {t.name: token_vault_name(t, cluster.name) for t in schema.cluster_tokens}
+        members = clusters.members(config, cluster.name)
+        return {"name": cluster.name, "values": values,
+                "tokens": {name: config.secret_is_set(vault) for name, vault in names.items()}, "token_vars": names,
+                "servers": [str(s["name"]) for s in members if s["k8s_role"] == "server"],
+                "agents": [str(s["name"]) for s in members if s["k8s_role"] == "agent"],
+                "kept": sorted(cluster.extra_vars),
+                "other_members": sorted(h for hosts in cluster.other_members.values() for h in hosts)}
+
+    def clusters_json(config: Config) -> dict[str, Any]:
+        fields = [field_json(f) for f in schema.cluster_fields]
+        fields[0]["variable"] = "k8s_<name>"  # the name is the group's, not a variable
+        return {"fields": fields,
+                "tokens": [field_json(t) for t in schema.cluster_tokens],
+                "clusters": [cluster_json(config, c) for c in config.clusters],
+                "max_clusters": clusters.MAX_CLUSTERS}
+
+    @app.get("/api/clusters")
+    async def clusters_data(request: Request):
+        require_login(request)
+        return reply(**clusters_json(store.load()))
+
+    @app.post("/api/clusters")
+    async def clusters_save(request: Request):
+        """Saves the clusters (their group_vars) and the join tokens typed in; a token is never sent back."""
+        require_login(request)
+        form = await checked_form(request)
+        config = store.load()
+        parsed = clusters.parse(form, schema, config)
+        if parsed.errors:
+            return reply(422, errors=parsed.errors)
+        clusters.apply_renames(config, parsed)
+        config.clusters = parsed.clusters
+        config.secrets.update(parsed.tokens)
+        store.save(config)
+        for vault_name in sorted(parsed.tokens):
+            audit.record("k8s.token_set", **who(request), token=vault_name, generated=False)
+        if parsed.renamed or parsed.removed:
+            audit.record("k8s.clusters", **who(request), renamed=parsed.renamed, removed=parsed.removed)
+        return reply(message=f"Saved {len(config.clusters)} cluster(s).", **clusters_json(config))
+
+    @app.post("/api/clusters/token")
+    async def clusters_token(request: Request):
+        """Makes a join token (secrets.token_hex(32)), saves it in the Vault and shows it this once, for the
+        password manager: it is never sent again, and only that it was made goes into the audit log."""
+        require_login(request)
+        form = await checked_form(request)
+        config = store.load()
+        cluster = next((c for c in config.clusters if c.name == str(form.get("cluster", ""))), None)
+        spec = next((t for t in schema.cluster_tokens if t.name == str(form.get("token", ""))), None)
+        if cluster is None or spec is None:
+            return reply(422, error="Save the cluster first, then make its token.")
+        vault_name = token_vault_name(spec, cluster.name)
+        if config.secret_is_set(vault_name) and form.get("replace") not in ("on", "true"):
+            return reply(422, error=("A token is saved already. Replacing it on a running cluster needs k3s' own "
+                                     "token rotation first: tick the box to replace it."))
+        token = clusters.generate_token()
+        config.secrets[vault_name] = token
+        store.save(config)
+        audit.record("k8s.token_set", **who(request), token=vault_name, generated=True)
+        response = reply(token=token, variable=vault_name,
+                         message=f"Saved {spec.label.lower()} of {cluster.name} in the Vault. Copy it into your "
+                                 "password manager now: it isn't shown again.")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     # --- SSH key, host key -------------------------------------------------------------------------------
 
@@ -1235,13 +1345,20 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
     async def vm_listing(config: Config, api: PveApi) -> dict[str, Any]:
         """The cluster listing, with what selecting a VM needs: whether it can be, and its pinned host keys."""
         network = vms.subnet(config.values.get("net_gateway"), setting(config, "net_prefix"))
+        exclude = tuple(span for _, _, span in clusters.reserved_addresses(config))
         # The calls block (and wait for the guest agents), so they run in a thread.
-        data = await asyncio.to_thread(lister.list, api, vm_servers(config), network)
+        data = await asyncio.to_thread(lister.list, api, vm_servers(config), network, exclude=exclude)
         pins = keys.pins()
+        drain_default = schema.roles.defaults.get("updates", {}).get(clusters.DRAIN_VAR, False)
+        by_name = {c.name: c for c in config.clusters}
         for row in data["vms"]:
             ok, why = vmplan.selectable(row)
             alias = alias_of(row["vmid"])
-            row.update(selectable=ok, why_not=why, alias=alias,
+            member = clusters.membership(config, row["vmid"], row.get("tags") or [])
+            if member is not None:
+                member["drain"] = member["inventory"] and clusters.drain(config, by_name.get(member["cluster"]),
+                                                                        drain_default)
+            row.update(selectable=ok, why_not=why, alias=alias, k8s=member,
                        pinned=[hostkey(k) for k in pins.get(alias, [])])
         return data
 
@@ -1425,6 +1542,11 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
                                 playbook=vmplan.UPDATES if updates else "baseline", options=options)
         except vmplan.PlanProblem as exc:
             return reply(422, errors=exc.errors)
+        if updates:
+            plan.warnings.extend(clusters.drain_warnings(
+                config, [(t.vmid, t.name) for t in plan.targets],
+                {vmid: list(rows[vmid].get("tags") or []) for vmid in selected if vmid in rows},
+                schema.roles.defaults.get("updates", {}).get(clusters.DRAIN_VAR, False)))
         if options.get("updates_snapshot") == "true":
             try:
                 problems = await asyncio.to_thread(snapshot_problems, api, selected)
@@ -1495,10 +1617,10 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         return ""
 
     def apply_json(run: Run) -> dict[str, Any] | None:
-        """For a VMs page check run: whether its plan can be run for real, and until when."""
-        if run.kind not in VM_RUNS or not run.check:
+        """For a VMs page or Kubernetes check run: whether its plan can be run for real, and until when."""
+        if run.kind not in (*VM_RUNS, K8S_KIND) or not run.check:
             return None
-        problem = apply_problem(run)
+        problem = k8s_apply_problem(run) if run.kind == K8S_KIND else apply_problem(run)
         return {"possible": not problem, "problem": problem,
                 "until": int((run.finished or 0) + CHECK_TTL) if run.finished else None}
 
@@ -1529,6 +1651,104 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
                      confirmed=True)
         return reply(redirect=f"/runs/{started.id}", run=run_json(started))
 
+    # --- Kubernetes runs: playbooks/kubernetes.yml for one cluster, a check first -------------------------------
+
+    def k8s_plan(config: Config, cluster: clusters.Cluster, action: str) -> tuple[dict[str, Any], str]:
+        """What a Kubernetes run is for (the cluster, its version and members), and its hash: a real run repeats a
+        check run of the same plan, with the settings unchanged since."""
+        target = {"cluster": cluster.name, "action": action, "version": str(cluster.values.get("k8s_version") or ""),
+                  "members": clusters.member_names(config, cluster)}
+        text = json.dumps({**target, "settings": runner.settings_digest()}, sort_keys=True)
+        return target, hashlib.sha256(text.encode()).hexdigest()
+
+    def k8s_apply_problem(check: Run | None) -> str:
+        """Why a Kubernetes check run can't be run for real now, or "" if it can."""
+        if check is None or check.kind != K8S_KIND or not check.check or check.applied_from or not check.targets:
+            return "Only a Kubernetes check run started from the Run page can be run for real."
+        if check.status != "succeeded":
+            return "The check run didn't succeed: fix what failed and run the check again."
+        if time.time() - (check.finished or 0) > CHECK_TTL:
+            return "The check run is more than 30 minutes old: run the check again."
+        if any(r.applied_from == check.id for r in runner.history()):
+            return "This check run has been run for real already: run the check again first."
+        if check.settings != runner.settings_digest():
+            return "Settings were saved since the check run: run the check again."
+        config = store.load()
+        target = check.targets[0]
+        cluster = next((c for c in config.clusters if c.name == target.get("cluster")), None)
+        if cluster is None or k8s_plan(config, cluster, str(target.get("action")))[1] != check.plan:
+            return "The cluster changed since the check run: run the check again."
+        return ""
+
+    def k8s_runs(config: Config) -> list[dict[str, Any]]:
+        """The Run page's Kubernetes part: each cluster, what it needs before a run, and the actions."""
+        found = []
+        for cluster in config.clusters:
+            needs = []
+            if not cluster.values.get("k8s_version"):
+                needs.append("a k3s version (Defaults page)")
+            for t in schema.cluster_tokens:
+                if not config.secret_is_set(token_vault_name(t, cluster.name)):
+                    needs.append(f"its {t.label.lower()} (Defaults page)")
+            members = clusters.members(config, cluster.name)
+            if not any(s["k8s_role"] == "server" for s in members) and not cluster.other_members.get("servers"):
+                needs.append("at least one server (Servers page)")
+            found.append({"cluster": cluster.name, "version": str(cluster.values.get("k8s_version") or ""),
+                          "members": clusters.member_names(config, cluster), "needs": needs})
+        return found
+
+    @app.post("/api/kubernetes/run")
+    async def k8s_run(request: Request):
+        """Runs playbooks/kubernetes.yml for one cluster in check mode (--check --diff), with the install or the
+        upgrade tag: nothing on the members changes; its run's page then offers the real run."""
+        require_login(request)
+        form = await checked_form(request)
+        config = store.load()
+        action = str(form.get("action", ""))
+        cluster = next((c for c in config.clusters if c.name == str(form.get("cluster", ""))), None)
+        if action not in K8S_ACTIONS or cluster is None:
+            return reply(422, error="Choose a cluster of the Defaults page and install or upgrade.")
+        entry = next(e for e in k8s_runs(config) if e["cluster"] == cluster.name)
+        if entry["needs"]:
+            return reply(422, error=f"Cluster {cluster.name} needs " + ", ".join(entry["needs"]) + " first.")
+        target, digest = k8s_plan(config, cluster, action)
+        try:
+            started = runner.start(K8S_KIND, True, True, f"k8s_{cluster.name}", store.host_names(), secret_values(),
+                                   kind=K8S_KIND, tags=[action], targets=[target], plan=digest)
+        except RunError as exc:
+            return reply(422, error=exc.message)
+        audit.record("run.check", **who(request), run=started.id, plan=digest, playbook=K8S_KIND, tags=[action],
+                     targets=[target])
+        return reply(redirect=f"/runs/{started.id}", run=run_json(started))
+
+    @app.post("/api/kubernetes/apply")
+    async def k8s_apply(request: Request):
+        """Runs a passing Kubernetes check run for real: the same cluster, tag and settings, within 30 minutes of
+        the check, once, after the user confirmed it; an upgrade's confirmation is the version typed again."""
+        require_login(request)
+        form = await checked_form(request)
+        check = runner.get(str(form.get("run_id", "")))
+        problem = k8s_apply_problem(check)
+        target = check.targets[0] if check and check.targets else {}
+        if not problem and form.get("confirm") is None:
+            problem = "Tick the box to confirm the real run."
+        if not problem and target.get("action") == "upgrade" and \
+                str(form.get("confirm_version", "")).strip() != target.get("version"):
+            problem = f"Type the version the cluster is upgraded to, {target.get('version')}, to confirm the upgrade."
+        if problem:
+            audit.record("run.refused", **who(request), check=check.id if check else None, reason=problem)
+            return reply(422, error=problem)
+        try:
+            started = runner.start(K8S_KIND, False, True, check.limit, store.host_names(), secret_values(),
+                                   kind=K8S_KIND, tags=check.tags, targets=check.targets, plan=check.plan,
+                                   applied_from=check.id)
+        except RunError as exc:
+            audit.record("run.refused", **who(request), check=check.id, reason=exc.message)
+            return reply(422, error=exc.message)
+        audit.record("run.apply", **who(request), run=started.id, check=check.id, plan=check.plan, playbook=K8S_KIND,
+                     tags=check.tags, targets=check.targets, confirmed=True)
+        return reply(redirect=f"/runs/{started.id}", run=run_json(started))
+
     @app.get("/audit.jsonl")
     async def audit_download(request: Request):
         """The audit log, oldest entry first (the rotated files, then the current one)."""
@@ -1546,7 +1766,9 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         require_login(request)
         config = store.load()
         return reply(playbooks=[{"key": k, "playbook": p, "description": d, "extra": list(x)}
-                                for k, (p, d, x) in PLAYBOOKS.items()],
+                                for k, (p, d, x) in PLAYBOOKS.items() if k not in GATED],
+                     kubernetes={"clusters": k8s_runs(config),
+                                 "actions": [{"key": k, "label": label} for k, label in K8S_ACTIONS.items()]},
                      names=sorted(store.host_names()), steps=readiness(config),
                      current_run=run_json(runner.current()),
                      iso_plan=nodes.iso_plan(plan, config, str(setting(config, "pve_iso_storage")), store.cluster(),
@@ -1560,6 +1782,8 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         try:
             if action not in PLAYBOOKS:
                 raise RunError("Choose what to run.")
+            if action in GATED:
+                raise RunError("A Kubernetes run starts from the Kubernetes clusters part of this page, as a check.")
             started = runner.start(action, form.get("check") is not None, form.get("diff") is not None,
                                    str(form.get("limit", "")), store.host_names(), secret_values())
         except RunError as exc:
