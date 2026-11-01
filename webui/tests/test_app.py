@@ -1395,10 +1395,13 @@ ED = "AAAAC3NzaC1lZDI1NTE5AAAAIOMq"
 
 
 def finished(c, run_id):
+    # A run is done before the runner calls its finish hook, which writes a VM run's run.finished entry: wait for
+    # that too, or a test may read the entry of an earlier run.
     deadline = time.time() + 20
     while time.time() < deadline:
         run = c.app_state.runner.get(run_id)
-        if run.done:
+        if run.done and (run.kind not in m.VM_RUNS or any(
+                e["event"] == "run.finished" and e.get("run") == run_id for e in c.app_state.audit.entries())):
             return run
         time.sleep(0.05)
     raise AssertionError("the run didn't finish")
