@@ -112,7 +112,7 @@ Every server's settings are checked before anything is created or downloaded: `v
 | `pve_storage`, `pve_efidisk_format` | `local-lvm`, `raw` | Storage for the VM's disk and its 4 MB EFI disk, and the EFI disk's format (`qcow2` on directory storage). |
 | `pve_tpmstate_storage` | `"{{ pve_storage }}"` | With `vm_disk_encryption`, the storage for the 4 MB vTPM state volume. On another storage than the disk, a copy of the disks' storage alone doesn't hold what unlocks them ([security.md](security.md#secure-boot-and-disk-encryption)). |
 | `pve_bridge`, `pve_vlan` | `vmbr0`, `""` | Bridge and optional VLAN tag (1-4094) of the first network card, `net0`. |
-| `pve_tags` | `[ubuntu, ansible]` | Proxmox tags on the VM. A server in a `k8s_<cluster>_servers` or `_agents` group also gets `usas-k8s-<cluster>-server` or `-agent`. New VMs only. |
+| `pve_tags` | `[<distribution>, ansible]` | Proxmox tags on the VM; the distribution is `vm_os` without its release (`ubuntu`, `debian`, `centos-stream`, `rocky`, `alma`). A server in a `k8s_<cluster>_servers` or `_agents` group also gets `usas-k8s-<cluster>-server` or `-agent`. New VMs only. |
 | `vm_spread_group` | `""` | Servers sharing this name (letters, digits, `.`, `_`, `-`) must have their VMs on different nodes ([disks and placement](#disks-and-placement)). |
 | `vm_cores`, `vm_sockets`, `vm_cpu_type` | `2`, `1`, `host` | CPU. |
 | `vm_memory_mb`, `vm_disk_gb` | `2048`, `32` | Memory and disk size. |

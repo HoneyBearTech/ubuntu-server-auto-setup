@@ -87,7 +87,7 @@
           # Matched by MAC address: the RHEL family's images name the card eth0, the others ens18.
           - primary.match.macaddress is match('bc:24:11:')
           - primary.addresses == ['127.0.0.1/24']
-          - "primary.routes == [{'to': 'default', 'via': '10.10.10.1'}]"
+          - "primary.routes == [{'to': '0.0.0.0/0', 'via': '10.10.10.1'}]"
           - primary.nameservers.addresses == ['10.10.10.1']
 
     - name: Look for the seed ISO and its files
