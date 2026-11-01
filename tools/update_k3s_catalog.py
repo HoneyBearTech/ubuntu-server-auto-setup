@@ -276,12 +276,14 @@ def check_url(url: str) -> None:
         raise CatalogError(f"refusing {url}: only HTTPS from {', '.join(sorted(HOSTS))}")
 
 
-def dearmor(data: bytes) -> bytes:
-    """A binary keyring from an ASCII-armored key block (gpgv reads only binary keyrings everywhere)."""
-    lines = data.decode("ascii").splitlines()
-    start = next((i for i, line in enumerate(lines) if line.startswith("-----BEGIN PGP PUBLIC KEY BLOCK")), None)
+def dearmor(data: bytes, block: str = "PUBLIC KEY BLOCK") -> bytes:
+    """The binary form of an ASCII-armored block: a keyring (gpgv reads only binary keyrings everywhere) or, with
+    block "SIGNATURE", a signature (gpgv 2.4 misreads an armored one without a checksum line, as openpgp.js writes
+    them)."""
+    lines = data.decode("ascii", "replace").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith(f"-----BEGIN PGP {block}")), None)
     if start is None:
-        raise CatalogError("the key file has no ASCII-armored public key block")
+        raise CatalogError(f"no ASCII-armored {block.lower()}")
     body_start = next(i for i in range(start + 1, len(lines)) if not lines[i].strip()) + 1
     body = []
     for line in lines[body_start:]:
@@ -293,35 +295,51 @@ def dearmor(data: bytes) -> bytes:
 
 _CLEARSIGNED = re.compile(
     rb"\A-----BEGIN PGP SIGNED MESSAGE-----\r?\n(?:Hash: [A-Za-z0-9, ]+\r?\n)+\r?\n(?P<text>.*?)\r?\n"
-    rb"-----BEGIN PGP SIGNATURE-----\r?\n.*?-----END PGP SIGNATURE-----\s*\Z", re.DOTALL)
+    rb"(?P<signature>-----BEGIN PGP SIGNATURE-----\r?\n.*?-----END PGP SIGNATURE-----)\s*\Z", re.DOTALL)
 
 
-def clearsigned_text(signed: bytes) -> bytes:
-    """The text of a clear-signed message (dash-escaping undone), which must be the whole file: one message, nothing
-    before or after it that the signature wouldn't cover."""
+def _clearsigned(signed: bytes) -> tuple[list[bytes], bytes]:
+    """A clear-signed message's lines (dash-escaping undone) and its signature, which must be the whole file: one
+    message, nothing before or after it that the signature wouldn't cover."""
     found = _CLEARSIGNED.match(signed)
     if not found or signed.count(b"-----BEGIN PGP S") != 2:
         raise CatalogError("isn't one clear-signed message and nothing else")
-    return b"\n".join(line[2:] if line.startswith(b"- ") else line for line in found["text"].splitlines()) + b"\n"
+    lines = [line[2:] if line.startswith(b"- ") else line for line in found["text"].split(b"\n")]
+    return [line.removesuffix(b"\r") for line in lines], found["signature"] + b"\n"
+
+
+def clearsigned_text(signed: bytes) -> bytes:
+    """The text of a clear-signed message (see _clearsigned)."""
+    return b"\n".join(_clearsigned(signed)[0]) + b"\n"
 
 
 def verify_signature(signature: bytes, key: Key, what: str, data: bytes | None = None, gpgv: str = "gpgv") -> bytes:
     """What's signed, if signature is a good signature by one of key's keys: a detached signature on data, or (data
-    None) a clear-signed message, whose text is returned. Fails otherwise."""
-    text = clearsigned_text(signature) if data is None else data
+    None) a clear-signed message, whose text is returned. Fails otherwise. A clear-signed message is checked as a
+    detached signature on its text as OpenPGP signs it (trailing blanks off, CRLF, no last line break): gpgv 2.4
+    reads the whole file as a clear-signed one and then fails on it, though the signature is good."""
+    text = data
+    if data is None:
+        lines, signature = _clearsigned(signature)
+        text = b"\n".join(lines) + b"\n"
+        data = b"\r\n".join(line.rstrip(b" \t") for line in lines)
+    if signature.lstrip().startswith(b"-----BEGIN PGP SIGNATURE-----"):
+        signature = dearmor(signature, "SIGNATURE")
     with tempfile.TemporaryDirectory(prefix="usas-k3s-catalog-") as tmp:
         folder = pathlib.Path(tmp)
         (folder / "keyring.gpg").write_bytes(dearmor(key.path.read_bytes()))
         (folder / "signature").write_bytes(signature)
-        args = [gpgv, "--status-fd", "1", "--keyring", str(folder / "keyring.gpg"), str(folder / "signature")]
-        if data is not None:
-            (folder / "data").write_bytes(data)
-            args.append(str(folder / "data"))
-        result = subprocess.run(args, capture_output=True, text=True, check=False)  # noqa: S603 (fixed arguments)
+        (folder / "data").write_bytes(data)
+        args = [gpgv, "--status-fd", "1", "--keyring", str(folder / "keyring.gpg"), str(folder / "signature"),
+                str(folder / "data")]
+        result = subprocess.run(args, capture_output=True, check=False)  # noqa: S603 (fixed arguments)
+    # gpgv prints user IDs as they are in the key, which needn't be UTF-8.
+    status = result.stdout.decode("utf-8", "replace")
     # VALIDSIG's last field is the primary key's fingerprint: only the pinned keys pass.
-    signers = re.findall(r"^\[GNUPG:\] VALIDSIG [0-9A-F]{40} .* ([0-9A-F]{40})$", result.stdout, flags=re.MULTILINE)
+    signers = re.findall(r"^\[GNUPG:\] VALIDSIG [0-9A-F]{40} .* ([0-9A-F]{40})$", status, flags=re.MULTILINE)
     if result.returncode != 0 or not signers or not set(signers) <= key.fingerprints:
-        raise CatalogError(f"the signature on {what} is bad or isn't by a pinned key: {result.stderr.strip()}")
+        raise CatalogError(f"the signature on {what} is bad or isn't by a pinned key: "
+                           f"{result.stderr.decode('utf-8', 'replace').strip()}")
     return text
 
 
