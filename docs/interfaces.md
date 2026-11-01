@@ -526,6 +526,16 @@ read-only deploy key) once it runs; the root Application syncs as soon as it can
 step (Helm, the chart and the cluster's objects aren't there to compare with). Removing Argo CD is the GitOps
 repository's business; homelab-kube's `docs/installing.md` ("Uninstalling") shows how.
 
+**In the web UI**, the Defaults page's **Kubernetes clusters** section edits each cluster's variables above (and
+`k8s_api_sources`, `k8s_flannel_backend` and `k8s_longhorn_prereqs` from the [node profile](#kubernetes-nodes))
+as the `vars` of the group `k8s_<cluster>`, a child of `servers`, and sets its two join tokens. The Servers
+page's **Kubernetes cluster** and **Kubernetes role** columns (server, agent or none) put a server into
+`k8s_<cluster>_servers` or `k8s_<cluster>_agents`. What the UI has no field for is kept as it was when it saves:
+other variables of `k8s_<cluster>` (and values it can't show, such as a template), the member groups' own
+`vars`, their hosts' variables, other child groups, and members that aren't on the Servers page; a cluster
+group written under `all` instead of `servers` stays there. The Run page runs `kubernetes.yml` for one cluster
+([the web UI](#the-web-ui)).
+
 ### Vault variables
 
 | Variable | Used by | Meaning |
@@ -536,7 +546,7 @@ repository's business; homelab-kube's `docs/installing.md` ("Uninstalling") show
 | `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
 | `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
 | `vault_disk_passphrase` (optional) | `vm_disk_passphrase` | The disk encryption passphrase, also the recovery key at the console. |
-| `vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>` (for each Kubernetes cluster; a `-` in its name is `_` here) | `playbooks/kubernetes.yml` | The cluster's join tokens, for its servers and for its agents: two different values, each made with `openssl rand -hex 32` (32 to 128 letters and digits). The playbook never makes them. |
+| `vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>` (for each Kubernetes cluster; a `-` in its name is `_` here) | `playbooks/kubernetes.yml` | The cluster's join tokens, for its servers and for its agents: two different values, each made with `openssl rand -hex 32` (32 to 128 letters and digits), or by the web UI's "Make a token and show it once" (Python's `secrets.token_hex(32)`). The playbook never makes them. |
 | `vault_become_password_<group>` (optional, any name you choose) | `ansible_become_password` of a group in `other_servers` | That group's own sudo password, for the updates playbook. |
 
 ### Commands
@@ -580,6 +590,7 @@ options, all optional except `plugin`:
 | `cluster` | the name `/cluster/status` reports, or `pve` | The cluster's name in host key aliases (`^[a-z0-9][a-z0-9-]{0,31}\Z`). |
 | `agent` | `true` | Ask running VMs' guest agents for their addresses and OS (`VM.GuestAgent.Audit`). |
 | `nodes`, `tags_any`, `tags_all`, `pools`, `name_patterns`, `exclude` | `[]` | Filters, all of which a VM must pass: node names, tags (any or all), pools, shell globs of the Proxmox or inventory name, and VM IDs or names to leave out. |
+| `exclude_addresses` | `[]` | Addresses a guest agent may report that are never a VM's own: IPv4 addresses, ranges `a-b` or networks. Every `/32` address, and the `k8s_api_vip` and `k8s_lb_pool` of the static inventory's `k8s_*` groups, are left out without being listed here: kube-vip puts them on whichever member holds them. |
 
 It sets these host variables: `usas_pve_vmid`, `usas_pve_name`, `usas_pve_node` (the node the VM runs on now),
 `usas_pve_tags`, `usas_pve_pool`, `usas_pve_hastate`, `usas_pve_status`, `usas_os_hint` (the guest's own
@@ -641,7 +652,8 @@ The image `honeybeartech/ubuntu-server-auto-setup` on Docker Hub, mirrored to `g
 `linux/amd64` and `linux/arm64`) runs the web UI on port 8080 as UID 10001, with its data in the volume
 mounted at `/data`. Publish the port on `127.0.0.1` only.
 
-- **Pages**: overview, Proxmox, SSH key, defaults, servers, hardening, VMs (the cluster's VMs, and check
+- **Pages**: overview, Proxmox, SSH key, defaults (with the [Kubernetes clusters](#kubernetes-clusters)),
+  servers, hardening, VMs (the cluster's VMs, and check
   runs of the baseline or the updates playbook against the ones selected), updates (each server's newest
   updates result, the schedules, the `updates_*` settings), run, history, account. Each form
   field sets one of the [inventory variables](#inventory-variables) (or a [Vault variable](#vault-variables))
@@ -668,6 +680,12 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   updates playbook in weekly windows from the container's own scheduler (`USAS_SCHEDULER`, on by default), or
   from the host with `docker exec <container> python -m usas_web updates --schedule <id>` (exit status 0 when
   the run, and an install schedule's update, succeeded; 1 otherwise; 2 for an unknown schedule).
+  **Kubernetes**: from the Run page only, `kubernetes.yml` for one cluster (`--limit=k8s_<cluster>`) with
+  `--tags install` or `--tags upgrade`, always in check mode first (`--check --diff`); a check that passed can
+  be run for real once, within 30 minutes, with no settings saved since and the cluster's version and members
+  unchanged, after a confirmation (for an upgrade, the version typed again). Every step is in the audit log.
+  The UI never shows or offers a kubeconfig, never runs `kubectl` itself and never writes to a cluster other
+  than through these runs.
 - **Settings**: the environment variables `USAS_DATA_DIR`, `USAS_VAULT_PASSWORD_FILE`, `USAS_ALLOWED_HOSTS`,
   `USAS_SECURE_COOKIES`, `USAS_TRUSTED_PROXIES`, `USAS_SESSION_HOURS`, `USAS_PUBLIC_URL` (the address
   passkeys belong to), `USAS_PORT` and `USAS_SCHEDULER` (`on` or `off`, the updates schedules)
@@ -680,7 +698,8 @@ mounted at `/data`. Publish the port on `127.0.0.1` only.
   `audit.jsonl` (one JSON object per line: `time`, `event`, `session`, `client`, then the event's fields;
   rotated to `audit.jsonl.1` to `.3` at 5 MB), `schedules.json` (the updates schedules, `0600`),
   `updates/state.json` (each server's newest updates result), `updates/reports/` and `runs/` there
-  ([web-ui.md](web-ui.md#what-is-stored-where)). Variables only the UI uses start with `webui_`
+  ([web-ui.md](web-ui.md#what-is-stored-where)). The Kubernetes clusters are groups of `hosts.yml` and their
+  join tokens are in the Vault ([Kubernetes clusters](#kubernetes-clusters)). Variables only the UI uses start with `webui_`
   (`webui_firewall_allow`, `webui_firewall_allow_host`, `webui_authorize_ui_key`; before 0.7.0 `webui_ufw_allow`
   and `webui_ufw_allow_host`, which the UI still reads).
 - **Health**: `GET /healthz` answers `ok` without a sign-in; the image's `HEALTHCHECK` uses it.

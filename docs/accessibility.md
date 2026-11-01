@@ -55,6 +55,11 @@ On **every pull request** (the required "Web UI tests" check):
     the servers table moves focus to a field of the table. While a run streams its output, focus stays
     where it is, the output isn't a live region, and the run's status changes inside a polite live region
     that was on the page from the start, so "Succeeded" is announced once.
+  - **A Kubernetes cluster by keyboard**: adding one on the Defaults page, picking its version by type-ahead,
+    ticking a packaged component with Space, a token the role would refuse (the summary takes focus, the field
+    is marked and empty again), saving, a token made and shown once and gone after a reload, a server joining
+    it from the Servers page, the Run page's cluster part; axe-core with the error and with the token shown, and
+    the keyboard checks on the Defaults and Run pages with a cluster.
   - **The VMs page**: the column headings are buttons that sort with Enter or Space, keep focus, and set
     `aria-sort` on the sorted column (the caption says how it is sorted too); the filters are labelled
     fields, and the count is a polite live region that changes only when the count does; a refresh every
@@ -146,6 +151,13 @@ nothing uses the accent to mean a warning.
   groups and checkboxes; a snapshot that isn't possible is a disabled checkbox whose help says why. The
   updates results are a table with `<caption>` and `<th scope>`, each status an icon and a word, and the
   package lists in `<details>`.
+- The Defaults page's Kubernetes clusters are each a section with a heading and labelled `<fieldset>`s; the
+  packaged components to leave out are a group of checkboxes with a legend, and the join tokens are password
+  fields whose saved state is announced with them. A token made by the server appears in a status region with a
+  heading and a button to hide it again. The Servers page's cluster and role are labelled dropdowns per row; the
+  Run page's check buttons name their cluster, and an upgrade's confirmation is a labelled text field for the
+  version next to the confirmation checkbox. On the VMs page, a cluster member's role and cluster and a warning
+  when updates don't drain it are text in its name cell, and a labelled dropdown filters by cluster.
 - The Updates page's tables (servers, schedules) have captions and row headers; times are `<time datetime>`.
   The schedule form groups its choices in `<fieldset>`/`<legend>` (what it does, the days as checkboxes),
   takes the start as `<input type="time">` and an explicit time zone, and its errors go to the error summary,
