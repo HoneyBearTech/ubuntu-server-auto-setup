@@ -1,7 +1,8 @@
 {# cloud-init's network configuration (v2) for a cloud-image install: the same cards and settings as the
-   autoinstall user-data's network section (templates/user-data.j2, which tests/fuzz/fuzz_user_data.py
-   compares it with). Each card is matched by its MAC address, not its name: the RHEL family's images name
-   them eth0 and up, the others ens18 and up. Built as data and written with to_nice_yaml, like user-data. #}
+   autoinstall user-data's network section but for the default route's spelling (templates/user-data.j2, which
+   tests/fuzz/fuzz_user_data.py compares it with). Each card is matched by its MAC address, not its name: the RHEL
+   family's images name them eth0 and up, the others ens18 and up. Built as data and written with to_nice_yaml,
+   like user-data. #}
 {% set net = namespace(ethernets={}) %}
 {% for nic in provision_nics %}
 {%   set eth = {'match': {'macaddress': nic.mac | lower}, 'dhcp4': nic.mode == 'dhcp', 'dhcp6': false} %}
@@ -14,7 +15,7 @@
 {%     set eth = eth | combine({'addresses': [nic.address ~ '/' ~ nic.prefix]}) %}
 {%     if nic.gateway | string | length > 0 %}
 {#       0.0.0.0/0, not default: cloud-init 24.4 (the RHEL family's) can't read 'default' and skips the whole
-          network configuration, leaving the image's DHCP card. #}
+          network configuration, leaving the image's DHCP card. Subiquity's user-data keeps 'default'. #}
 {%       set eth = eth | combine({'routes': [{'to': '0.0.0.0/0', 'via': nic.gateway | string}]}) %}
 {%     endif %}
 {%   endif %}

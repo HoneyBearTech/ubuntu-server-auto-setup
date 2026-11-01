@@ -22,8 +22,7 @@
 {%   elif nic.mode == 'static' %}
 {%     set eth = eth | combine({'addresses': [nic.address ~ '/' ~ nic.prefix]}) %}
 {%     if nic.gateway | string | length > 0 %}
-{#       Spelled as in network-config.j2, which the RHEL family's cloud-init needs. #}
-{%       set eth = eth | combine({'routes': [{'to': '0.0.0.0/0', 'via': nic.gateway | string}]}) %}
+{%       set eth = eth | combine({'routes': [{'to': 'default', 'via': nic.gateway | string}]}) %}
 {%     endif %}
 {%   endif %}
 {%   if loop.first and (nic.mode == 'static' or net_dns or net_search) %}

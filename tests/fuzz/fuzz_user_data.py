@@ -143,7 +143,7 @@ def expected_ethernet(nic, first, values):
     elif nic["mode"] == "static":
         eth["addresses"] = [f"{nic['address']}/{nic['prefix']}"]
         if str(nic["gateway"]):
-            eth["routes"] = [{"to": "0.0.0.0/0", "via": str(nic["gateway"])}]
+            eth["routes"] = [{"to": "default", "via": str(nic["gateway"])}]
     if first and (nic["mode"] == "static" or values["net_dns"] or values["net_search"]):
         eth["nameservers"] = {"addresses": values["net_dns"], "search": values["net_search"]}
     if str(nic["mtu"]):
@@ -248,7 +248,7 @@ def one_input(data):
         assert ethernets[name] == expected_ethernet(nic, i == 0, values), (ethernets[name], nic)
     if values["net_mode"] == "static":
         assert ethernets["primary"]["addresses"] == [f"{values['ansible_host']}/{values['net_prefix']}"]
-    routes = [r for eth in ethernets.values() for r in eth.get("routes", []) if r["to"] == "0.0.0.0/0"]
+    routes = [r for eth in ethernets.values() for r in eth.get("routes", []) if r["to"] == "default"]
     assert len(routes) + (values["net_mode"] == "dhcp") == 1, ethernets
     layout = {"name": values["autoinstall_storage_layout"]}
     if values["autoinstall_storage_layout"] == "lvm":
@@ -282,8 +282,11 @@ def one_input(data):
     meta = yaml.safe_load(META_DATA.render(values))
     assert meta == {"instance-id": f"{host}-{values['pve_vmid']}", "local-hostname": host}, meta
 
-    # A cloud image's seed: the same network in a file of its own, the same user, keys and sudo.
-    assert yaml.safe_load(NETWORK_CONFIG.render(values)) == {"version": 2, "ethernets": ethernets}
+    # A cloud image's seed: the same network in a file of its own, the default route spelled 0.0.0.0/0 (the RHEL
+    # family's cloud-init can't read "default"), and the same user, keys and sudo.
+    cloud_ethernets = {name: {**eth, "routes": [{**r, "to": "0.0.0.0/0"} for r in eth["routes"]]} if "routes" in eth
+                       else eth for name, eth in ethernets.items()}
+    assert yaml.safe_load(NETWORK_CONFIG.render(values)) == {"version": 2, "ethernets": cloud_ethernets}
     text = CLOUD_USER_DATA.render(values)
     assert text.startswith("#cloud-config\n"), text[:40]
     cloud = yaml.safe_load(text)
