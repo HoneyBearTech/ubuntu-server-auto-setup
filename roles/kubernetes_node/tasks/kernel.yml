@@ -1,12 +1,15 @@
 ---
-# A minimal EL image has no modules-load.d until something puts a file there.
-- name: Create the modules-load.d directory
+# A minimal EL image has no modules-load.d or sysctl.d until something puts a file there.
+- name: Create the modules-load.d and sysctl.d directories
   ansible.builtin.file:
-    path: "{{ k8s_node_modules_file | dirname }}"
+    path: "{{ item | dirname }}"
     state: directory
     owner: root
     group: root
     mode: "0755"
+  loop:
+    - "{{ k8s_node_modules_file }}"
+    - "{{ k8s_node_sysctl_file }}"
 
 - name: Load the kernel modules at boot
   ansible.builtin.copy:
