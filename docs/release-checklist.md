@@ -123,7 +123,7 @@ be tagged; replace them with yours.
   pool address, the agent on AlmaLinux runs a pod with no AVC denial, and the read-only kubeconfig lists the
   nodes from the control node but can't read Secrets. Install Longhorn (homelab-kube's way, or its Helm chart):
   its manager runs on every agent and each agent's disk is Schedulable. Stop the VM that holds the VIP: the API
-  answers on it again within about 15 s, from another server, and `etcd` keeps working with two of three. Then
+  answers on it again within about 30 s, from another server, and `etcd` keeps working with two of three. Then
   reboot one Proxmox node that holds a server (its VMs stop with it, or migrate them away first): the API stays
   up, and every node is Ready again once it's back. A second `make kubernetes` changes nothing. Remove the VMs,
   their disks and the read-only kubeconfig afterwards ([clean-up](#clean-up)):

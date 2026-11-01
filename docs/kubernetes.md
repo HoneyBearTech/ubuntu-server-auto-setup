@@ -135,7 +135,7 @@ KUBECONFIG=inventory/kube/lab-readonly.yaml kubectl get nodes,pods -A
 ## 4. The VIP and the pool
 
 With `k8s_api_vip`, [kube-vip](https://kube-vip.io/) runs on every server and one of them holds the address,
-answering ARP for it. If that server stops, another takes the address within about 15 seconds, and it doesn't
+answering ARP for it. If that server stops, another takes the address within about 20 seconds (kube-vip's default lease), and it doesn't
 move back by itself. The API's certificate is valid for the VIP, and every member joins the cluster through
 it, so the first server isn't special once the cluster runs. Without a VIP, every member joins through the
 first server's own address, and the cluster's API is that server's.
