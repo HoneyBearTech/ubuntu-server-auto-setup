@@ -1,0 +1,27 @@
+---
+# Added to tests/inventory/hosts.yml (a second -i) by tests/baseline.sh: srv-01 is the first server of cluster test,
+# with a second server and an agent that exist only here (documentation addresses; the runs --limit srv-01). The
+# firewall_allow rule on the kubelet's port is the owner's, so it stays when the role removes rules it no longer needs.
+all:
+  children:
+    servers:
+      hosts:
+        srv-01:
+          k8s_node_ip: 192.0.2.11
+          k8s_api_sources: [198.51.100.0/24]
+          firewall_allow:
+            - { port: "10250", proto: tcp, from: 203.0.113.9, comment: kubelet-scraper }
+    k8s_test:
+      vars:
+        k8s_longhorn_prereqs: true
+      children:
+        k8s_test_servers:
+          hosts:
+            srv-01:
+            k8s-s2:
+              ansible_host: 192.0.2.12
+        k8s_test_agents:
+          hosts:
+            k8s-a1:
+              k8s_node_ip: 192.0.2.21
+              ansible_host: k8s-a1.example.net

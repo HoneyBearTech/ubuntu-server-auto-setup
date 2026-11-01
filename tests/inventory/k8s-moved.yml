@@ -1,0 +1,20 @@
+---
+# Replaces tests/inventory/k8s.yml in one step of tests/baseline.sh: the second server has left the cluster and the
+# agent has a new address, so their rules on srv-01 must go; the flannel backend is wireguard-native, so 8472/udp
+# goes too and 51820/udp comes in; Longhorn's prerequisites are off.
+all:
+  children:
+    servers:
+      hosts:
+        srv-01:
+          k8s_node_ip: 192.0.2.11
+          k8s_flannel_backend: wireguard-native
+          firewall_allow:
+            - { port: "10250", proto: tcp, from: 203.0.113.9, comment: kubelet-scraper }
+    k8s_test_servers:
+      hosts:
+        srv-01:
+    k8s_test_agents:
+      hosts:
+        k8s-a1:
+          k8s_node_ip: 192.0.2.22

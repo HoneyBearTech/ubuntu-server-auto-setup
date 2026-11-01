@@ -47,8 +47,9 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
 - Optional IPv6 network configuration, and more disk layouts.
 - Done: extra data disks, formatted and mounted by label while blank, and spread groups that keep a set of
   VMs on different nodes ([interfaces.md](interfaces.md#disks-and-placement)).
-- Kubernetes (k3s) clusters on Proxmox: the VMs' disks, placement and tags first (done), then a node profile,
-  the k3s install with its API address, upgrades in drain-aware waves and web UI fields.
+- Kubernetes (k3s) clusters on Proxmox: the VMs' disks, placement and tags first (done), then a node profile
+  (done: [interfaces.md](interfaces.md#kubernetes-nodes)), the k3s install with its API address, upgrades in
+  drain-aware waves and web UI fields.
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 

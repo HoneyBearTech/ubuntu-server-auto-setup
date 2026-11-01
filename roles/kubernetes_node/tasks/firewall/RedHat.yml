@@ -1,0 +1,48 @@
+---
+# firewalld: rich rules in the default zone (no trusted zone for the pod network: k3s doesn't need one). Rich rules
+# carry no comment, so on a member the role owns the k3s ports (k8s_node_owned_ports): a rich rule on one of them
+# from an address the cluster doesn't need is removed, unless firewall_allow adds it.
+- name: Look for firewalld
+  ansible.builtin.stat:
+    path: /usr/bin/firewall-cmd
+  register: k8s_node_firewalld
+
+# A check run on a fresh server: the firewall role would install firewalld first.
+- name: Fail unless firewalld is installed
+  ansible.builtin.assert:
+    that: k8s_node_firewalld.stat.exists or ansible_check_mode
+    fail_msg: "{{ inventory_hostname }} has no firewalld: run the whole baseline (the firewall role installs it)."
+    quiet: true
+
+- name: Allow k3s between members
+  ansible.posix.firewalld:
+    zone: "{{ k8s_node_firewalld_zone }}"
+    rich_rule: "{{ item | k8s_firewalld_rule }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ k8s_node_rules }}"
+  loop_control:
+    label: "{{ item.port }}/{{ item.proto }} from {{ item.from }}"
+  when: k8s_node_firewalld.stat.exists
+
+- name: List firewalld's rich rules
+  ansible.builtin.command:
+    argv: [firewall-cmd, --permanent, "--zone={{ k8s_node_firewalld_zone }}", --list-rich-rules]
+  register: k8s_node_rich_rules
+  changed_when: false
+  check_mode: false
+  when: k8s_node_firewalld.stat.exists
+
+- name: Remove k3s rules the cluster no longer needs
+  ansible.posix.firewalld:
+    zone: "{{ k8s_node_firewalld_zone }}"
+    rich_rule: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: disabled
+  loop: >-
+    {{ k8s_node_rich_rules.stdout_lines | k8s_firewalld_stale(k8s_node_rules, k8s_node_owned_ports,
+       [{'proto': 'tcp', 'from': 'any'}] | product(firewall_allow | default([])) | map('combine')
+       | map('k8s_firewalld_rule') | list) }}
+  when: k8s_node_firewalld.stat.exists

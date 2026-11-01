@@ -1,0 +1,22 @@
+---
+# The kubelet expects no swap. /etc/fstab's swap lines are commented out, so it stays off after a reboot.
+- name: Leave swap off at boot
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*[^#\s]\S*\s+\S+\s+swap\s.*)$'
+    replace: '#\1'
+
+# In a container swapoff would act on the host's swap: only the fstab line is the container's.
+- name: Read the swap in use
+  ansible.builtin.command:
+    argv: [swapon, --show=NAME, --noheadings]
+  register: k8s_node_swap
+  changed_when: false
+  check_mode: false
+  when: not k8s_node_in_container
+
+- name: Turn swap off now
+  ansible.builtin.command:
+    argv: [swapoff, --all]
+  changed_when: true
+  when: not k8s_node_in_container and k8s_node_swap.stdout | trim | length > 0

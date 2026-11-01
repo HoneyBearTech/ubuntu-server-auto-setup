@@ -1,0 +1,43 @@
+---
+# UFW: each rule carries the comment "usas-k8s <cluster>", so a rule from an earlier run that the cluster no longer
+# needs (a member that left or moved, the other flannel backend) is found and removed.
+- name: Look for UFW
+  ansible.builtin.stat:
+    path: /usr/sbin/ufw
+  register: k8s_node_ufw
+
+# A check run on a fresh server: the firewall role would install UFW first.
+- name: Fail unless UFW is installed
+  ansible.builtin.assert:
+    that: k8s_node_ufw.stat.exists or ansible_check_mode
+    fail_msg: "{{ inventory_hostname }} has no UFW: run the whole baseline (the firewall role installs it)."
+    quiet: true
+
+- name: Allow k3s between members
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    from_ip: "{{ item.from }}"
+    comment: "{{ item.comment }}"
+  loop: "{{ k8s_node_rules }}"
+  loop_control:
+    label: "{{ item.port }}/{{ item.proto }} from {{ item.from }}"
+  when: k8s_node_ufw.stat.exists
+
+- name: List UFW's rules
+  ansible.builtin.command:
+    argv: [ufw, show, added]
+  register: k8s_node_ufw_added
+  changed_when: false
+  check_mode: false
+  when: k8s_node_ufw.stat.exists
+
+- name: Remove k3s rules the cluster no longer needs
+  ansible.builtin.command:
+    argv: "{{ ['ufw'] + item }}"
+  changed_when: true
+  loop: "{{ k8s_node_ufw_added.stdout_lines | k8s_ufw_stale(k8s_node_rules, k8s_node_comment) }}"
+  loop_control:
+    label: "{{ item[2:] | join(' ') }}"
+  when: k8s_node_ufw.stat.exists

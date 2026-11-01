@@ -1,0 +1,18 @@
+---
+# A Kubernetes node. The baseline runs this role only on servers in a k8s_<cluster>_servers or k8s_<cluster>_agents
+# group (one per server). It prepares the server for k3s: firewall rules between the cluster's members, the kernel
+# modules and settings k3s needs, swap off, and on the RHEL family k3s' SELinux policy. It doesn't install k3s.
+
+# The address the other members reach this one on, and the one their firewall rules allow: an IPv4 address. Empty
+# takes ansible_host, which must then be an IPv4 address (a server on DHCP needs k8s_node_ip set).
+k8s_node_ip: ""
+# Who else may reach the Kubernetes API (6443/tcp) on the cluster's servers, besides its members: IPv4 addresses or
+# networks (CIDR), or "any". Add the control node to run kubectl from it.
+k8s_api_sources: []
+# How the pod network crosses between nodes: vxlan (8472/udp) or wireguard-native (51820/udp, encrypted). Set it
+# for the whole cluster (group_vars of the cluster's parent group).
+k8s_flannel_backend: vxlan
+# Longhorn's node prerequisites: the iSCSI initiator (open-iscsi, or iscsi-initiator-utils on the RHEL family) with
+# iscsid running, the NFS client, the iscsi_tcp module, and multipathd (where it's installed) told to leave sd*
+# disks alone. Turning it off again removes the module and multipathd files, not the packages.
+k8s_longhorn_prereqs: false

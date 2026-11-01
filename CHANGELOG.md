@@ -42,6 +42,16 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   workflow runs it for every release, weekly, by hand, and on pull requests that change the catalog, the seed
   templates or the test.
 
+- **Kubernetes node profile** ([docs/interfaces.md](docs/interfaces.md#kubernetes-nodes)): the baseline's new
+  `kubernetes_node` role prepares every server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group for
+  k3s, and leaves other servers alone. k3s' ports open only to the other members' own addresses (flannel and the
+  kubelet from every member; on servers also the API from the members and `k8s_api_sources`, and etcd from the
+  other servers), with rules for members that left removed; the `br_netfilter` and `overlay` modules,
+  forwarding and bridged traffic through iptables; swap off; a running time service required; Longhorn's
+  prerequisites with `k8s_longhorn_prereqs`; and on the RHEL family k3s' SELinux policy from Rancher's
+  repository, its key pinned by fingerprint (release 9 only: Rancher has no stable build for 10 yet). It
+  doesn't install k3s. **New outbound dependency** on the RHEL family: `rpm.rancher.io`, for Kubernetes nodes
+  only.
 - **Extra disks, spread groups and Kubernetes tags for VMs** ([docs/interfaces.md](docs/interfaces.md#disks-and-placement)):
   - `vm_extra_disks` adds empty disks (`scsi1` and up, each with the serial `usas-<label>`) to a new VM after its
     install, and the baseline's new `data_disks` role formats each one while it's blank (`ext4` or `xfs`) and mounts

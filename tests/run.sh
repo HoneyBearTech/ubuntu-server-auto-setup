@@ -773,6 +773,10 @@ published || { echo "ERROR: turning firewall_docker_enabled off left the publish
 play tests/verify-docker-ports.yml -e ansible_port=2222 -e expect_docker_rules=false
 docker exec "$SRV" sh -c 'systemctl stop docker && rm /etc/systemd/system/docker.service && systemctl daemon-reload'
 
+# The Kubernetes node profile (roles/kubernetes_node), shared with tests/baseline.sh.
+# shellcheck source=tests/kubernetes-node.sh
+. tests/kubernetes-node.sh
+
 step "baseline: sudo-rs without the classic sudo is refused before anything changes"
 cool_down
 docker exec "$SRV" mv /usr/bin/sudo.ws /usr/bin/sudo.ws.hidden
@@ -784,6 +788,6 @@ step "Task coverage"
 # The updates role has its own suite and figure (tests/updates.sh).
 # Ubuntu only here: the RHEL family's task files are tests/baseline.sh's.
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --skip-roles updates \
-  --skip-files '*/RedHat.yml,roles/common/tasks/epel.yml'
+  --skip-files '*/RedHat.yml,roles/common/tasks/epel.yml,roles/kubernetes_node/tasks/selinux.yml'
 
 step "All integration tests passed"

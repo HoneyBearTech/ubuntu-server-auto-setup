@@ -1,0 +1,115 @@
+---
+# Checks what roles/kubernetes_node leaves on srv-01 with tests/inventory/k8s.yml (or, with -e expect_moved=true,
+# tests/inventory/k8s-moved.yml): exactly the firewall rules k3s needs from the other members, the owner's own rule
+# on the kubelet's port still there, the kernel modules and settings, swap commented out of /etc/fstab, Longhorn's
+# prerequisites (or their files gone), and k3s' SELinux policy on the RHEL family. The expected rules are written
+# out here, not worked out with the role's filters. tests/baseline.sh runs it.
+- name: Verify the Kubernetes node
+  hosts: srv-01
+  become: true
+  gather_facts: true
+  vars:
+    expect_moved: false
+    verify_rules: >-
+      {{ [['51820', 'udp', '192.0.2.22'], ['10250', 'tcp', '192.0.2.22'], ['6443', 'tcp', '192.0.2.22']]
+         if expect_moved | bool else
+         [['8472', 'udp', '192.0.2.12'], ['10250', 'tcp', '192.0.2.12'], ['6443', 'tcp', '192.0.2.12'],
+          ['2379:2380', 'tcp', '192.0.2.12'],
+          ['8472', 'udp', '192.0.2.21'], ['10250', 'tcp', '192.0.2.21'], ['6443', 'tcp', '192.0.2.21'],
+          ['6443', 'tcp', '198.51.100.0/24']] }}
+    verify_owner_rule: ['10250', 'tcp', '203.0.113.9']
+  pre_tasks:
+    - name: Use a sudo that Ansible can give the password to
+      ansible.builtin.import_tasks: ../playbooks/tasks/classic_sudo.yml
+  tasks:
+    - name: List UFW's rules
+      ansible.builtin.command:
+        argv: [ufw, show, added]
+      register: verify_ufw
+      changed_when: false
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Check UFW's k3s rules
+      ansible.builtin.assert:
+        that:
+          - verify_ufw.stdout_lines | select('search', "comment 'usas-k8s test'$") | sort
+            == verify_rules | map('join', ' ') | map('regex_replace', '^(\\S+) (\\S+) (\\S+)$',
+              "ufw allow from \\3 to any port \\1 proto \\2 comment 'usas-k8s test'") | sort
+          - '"ufw allow from 203.0.113.9 to any port 10250 proto tcp comment ''kubelet-scraper''" in verify_ufw.stdout_lines'
+        fail_msg: "UFW's rules on srv-01: {{ verify_ufw.stdout_lines }}"
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: List firewalld's rich rules
+      ansible.builtin.command:
+        argv: [firewall-cmd, --permanent, --list-rich-rules]
+      register: verify_rich
+      changed_when: false
+      when: ansible_facts.os_family == 'RedHat'
+
+    # Every rich rule on a k3s port: the expected ones and the owner's, nothing else.
+    - name: Check firewalld's k3s rules
+      ansible.builtin.assert:
+        that:
+          - verify_rich.stdout_lines | select('search', 'port="(8472|51820|10250|6443|2379-2380)"') | sort
+            == (verify_rules + [verify_owner_rule]) | map('join', ' ') | map('regex_replace', '^(\\S+) (\\S+) (\\S+)$',
+              'rule family="ipv4" source address="\\3" port port="\\1" protocol="\\2" accept')
+              | map('replace', '2379:2380', '2379-2380') | sort
+        fail_msg: "firewalld's rich rules on srv-01: {{ verify_rich.stdout_lines }}"
+      when: ansible_facts.os_family == 'RedHat'
+
+    - name: Read the kernel settings and modules files
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: verify_kernel_files
+      loop: [/etc/sysctl.d/91-usas-kubernetes.conf, /etc/modules-load.d/usas-kubernetes.conf, /etc/fstab]
+
+    - name: Read the live forwarding setting
+      ansible.builtin.command:
+        argv: [sysctl, --values, net.ipv4.ip_forward]
+      register: verify_forward
+      changed_when: false
+
+    - name: Check the kernel settings, modules and swap
+      ansible.builtin.assert:
+        that:
+          - (verify_kernel_files.results[0].content | b64decode) is search('(?m)^net\.ipv4\.ip_forward = 1$')
+          - (verify_kernel_files.results[0].content | b64decode) is search('(?m)^net\.bridge\.bridge-nf-call-iptables = 1$')
+          - (verify_kernel_files.results[1].content | b64decode) is search('(?m)^br_netfilter$')
+          - (verify_kernel_files.results[1].content | b64decode) is search('(?m)^overlay$')
+          - verify_forward.stdout | trim == '1'
+          - (verify_kernel_files.results[2].content | b64decode) is search('(?m)^#/swap\.img\s+none\s+swap\s')
+          - (verify_kernel_files.results[2].content | b64decode) is not search('(?m)^[^#\s]\S*\s+\S+\s+swap\s')
+        quiet: true
+
+    - name: List the packages
+      ansible.builtin.package_facts:
+
+    - name: Look for Longhorn's modules file
+      ansible.builtin.stat:
+        path: /etc/modules-load.d/usas-longhorn.conf
+      register: verify_longhorn_modules
+
+    - name: Check Longhorn's prerequisites
+      ansible.builtin.assert:
+        that:
+          - verify_longhorn_modules.stat.exists != expect_moved | bool
+          - expect_moved | bool or verify_longhorn_packages | difference(ansible_facts.packages) | length == 0
+        fail_msg: "Longhorn's packages or iscsi_tcp file on srv-01 aren't as expected (moved: {{ expect_moved }})."
+      vars:
+        verify_longhorn_packages: "{{ ['open-iscsi', 'nfs-common'] if ansible_facts.os_family == 'Debian'
+          else ['iscsi-initiator-utils', 'nfs-utils'] }}"
+
+    - name: Read Rancher's repository file
+      ansible.builtin.slurp:
+        src: /etc/yum.repos.d/rancher-k3s-common-stable.repo
+      register: verify_rancher_repo
+      when: ansible_facts.os_family == 'RedHat'
+
+    - name: Check k3s' SELinux policy and where it came from
+      ansible.builtin.assert:
+        that:
+          - "'k3s-selinux' in ansible_facts.packages and 'container-selinux' in ansible_facts.packages"
+          - (verify_rancher_repo.content | b64decode) is search('(?m)^gpgcheck = 1$')
+          - (verify_rancher_repo.content | b64decode) is search('(?m)^repo_gpgcheck = 0$')
+        quiet: true
+      when: ansible_facts.os_family == 'RedHat'

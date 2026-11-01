@@ -1,0 +1,60 @@
+---
+# Longhorn's node prerequisites (k8s_longhorn_prereqs): it attaches its volumes over iSCSI and serves RWX volumes over
+# NFS, and multipathd mustn't claim the sd* disks those volumes appear as.
+- name: Install the iSCSI initiator and the NFS client
+  ansible.builtin.package:
+    name: "{{ k8s_node_longhorn_packages[ansible_facts.os_family] }}"
+    state: present
+  register: k8s_node_longhorn_install
+  when: k8s_longhorn_prereqs | bool
+
+- name: Load iscsi_tcp at boot
+  ansible.builtin.copy:
+    dest: "{{ k8s_node_longhorn_modules_file }}"
+    content: |
+      # {{ ansible_managed }}
+      # Longhorn's iSCSI (kubernetes_node, k8s_longhorn_prereqs).
+      iscsi_tcp
+    owner: root
+    group: root
+    mode: "0644"
+  when: k8s_longhorn_prereqs | bool
+
+- name: Load iscsi_tcp now
+  community.general.modprobe:
+    name: iscsi_tcp
+    state: present
+  when: k8s_longhorn_prereqs | bool and not k8s_node_in_container
+
+# iscsid needs the host kernel's iSCSI support, which a container doesn't have.
+- name: Start iscsid
+  ansible.builtin.systemd_service:
+    name: iscsid
+    enabled: true
+    state: "{{ omit if k8s_node_in_container else 'started' }}"
+  when: k8s_longhorn_prereqs | bool and not (ansible_check_mode and k8s_node_longhorn_install is changed)
+
+- name: Leave sd* disks to Longhorn in multipathd
+  ansible.builtin.copy:
+    dest: "{{ k8s_node_multipath_file }}"
+    content: |
+      # {{ ansible_managed }}
+      # Longhorn's volumes are sd* disks: multipathd leaves them alone (kubernetes_node, k8s_longhorn_prereqs).
+      blacklist {
+          devnode "^sd[a-z0-9]+"
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload multipathd
+  when: k8s_longhorn_prereqs | bool and 'multipathd.service' in ansible_facts.services
+
+- name: Remove Longhorn's files when it's turned off
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ k8s_node_longhorn_modules_file }}"
+    - "{{ k8s_node_multipath_file }}"
+  notify: Reload multipathd
+  when: not k8s_longhorn_prereqs | bool

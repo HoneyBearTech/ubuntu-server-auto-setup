@@ -30,7 +30,7 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
-| `k8s_<cluster>_servers`, `k8s_<cluster>_agents` | a Kubernetes cluster's servers and agents, inside `servers` (cluster name `^[a-z][a-z0-9-]{0,30}\Z`, a server in at most one of these groups). Today they tag the VM `usas-k8s-<cluster>-server` or `-agent` when it's created; installing k3s comes later | as in `servers` |
+| `k8s_<cluster>_servers`, `k8s_<cluster>_agents` | a Kubernetes cluster's servers and agents, inside `servers` (cluster name `^[a-z][a-z0-9-]{0,30}\Z`, a server in at most one of these groups). They tag the VM `usas-k8s-<cluster>-server` or `-agent` when it's created, and the baseline prepares each member for k3s ([Kubernetes nodes](#kubernetes-nodes)); installing k3s comes later | as in `servers` |
 | `ubuntu_servers` | the group's name before 0.7.0: still read, with `servers`, until 1.0 (each run says so) | as in `servers` |
 | `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
 | `usas_pve_vms` | made by the cluster inventory (`usas_pve`): VMs of the cluster that aren't in the static inventory, as `vm-<vmid>`, to update | SSH with the group's own login (`group_vars/usas_pve_vms.yml`), host key pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
@@ -353,6 +353,45 @@ too, add an HA node affinity rule (Proxmox VE 9) or HA group (Proxmox VE 8) for 
 Until the web UI has fields for them, a web UI save keeps only what it can show, so set `vm_extra_disks` and
 `vm_spread_group` in `host_vars/<server>.yml` next to the inventory (the UI doesn't write that folder); the
 `k8s_*` groups need an inventory of your own for now.
+
+### Kubernetes nodes
+
+A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group is a member of that cluster, and the
+baseline's `kubernetes_node` role (tag `kubernetes`) prepares it for k3s. It doesn't install k3s. Servers in no
+such group are left alone.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `k8s_node_ip` | `""` | The member's address on the cluster's network: an IPv4 address. Empty takes `ansible_host`, which must then be an IPv4 address too, so a server on DHCP needs this set. Every member's differs. |
+| `k8s_api_sources` | `[]` | Who else may reach the Kubernetes API (6443/tcp) on the cluster's servers, besides its members: IPv4 addresses or networks (CIDR), or `any`. Add the control node to run `kubectl` from it. |
+| `k8s_flannel_backend` | `vxlan` | How pod traffic crosses between nodes: `vxlan` (8472/udp) or `wireguard-native` (51820/udp, encrypted). Set it for the whole cluster. |
+| `k8s_longhorn_prereqs` | `false` | Longhorn's node prerequisites: the iSCSI initiator (`open-iscsi`, or `iscsi-initiator-utils` on the RHEL family) with `iscsid` running, the NFS client, the `iscsi_tcp` module, and `multipathd` (where it's installed) told to leave `sd*` disks alone. Turned off again, the module and `multipathd` files go; the packages stay. |
+
+What the role does on each member:
+
+- **Firewall:** each rule allows one port from one member's address, never a whole network: flannel's port
+  (udp) and the kubelet's 10250/tcp from every other member; on a server also 6443/tcp from every other member
+  and `k8s_api_sources`, and etcd's 2379:2380/tcp from the other servers. On UFW each rule carries the comment
+  `usas-k8s <cluster>`; on firewalld they are rich rules in the default zone. A rule from an earlier run that the
+  cluster no longer needs (a member that left or moved, the other flannel backend) is removed. firewalld's rich
+  rules carry no comment, so there the role removes any rich rule on a k3s port (8472/udp, 51820/udp, 10250/tcp,
+  6443/tcp, 2379-2380/tcp) that it doesn't need, except those `firewall_allow` adds. Pod traffic between nodes
+  needs no rule of its own: UFW's forward chains log it as blocked before flannel's own rules accept it.
+- **Kernel:** the `br_netfilter` and `overlay` modules, loaded now and at boot
+  (`/etc/modules-load.d/usas-kubernetes.conf`); `net.ipv4.ip_forward` and `net.bridge.bridge-nf-call-iptables`
+  and `-ip6tables` set to 1 (`/etc/sysctl.d/91-usas-kubernetes.conf`). The run stops if `hardening_sysctl` or
+  `hardening_sysctl_extra` sets one of them otherwise.
+- **Swap** off now, and its `/etc/fstab` lines commented out.
+- **Time:** the run stops unless a time service (chrony or systemd-timesyncd) runs, since etcd needs the
+  servers' clocks in step.
+- **The RHEL family:** k3s' SELinux policy (`k3s-selinux`, with `container-selinux`) from Rancher's stable
+  repository. Rancher's signing key is checked against its pinned fingerprint before rpm trusts it, and dnf
+  checks every package against it (`gpgcheck=1`); Rancher doesn't sign the repository's metadata, so
+  `repo_gpgcheck` stays off. Rancher has no stable build for release 10 yet, so a member on AlmaLinux, Rocky
+  Linux or CentOS Stream 10 is refused before anything changes.
+
+A server that leaves every `k8s_*` group keeps what the role set up; remove its rules by hand
+(`ufw status numbered`, `firewall-cmd --list-rich-rules`).
 
 ### Vault variables
 

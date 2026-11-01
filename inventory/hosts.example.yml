@@ -99,6 +99,20 @@ all:
         # cp-1: { ansible_host: 10.10.10.71, pve_vmid: 4071, pve_node: pve-a, vm_spread_group: k8s-lab-servers }
         # cp-2: { ansible_host: 10.10.10.72, pve_vmid: 4072, pve_node: pve-b, vm_spread_group: k8s-lab-servers }
         # cp-3: { ansible_host: 10.10.10.73, pve_vmid: 4073, pve_node: pve-c, vm_spread_group: k8s-lab-servers }
+      # A Kubernetes cluster "lab": the baseline gives its members k3s' firewall rules from each other member, its
+      # kernel settings and swap off, and Longhorn's prerequisites to the agents (docs/interfaces.md#kubernetes-nodes).
+      # Move cp-1 to cp-3 from hosts above into k8s_lab_servers.
+      # children:
+      #   k8s_lab_servers:
+      #     hosts: {cp-1: {}, cp-2: {}, cp-3: {}}
+      #     vars: {k8s_api_sources: [10.10.10.5]}   # the control node, for kubectl
+      #   k8s_lab_agents:
+      #     hosts:
+      #       w-1:
+      #         ansible_host: 10.10.10.81
+      #         pve_vmid: 4081
+      #         vm_extra_disks: [{size_gb: 100, label: longhorn, mount: /var/lib/longhorn}]
+      #     vars: {k8s_longhorn_prereqs: true}
 
     # Servers this project didn't install, for the updates playbook only (make updates-check, make updates);
     # the other playbooks never touch them. Each needs its own login and sudo: passwordless sudo, or its own

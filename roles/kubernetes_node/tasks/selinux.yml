@@ -1,0 +1,26 @@
+---
+# The RHEL family: k3s' SELinux policy, so k3s and its containers run confined with SELinux enforcing. Rancher's key is
+# checked against the pinned fingerprint before rpm trusts it; dnf then checks every package against it.
+- name: Trust Rancher's package signing key
+  ansible.builtin.rpm_key:
+    key: "{{ k8s_node_rancher_key_url }}"
+    fingerprint: "{{ k8s_node_rancher_key_fingerprint }}"
+    state: present
+
+- name: Add Rancher's k3s-selinux repository
+  ansible.builtin.yum_repository:
+    name: rancher-k3s-common-stable
+    description: Rancher k3s common packages (stable)
+    baseurl: "{{ k8s_node_rancher_repo_url }}"
+    gpgkey: "{{ k8s_node_rancher_key_url }}"
+    gpgcheck: true
+    repo_gpgcheck: false
+    enabled: true
+  register: k8s_node_rancher_repo
+
+# A check run before the repository is there can't ask it about the packages.
+- name: Install k3s' SELinux policy
+  ansible.builtin.dnf:
+    name: "{{ k8s_node_selinux_packages }}"
+    state: present
+  when: not (ansible_check_mode and k8s_node_rancher_repo is changed)

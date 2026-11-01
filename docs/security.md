@@ -108,6 +108,14 @@ defaults and the advice in the README's "Running it securely" section and in [we
   nothing, found by the serial it was created with, never by its kernel name; a disk that holds anything is left
   as it is. Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
   in the role), and `vm_spread_group` is checked from the VM list the token already reads.
+- A Kubernetes node's firewall rules (`kubernetes_node`) open k3s' ports to each other member's own address, never
+  to a network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or the
+  pod network. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
+  `k8s_api_sources`. Every address is checked against an IPv4 pattern before a rule is written, so none can add
+  an option to a UFW or firewalld rule (fuzzed in `tests/fuzz/fuzz_kubernetes_node.py`), and rules for members
+  that left are removed. On the RHEL family, `k3s-selinux` comes from Rancher's repository with every package
+  checked against Rancher's key, pinned by fingerprint; the repository's metadata isn't signed by Rancher, so
+  `repo_gpgcheck` is off for it (the packages are still checked).
 
 <a id="the-proxmox-node-user-optional"></a>
 **The Proxmox node user (optional)**

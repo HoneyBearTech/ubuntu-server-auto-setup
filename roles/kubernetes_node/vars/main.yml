@@ -1,0 +1,49 @@
+---
+# The groups that make a server a Kubernetes node: k8s_<cluster>_servers or k8s_<cluster>_agents (as proxmox_vm's
+# provision_k8s_group_pattern). playbooks/baseline.yml runs the role for these groups only.
+k8s_node_group_pattern: '^k8s_([a-z][a-z0-9-]{0,30})_(servers|agents)\Z'
+# A member's address, and what k8s_api_sources entries may be: IPv4 addresses (and networks), nothing that could add
+# an option to a UFW or firewalld rule. tests/fuzz/ reads them from here.
+k8s_node_ipv4_pattern: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\Z'
+k8s_node_source_pattern: >-
+  ^(any|((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(/([0-9]|[12][0-9]|3[0-2]))?)\Z
+# flannel's port for each backend (udp). Rules for the other backend's port are removed.
+k8s_node_flannel_ports:
+  vxlan: "8472"
+  wireguard-native: "51820"
+# Every port the role's rules use, as firewalld writes them: on a member, firewalld rich rules on these are the
+# role's (rich rules carry no comment), except those firewall_allow adds.
+k8s_node_owned_ports: [8472/udp, 51820/udp, 10250/tcp, 6443/tcp, 2379-2380/tcp]
+# firewalld's zone for the rules, as the firewall role's.
+k8s_node_firewalld_zone: public
+
+# What k3s needs from the kernel: overlayfs for containerd and br_netfilter for bridged pod traffic through
+# iptables, loaded at boot; forwarding on and bridged traffic through iptables. The file sorts after
+# hardening_sysctl's 90-usas-hardening.conf, and the role stops if hardening_sysctl sets one of these otherwise.
+k8s_node_modules: [br_netfilter, overlay]
+k8s_node_modules_file: /etc/modules-load.d/usas-kubernetes.conf
+k8s_node_sysctl:
+  net.ipv4.ip_forward: 1
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+k8s_node_sysctl_file: /etc/sysctl.d/91-usas-kubernetes.conf
+# etcd needs the servers' clocks in step: one of these must run (outside a container, where none does).
+k8s_node_time_services: [chrony.service, chronyd.service, systemd-timesyncd.service, ntp.service, ntpsec.service]
+# Kernel modules, swap and time sync belong to the host kernel, not a container (as hardening_container_types).
+k8s_node_container_types: [docker, podman, container, containerd, lxc, systemd-nspawn, openvz, wsl]
+
+# Longhorn (k8s_longhorn_prereqs): packages per OS family, the module for iSCSI over TCP, and multipathd's file.
+k8s_node_longhorn_packages:
+  Debian: [open-iscsi, nfs-common]
+  RedHat: [iscsi-initiator-utils, nfs-utils]
+k8s_node_longhorn_modules_file: /etc/modules-load.d/usas-longhorn.conf
+k8s_node_multipath_file: /etc/multipath/conf.d/usas-longhorn.conf
+
+# The RHEL family: k3s' SELinux policy (k3s-selinux) from Rancher's stable repository, its packages checked against
+# Rancher's signing key, pinned here by fingerprint. Rancher doesn't sign the repository's metadata, so
+# repo_gpgcheck stays off; every package is still checked. The stable repository has no EL10 build yet.
+k8s_node_rancher_key_url: https://rpm.rancher.io/public.key
+k8s_node_rancher_key_fingerprint: C8CF F216 4551 26E9 B9C9 18BE 925E A29A E257 814A
+k8s_node_rancher_repo_url: https://rpm.rancher.io/k3s/stable/common/centos/{{ ansible_facts.distribution_major_version }}/noarch
+k8s_node_selinux_releases: ["9"]
+k8s_node_selinux_packages: [container-selinux, k3s-selinux]
