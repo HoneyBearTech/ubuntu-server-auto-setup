@@ -754,9 +754,10 @@ and a pre-release checklist on real Proxmox VE.
   page; where focus goes after each action; the run's status in a polite live region while the output
   streams without moving focus; and axe-core's WCAG 2.1 A and AA rules with real layout, so with contrast,
   on every page in the dark, light and system themes. See [docs/testing.md](docs/testing.md#the-browser-tests).
-- A screen-reader walk-through with VoiceOver and NVDA, with what each step should announce and a table for
-  each release's results ([docs/accessibility.md](docs/accessibility.md#known-gaps)), now part
-  of the pre-release checklist. It hasn't been run yet.
+- A screen-reader walk-through with VoiceOver and NVDA in the pre-release checklist. It was never run and has
+  since been dropped: screen-reader testing is listed under the
+  [known gaps](docs/accessibility.md#known-gaps), with the structure screen readers rely on checked by the
+  automated tests.
 
 - Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
   `hardening_sysctl_enabled` (kernel and network settings in `/etc/sysctl.d/90-usas-hardening.conf`,
