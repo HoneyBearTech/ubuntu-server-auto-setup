@@ -2,7 +2,7 @@
 
 export type Theme = "dark" | "light" | "system";
 
-export type FieldKind = "text" | "int" | "bool" | "choice" | "list" | "secret";
+export type FieldKind = "text" | "multiline" | "int" | "bool" | "choice" | "list" | "secret";
 
 export interface FieldMeta {
   name: string;
@@ -84,6 +84,25 @@ export interface SectionData {
   timezones?: string[];
 }
 
+// A Kubernetes cluster of the Defaults page (GET /api/clusters): never its tokens, only whether each is saved.
+export interface ClusterInfo {
+  name: string;
+  values: Values;
+  tokens: Record<string, boolean>;
+  token_vars: Record<string, string>; // each token's Vault name
+  servers: string[];
+  agents: string[];
+  kept: string[]; // variables set by hand in the inventory, kept as they are
+  other_members: string[]; // members set by hand that the Servers page doesn't list
+}
+
+export interface ClustersData {
+  fields: FieldMeta[];
+  tokens: FieldMeta[];
+  clusters: ClusterInfo[];
+  max_clusters: number;
+}
+
 export type RunStatus = "running" | "succeeded" | "failed" | "stopped" | "interrupted";
 
 export interface Run {
@@ -105,6 +124,14 @@ export interface Run {
   plan?: string;
   applied_from?: string; // a real run's check run
   options?: Record<string, string>; // an updates run's choices (updates_scope, updates_reboot, ...)
+}
+
+// What a Kubernetes run (kind "kubernetes") is for: one cluster, install or upgrade, its version and members.
+export interface K8sTarget {
+  cluster: string;
+  action: string;
+  version: string;
+  members: string[];
 }
 
 // For a VMs page check run: whether its plan can now be run for real (main.py apply_json).
@@ -215,12 +242,21 @@ export interface IsoPlan {
   builders: string[];
 }
 
+// The Run page's Kubernetes part: each cluster of the Defaults page and what it needs before a run.
+export interface K8sRunCluster {
+  cluster: string;
+  version: string;
+  members: string[];
+  needs: string[];
+}
+
 export interface RunPageData {
   playbooks: Playbook[];
   names: string[];
   steps: Step[];
   current_run: Run | null;
   iso_plan: IsoPlan;
+  kubernetes?: { clusters: K8sRunCluster[]; actions: { key: string; label: string }[] };
 }
 
 export interface RunDetailData {
@@ -268,6 +304,7 @@ export interface ServersData {
   default_node: string;
   default_os: string; // the Defaults page's OS, an OS catalog id
   default_install_method: string; // the Defaults page's install method
+  clusters?: string[]; // the Kubernetes clusters of the Defaults page, for the cluster column
 }
 
 export interface Notice {
@@ -312,6 +349,8 @@ export interface Vm {
   why_not: string;
   alias: string;
   pinned: HostKey[];
+  // A Kubernetes member: from the inventory, or only its usas-k8s-<cluster>-<role> tag; drain: updates drain it.
+  k8s?: { cluster: string; role: string; inventory: boolean; drain: boolean } | null;
 }
 
 export interface VmPreset {

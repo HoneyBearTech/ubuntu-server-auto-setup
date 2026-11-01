@@ -164,6 +164,7 @@ function Settings({ data, reload, loaded }: { data: UpdatesData; reload: () => v
     { legend: "What to install", test: (f: FieldMeta) => ["updates_scope", "updates_apt_upgrade", "updates_kernel", "updates_exclude_packages"].includes(f.name) },
     { legend: "Reboots and health", test: (f: FieldMeta) => f.name.startsWith("updates_re") || f.name === "updates_health_services" },
     { legend: "Snapshots", test: (f: FieldMeta) => f.name.startsWith("updates_snapshot") },
+    { legend: "Kubernetes members", test: (f: FieldMeta) => f.name.startsWith("updates_k8s_") },
     { legend: "Waves and notifications", test: () => true },
   ]);
   return (

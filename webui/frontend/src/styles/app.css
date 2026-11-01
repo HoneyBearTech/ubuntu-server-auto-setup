@@ -933,6 +933,36 @@ input[type="radio"] {
   gap: var(--space-2);
 }
 
+/* A set of choices (Field, a list with choices): a fieldset that looks like the other fields. */
+.check-group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.check-group > legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.token-once {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.token-once code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .check-field .help,
 .check-field .error {
   margin-left: calc(1.25rem + var(--space-3));
@@ -1197,6 +1227,10 @@ td a {
   font: 400 var(--text-sm) / var(--leading-tight) var(--font-sans);
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.sub.warning-text {
+  color: var(--warning);
 }
 
 .muted {

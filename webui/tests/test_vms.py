@@ -112,6 +112,42 @@ def test_parse_interfaces_survives_a_hostile_guest():
     assert v.parse_interfaces(None) == [] and v.parse_interfaces({"x": 1}) == []
 
 
+def test_parse_interfaces_leaves_out_kubernetes_addresses():
+    """kube-vip puts the API address and LoadBalancer addresses on whichever member holds them (as /32), so the
+    guest agent reports them as the VM's: they are never taken as its address (K0 part 3)."""
+    result = [{"name": "ens18", "ip-addresses": [
+        {"ip-address": "192.168.40.99", "ip-address-type": "ipv4", "prefix": 32},
+        {"ip-address": "192.168.40.91", "ip-address-type": "ipv4", "prefix": 24},
+        {"ip-address": "192.168.40.252", "ip-address-type": "ipv4", "prefix": 24}]}]
+    assert v.parse_interfaces(result) == ["192.168.40.91", "192.168.40.252"]
+    pool = v.address_ranges(["192.168.40.90-192.168.40.95", "192.168.40.99"])
+    assert v.parse_interfaces(result, exclude=pool) == ["192.168.40.252"]
+    assert v.parse_interfaces(result, exclude=v.address_ranges("192.168.40.0/24")) == []
+
+
+@pytest.mark.parametrize(("values", "ranges"), [
+    ("10.0.0.5", ((167772165, 167772165),)),
+    (["10.0.0.8/30"], ((167772168, 167772171),)),
+    (["10.0.0.1-10.0.0.2", ""], ((167772161, 167772162),)),
+    (["10.0.0.2-10.0.0.1", "x", "10.0.0.300", "{{ vip }}", None], ()),
+    (None, ()),
+])
+def test_address_ranges(values, ranges):
+    assert v.address_ranges(values) == ranges
+    assert not v.excluded("not an address", ranges)
+
+
+def test_the_inventory_plugin_checks_its_address_exclusions():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("usas_pve_plugin", REPO / "plugins/inventory/usas_pve.py")
+    plugin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plugin)
+    option_problems = plugin.option_problems
+    assert option_problems({"exclude_addresses": ["10.0.0.5", "10.0.0.8/29", "10.0.0.1-10.0.0.9"]}) == []
+    problems = option_problems({"exclude_addresses": ["10.0.0.5; x", "10.0.0.9-10.0.0.1", "vip"]})
+    assert len(problems) == 1 and "10.0.0.9-10.0.0.1" in problems[0] and "vip" in problems[0]
+
+
 @pytest.mark.parametrize("gateway,prefix,network", [
     ("10.0.0.1", 24, "10.0.0.0/24"), ("10.0.0.1", "16", "10.0.0.0/16"), (None, 24, None), ("10.0.0.1", "x", None),
     ("", 24, None),

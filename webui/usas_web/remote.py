@@ -339,7 +339,7 @@ class VmLister:
     # --- The listing ---------------------------------------------------------------------------------------
 
     def _row(self, vm: v.Vm, servers: dict[int, dict[str, str]], network: ipaddress.IPv4Network | None,
-             pending: set[tuple]) -> dict[str, Any]:
+             pending: set[tuple], exclude: tuple[tuple[int, int], ...] = ()) -> dict[str, Any]:
         qemu = vm.type == "qemu" and not vm.template
         _, config = self._get(("config", vm.node, vm.vmid), float("inf")) if qemu else (False, None)
         waiting = (vm.node, vm.vmid) in pending
@@ -360,7 +360,8 @@ class VmLister:
                 agent = AgentData("ok", list(addresses), *about)
             else:
                 agent = AgentData("pending" if waiting else "error")
-        addresses = agent.addresses
+        # A Kubernetes cluster's API address and LoadBalancer pool move between its members: never a VM's own.
+        addresses = [a for a in agent.addresses if not v.excluded(a, exclude)]
         if network is not None:
             addresses = sorted(addresses, key=lambda a: ipaddress.IPv4Address(a) not in network)
         server = servers.get(vm.vmid, {})
@@ -378,9 +379,10 @@ class VmLister:
         }
 
     def list(self, api: PveApi, servers: dict[int, dict[str, str]],
-             network: ipaddress.IPv4Network | None = None, budget: float | None = None) -> dict[str, Any]:
-        """The page's data: every VM and container, with addresses and support. Raises PveError when the
-        cluster can't be listed at all."""
+             network: ipaddress.IPv4Network | None = None, budget: float | None = None,
+             exclude: tuple[tuple[int, int], ...] = ()) -> dict[str, Any]:
+        """The page's data: every VM and container, with addresses and support; addresses in exclude
+        (usas_vms.address_ranges) are left out. Raises PveError when the cluster can't be listed at all."""
         self._use(api)
         started = self.clock()
         version = self.version(api)
@@ -389,6 +391,6 @@ class VmLister:
         remaining = max(0.0, (self.BUDGET if budget is None else budget) - (self.clock() - started))
         wait(list(futures.values()), timeout=remaining)
         pending = {key for key, future in futures.items() if not future.done()}
-        rows = [self._row(vm, servers, network, pending) for vm in vms]
+        rows = [self._row(vm, servers, network, pending, exclude) for vm in vms]
         return {"version": version, "vms": rows, "complete": not pending,
                 "forbidden": sum(1 for r in rows if r["agent"] == "forbidden")}

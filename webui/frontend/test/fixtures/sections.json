@@ -1092,6 +1092,32 @@
     "variable": "firewall_ports",
     "default": null,
     "choices": null
+   },
+   {
+    "name": "k8s_cluster",
+    "label": "Kubernetes cluster",
+    "kind": "text",
+    "help": "One of the clusters on the Defaults page; empty: not a member.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_cluster",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_role",
+    "label": "Kubernetes role",
+    "kind": "choice",
+    "help": "server (the control plane and etcd) or agent (a worker); none: not a member.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_role",
+    "default": "none",
+    "choices": [
+     "none",
+     "server",
+     "agent"
+    ]
    }
   ],
   "rows": [
@@ -1108,7 +1134,9 @@
     "vm_memory_mb": "",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
-    "firewall_ports": "443/tcp"
+    "firewall_ports": "443/tcp",
+    "k8s_cluster": "lab",
+    "k8s_role": "server"
    },
    {
     "name": "db-01",
@@ -1123,8 +1151,13 @@
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
-    "firewall_ports": ""
+    "firewall_ports": "",
+    "k8s_cluster": "",
+    "k8s_role": ""
    }
+  ],
+  "clusters": [
+   "lab"
   ],
   "nodes": [
    "ares",
@@ -1334,6 +1367,61 @@
      "only-on-error",
      "on-change"
     ]
+   },
+   {
+    "name": "updates_k8s_drain",
+    "label": "Drain Kubernetes members before a reboot",
+    "kind": "bool",
+    "help": "Kubernetes members (in a k8s_<cluster>_servers or k8s_<cluster>_agents group, as for the k3s role): before a reboot the node is cordoned and drained (k3s kubectl drain --ignore-daemonsets --delete-emptydir-data), from the server itself or, for an agent, from the cluster's first server in the inventory; once it's back, healthy and a Ready node again, it's uncordoned. A drain that doesn't finish in updates_k8s_drain_timeout seconds uncordons the node again and fails the server without a reboot. The waves never hold two servers of a cluster, nor a server with its agents. false reboots a member without draining it (its pods stop with it).",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_k8s_drain",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "updates_k8s_wait_longhorn",
+    "label": "Wait for Longhorn's volumes after each member",
+    "kind": "bool",
+    "help": "After uncordoning a member, wait until every attached Longhorn volume is healthy again (its replicas rebuilt) before the server's update counts as done, so that the next wave starts with every volume whole; fails the server after updates_k8s_longhorn_timeout seconds.",
+    "required": false,
+    "advanced": false,
+    "variable": "updates_k8s_wait_longhorn",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "updates_k8s_drain_timeout",
+    "label": "Seconds a drain may take",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_k8s_drain_timeout",
+    "default": "300",
+    "choices": null
+   },
+   {
+    "name": "updates_k8s_ready_timeout",
+    "label": "Seconds to wait for a member to be Ready again",
+    "kind": "text",
+    "help": "Seconds to wait for the node to be Ready again after its reboot.",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_k8s_ready_timeout",
+    "default": "300",
+    "choices": null
+   },
+   {
+    "name": "updates_k8s_longhorn_timeout",
+    "label": "Seconds to wait for Longhorn's volumes",
+    "kind": "text",
+    "help": "",
+    "required": false,
+    "advanced": true,
+    "variable": "updates_k8s_longhorn_timeout",
+    "default": "1800",
+    "choices": null
    }
   ],
   "values": {
@@ -1350,7 +1438,327 @@
    "updates_serial": "25%",
    "updates_group_max_parallel": "1",
    "updates_node_max_parallel": "2",
-   "updates_notify": "on-change"
+   "updates_notify": "on-change",
+   "updates_k8s_drain": true,
+   "updates_k8s_wait_longhorn": false,
+   "updates_k8s_drain_timeout": "300",
+   "updates_k8s_ready_timeout": "300",
+   "updates_k8s_longhorn_timeout": "1800"
   }
+ },
+ "clusters": {
+  "fields": [
+   {
+    "name": "name",
+    "label": "Name",
+    "kind": "text",
+    "help": "Lowercase letters, digits and -, starting with a letter: the groups are k8s_<name>_servers and k8s_<name>_agents.",
+    "required": true,
+    "advanced": false,
+    "variable": "k8s_<name>",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_version",
+    "label": "k3s version",
+    "kind": "choice",
+    "help": "The k3s release, one of the catalog's (roles/k3s/vars/catalog.yml): required. A member that already runs another release is refused, unless the run is an upgrade (--tags upgrade), which moves the cluster to this release one node at a time: servers first, then agents, forward only, one minor release at a time.",
+    "required": true,
+    "advanced": false,
+    "variable": "k8s_version",
+    "default": null,
+    "choices": [
+     "v1.36.5+k3s1",
+     "v1.37.1+k3s1"
+    ]
+   },
+   {
+    "name": "k8s_api_vip",
+    "label": "API address (VIP)",
+    "kind": "text",
+    "help": "The API's address on the LAN, an IPv4 address no other host has: kube-vip holds it on one server at a time and moves it when that server stops. Empty: no kube-vip, and every member joins through the first server's address.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_api_vip",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_lb_pool",
+    "label": "LoadBalancer pool",
+    "kind": "text",
+    "help": "The addresses LoadBalancer services get, from kube-vip's cloud provider: a range (192.0.2.20-192.0.2.29) or a network (192.0.2.32/28). Empty: none. Needs k8s_api_vip (kube-vip announces them) and servicelb in k8s_disable.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_lb_pool",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_api_sources",
+    "label": "API allowed from",
+    "kind": "list",
+    "help": "Who else may reach the Kubernetes API (6443/tcp) on the cluster's servers, besides its members: IPv4 addresses or networks (CIDR), or \"any\". Add the control node to run kubectl from it.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_api_sources",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_server_taint",
+    "label": "Keep workloads off the servers",
+    "kind": "bool",
+    "help": "Keep ordinary workloads off the servers (CriticalAddonsOnly=true:NoExecute). k3s' own add-ons still run there.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_server_taint",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "k8s_flannel_backend",
+    "label": "Pod network between nodes",
+    "kind": "choice",
+    "help": "The pod network between nodes, as the baseline's firewall rules expect (roles/kubernetes_node, same variable): vxlan or wireguard-native.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_flannel_backend",
+    "default": "vxlan",
+    "choices": [
+     "vxlan",
+     "wireguard-native"
+    ]
+   },
+   {
+    "name": "k8s_longhorn_prereqs",
+    "label": "Longhorn's prerequisites",
+    "kind": "bool",
+    "help": "Longhorn's node prerequisites: the iSCSI initiator (open-iscsi, or iscsi-initiator-utils on the RHEL family) with iscsid running, the NFS client, the iscsi_tcp module, and multipathd (where it's installed) told to leave sd* disks alone. Turning it off again removes the module and multipathd files, not the packages.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_longhorn_prereqs",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "k8s_disable",
+    "label": "Packaged components to leave out",
+    "kind": "list",
+    "help": "K3s' packaged components to leave out: servicelb, traefik, local-storage, metrics-server.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_disable",
+    "default": "servicelb",
+    "choices": [
+     "servicelb",
+     "traefik",
+     "local-storage",
+     "metrics-server"
+    ]
+   },
+   {
+    "name": "k8s_api_vip_interface",
+    "label": "VIP network interface",
+    "kind": "text",
+    "help": "The network interface kube-vip puts the address on, the same name on every server. Empty: the first server's interface for its default route.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_api_vip_interface",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_tls_san",
+    "label": "More certificate names",
+    "kind": "list",
+    "help": "More names or addresses the API's certificate is valid for, besides k8s_api_vip (DNS names or IPv4 addresses).",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_tls_san",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_secrets_encryption",
+    "label": "Encrypt Secrets in etcd",
+    "kind": "bool",
+    "help": "Encrypt Secrets in etcd. Turning it on or off in a running cluster takes k3s' own procedure (k3s secrets-encrypt), not just this setting.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_secrets_encryption",
+    "default": "true",
+    "choices": null
+   },
+   {
+    "name": "k8s_fetch_readonly_kubeconfig",
+    "label": "Fetch a read-only kubeconfig",
+    "kind": "bool",
+    "help": "Kept in the data folder for kubectl from the container; the web UI never shows or offers it. Fetch a kubeconfig of a read-only ServiceAccount (bound to the view ClusterRole) to k8s_readonly_kubeconfig on the control node, mode 0600. The admin kubeconfig never leaves the servers.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_fetch_readonly_kubeconfig",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "k8s_ready_timeout",
+    "label": "Seconds to wait for a node to be Ready",
+    "kind": "int",
+    "help": "Seconds to wait for a node to be Ready after k3s starts.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_ready_timeout",
+    "default": "300",
+    "choices": null
+   },
+   {
+    "name": "k8s_drain_timeout",
+    "label": "Seconds a node's drain may take in an upgrade",
+    "kind": "int",
+    "help": "Seconds a node's drain may take during an upgrade (k3s kubectl drain --timeout). A pod that can't be evicted in time (a PodDisruptionBudget, a pod no controller manages) stops the upgrade with the node still cordoned.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_drain_timeout",
+    "default": "300",
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_argocd",
+    "label": "Hand the cluster over to Argo CD",
+    "kind": "bool",
+    "help": "The GitOps handoff (optional): once the cluster is Ready, Helm installs Argo CD's chart (both pinned in the catalog) on the cluster's first server, and one root Application makes Argo CD sync the rest from a Git repository (an \"app of apps\", like homelab-kube's bootstrap/root.yaml). That's where USAS stops: from then on Argo CD manages itself and the apps from Git, and a later run never upgrades, changes or syncs either of them. Argo CD's initial admin password stays in the argocd-initial-admin-secret Secret for the owner to read and delete (docs/interfaces.md).",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_bootstrap_argocd",
+    "default": "false",
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_repo_url",
+    "label": "Git repository",
+    "kind": "text",
+    "help": "The Git repository the root Application syncs: an https:// URL with no user name, password, query or fragment. A private repository needs read access in Argo CD (Settings, Repositories) once it runs.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_bootstrap_repo_url",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_path",
+    "label": "Folder of the Applications",
+    "kind": "text",
+    "help": "The folder in the repository with the Applications (\".\" for its top), and the branch, tag or commit to follow.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_bootstrap_path",
+    "default": "apps",
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_revision",
+    "label": "Branch, tag or commit",
+    "kind": "text",
+    "help": "What the root Application follows in the repository.",
+    "required": false,
+    "advanced": false,
+    "variable": "k8s_bootstrap_revision",
+    "default": "main",
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_repo_ca",
+    "label": "The Git server's CA certificate (PEM)",
+    "kind": "multiline",
+    "help": "The certificate (PEM) of the CA that signed the Git server's certificate, if it isn't a public CA's: Argo CD trusts it for that server only. Empty: public CAs only.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_bootstrap_repo_ca",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "k8s_bootstrap_timeout",
+    "label": "Seconds Helm waits for Argo CD",
+    "kind": "int",
+    "help": "Seconds Helm waits for Argo CD's pods to be ready.",
+    "required": false,
+    "advanced": true,
+    "variable": "k8s_bootstrap_timeout",
+    "default": "600",
+    "choices": null
+   }
+  ],
+  "tokens": [
+   {
+    "name": "k8s_token",
+    "label": "Server join token",
+    "kind": "secret",
+    "help": "Servers join with it. 32 to 128 letters and digits, such as openssl rand -hex 32 makes.",
+    "required": false,
+    "advanced": false,
+    "variable": "vault_k8s_token_{cluster}",
+    "default": null,
+    "choices": null,
+    "saved": false
+   },
+   {
+    "name": "k8s_agent_token",
+    "label": "Agent join token",
+    "kind": "secret",
+    "help": "Agents join with it, so a worker can't join as a server. Not the server token.",
+    "required": false,
+    "advanced": false,
+    "variable": "vault_k8s_agent_token_{cluster}",
+    "default": null,
+    "choices": null,
+    "saved": false
+   }
+  ],
+  "clusters": [
+   {
+    "name": "lab",
+    "values": {
+     "k8s_version": "v1.36.5+k3s1",
+     "k8s_api_vip": "10.0.0.99",
+     "k8s_lb_pool": "",
+     "k8s_api_sources": "",
+     "k8s_server_taint": true,
+     "k8s_flannel_backend": "vxlan",
+     "k8s_longhorn_prereqs": false,
+     "k8s_disable": "servicelb",
+     "k8s_api_vip_interface": "",
+     "k8s_tls_san": "",
+     "k8s_secrets_encryption": true,
+     "k8s_fetch_readonly_kubeconfig": false,
+     "k8s_ready_timeout": "300",
+     "k8s_drain_timeout": "300",
+     "k8s_bootstrap_argocd": false,
+     "k8s_bootstrap_repo_url": "",
+     "k8s_bootstrap_path": "apps",
+     "k8s_bootstrap_revision": "main",
+     "k8s_bootstrap_repo_ca": "",
+     "k8s_bootstrap_timeout": "600",
+     "name": "lab"
+    },
+    "tokens": {
+     "k8s_token": true,
+     "k8s_agent_token": false
+    },
+    "token_vars": {
+     "k8s_token": "vault_k8s_token_lab",
+     "k8s_agent_token": "vault_k8s_agent_token_lab"
+    },
+    "servers": [
+     "web-01"
+    ],
+    "agents": [],
+    "kept": [],
+    "other_members": []
+   }
+  ],
+  "max_clusters": 16
  }
 }

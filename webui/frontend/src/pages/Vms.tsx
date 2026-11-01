@@ -111,7 +111,10 @@ interface Filters {
   node: string;
   status: string;
   support: string;
+  cluster: string; // a Kubernetes cluster's name, NO_CLUSTER, or "" for any
 }
+
+export const NO_CLUSTER = "-";
 
 export function matches(vm: Vm, filters: Filters): boolean {
   const text = filters.text.trim().toLowerCase();
@@ -124,7 +127,24 @@ export function matches(vm: Vm, filters: Filters): boolean {
   if (filters.status && (filters.status === "other" ? ["running", "stopped"].includes(vm.status) : vm.status !== filters.status)) {
     return false;
   }
+  if (filters.cluster && (vm.k8s?.cluster ?? NO_CLUSTER) !== filters.cluster) return false;
   return !filters.support || vm.support === filters.support;
+}
+
+// A Kubernetes member's line in the name cell: its role and cluster (from the inventory, or only its Proxmox tag),
+// and whether a fleet update drains it first.
+function K8sMember({ vm }: { vm: Vm }) {
+  const k8s = vm.k8s;
+  if (!k8s) return null;
+  return (
+    <>
+      <span className="sub">
+        Kubernetes: {k8s.role} of <strong>{k8s.cluster}</strong>
+        {k8s.inventory ? "" : " (Proxmox tag only, not in the inventory)"}
+      </span>
+      {!k8s.drain ? <span className="sub warning-text">Updates don't drain it first</span> : null}
+    </>
+  );
 }
 
 interface Poll {
@@ -224,6 +244,7 @@ function VmRow({ vm, selected, onSelect }: { vm: Vm; selected: boolean; onSelect
           <span className="sub">Inventory: {vm.inventory_name}</span>
         ) : null}
         {vm.hostname && vm.hostname !== vm.name ? <span className="sub">Host name: {vm.hostname}</span> : null}
+        <K8sMember vm={vm} />
         {vm.ours ? <span className="sub">Installed by USAS</span> : null}
         {vm.lock ? <span className="sub">Locked: {vm.lock}</span> : null}
       </th>
@@ -284,7 +305,7 @@ function SortButton({ column, sort, onSort }: { column: (typeof COLUMNS)[number]
   );
 }
 
-const NO_FILTERS: Filters = { text: "", node: "", status: "", support: "" };
+const NO_FILTERS: Filters = { text: "", node: "", status: "", support: "", cluster: "" };
 
 export function Vms() {
   const { data, error, setup, busy, refresh } = useVms();
@@ -310,6 +331,7 @@ export function Vms() {
   const rows = arranged.map((id) => byId.get(id)).filter((vm): vm is Vm => !!vm);
   const shown = rows.filter((vm) => matches(vm, filters));
   const nodes = [...new Set((data?.vms ?? []).map((vm) => vm.node))].sort();
+  const k8sClusters = [...new Set((data?.vms ?? []).flatMap((vm) => (vm.k8s ? [vm.k8s.cluster] : [])))].sort();
   const set = (name: keyof Filters) => (event: { target: { value: string } }) =>
     setFilters({ ...filters, [name]: event.target.value });
   const filtered = Object.values(filters).some(Boolean);
@@ -396,6 +418,19 @@ export function Vms() {
               </select>
             </div>
           </div>
+          {k8sClusters.length ? (
+            <div className="field">
+              <label htmlFor="vm-cluster">Kubernetes cluster</label>
+              <div className="select">
+                <select id="vm-cluster" value={filters.cluster} onChange={set("cluster")} aria-describedby="vm-cluster-help">
+                  <option value="">Any</option>
+                  {k8sClusters.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value={NO_CLUSTER}>Not in a cluster</option>
+                </select>
+              </div>
+              <p className="help" id="vm-cluster-help">A cluster's members, from the inventory or their usas-k8s tags</p>
+            </div>
+          ) : null}
         </div>
         {filtered ? (
           <div className="card-foot">
