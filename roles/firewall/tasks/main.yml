@@ -1,4 +1,7 @@
 ---
+- name: Check the Docker-published ports settings
+  ansible.builtin.import_tasks: docker_checks.yml
+
 # UFW on Ubuntu and Debian, firewalld on the RHEL family, driven by the same firewall_* settings. Dynamic, so its
 # tasks get the tag here: they run whenever this include does (--tags firewall included).
 - name: Configure the firewall
@@ -6,3 +9,6 @@
     file: "{{ ansible_facts.os_family }}.yml"
     apply:
       tags: [always]
+
+- name: Filter Docker-published ports
+  ansible.builtin.import_tasks: docker.yml

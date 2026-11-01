@@ -1,0 +1,24 @@
+{# The DOCKER-USER chain for one IP version (firewall_docker_family: 4 or 6), between the role's markers in
+   UFW's after.rules or after6.rules. Declaring the chain empties it, so each UFW reload starts it afresh. #}
+{% set v6 = firewall_docker_family | int == 6 %}
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+-A DOCKER-USER -m conntrack ! --ctstate DNAT -j RETURN
+{% for source in firewall_docker_sources if (':' in source) == v6 %}
+-A DOCKER-USER -s {{ source }} -j RETURN
+{% endfor %}
+{% for rule in firewall_docker_allow %}
+{% set rule_source = rule.get('from', 'any') | string %}
+{% if rule_source == 'any' or (':' in rule_source) == v6 %}
+{% set rule_proto = rule.get('proto', 'tcp') %}
+{% for proto in (['tcp', 'udp'] if rule_proto == 'any' else [rule_proto]) %}
+-A DOCKER-USER -p {{ proto }} -m conntrack --ctorigdstport {{ rule.port }}{{ '' if rule_source == 'any' else ' -s ' ~ rule_source }} -j RETURN
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% if firewall_logging | string | lower not in ['off', 'false'] %}
+-A DOCKER-USER -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[USAS DOCKER BLOCK] "
+{% endif %}
+-A DOCKER-USER -j DROP
+COMMIT

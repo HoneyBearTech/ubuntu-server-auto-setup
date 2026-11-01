@@ -58,6 +58,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   empty (the default) leaves the OS's time sync untouched; emptying them again brings its sources back. Also on
   the web UI's Defaults page. **New outbound dependency** when set: the servers' clocks follow your NTP servers
   over plain NTP (assurance case B25).
+- **Docker-published ports can obey the firewall** (`firewall_docker_enabled`, off by default; Ubuntu and
+  Debian): rules in Docker's `DOCKER-USER` chain, kept in UFW's `after.rules` and `after6.rules`, drop new
+  connections to published container ports unless their source is in `firewall_docker_sources` or the port is
+  in `firewall_docker_allow`. Skipped with a message on servers without Docker; refused on the RHEL family. On
+  the web UI's Hardening page too. A firewall change: trust boundary B27 in the
+  [assurance case](docs/assurance-case.md) ([interfaces](docs/interfaces.md), [security](docs/security.md)).
 - **The updates playbook can cover every VM on the cluster** ([docs/updates.md](docs/updates.md#every-vm-on-the-cluster)):
   copy `inventory/pve.usas_pve.example.yml` to `inventory/pve.usas_pve.yml`, and `make updates-check` and
   `make updates` add the cluster's VMs, through a new inventory plugin (`usas_pve`) that reads the inventory's
@@ -277,6 +283,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
+  Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
+  `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
+  command it runs on a node over SSH. Found by the v0.7.0 release checklist.
 - A Debian 12 VM installed from its cloud image never finished its first boot: Debian 12's cloud kernel has no SATA
   driver, and the seed was an IDE CD-ROM, which q35 puts on its SATA controller, so cloud-init never saw it. The
   seed is now a SCSI CD-ROM (`scsi30`), and `vm_extra_disks` takes up to 29 disks (`scsi1` to `scsi29`). Found by
@@ -302,6 +312,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - The banner, the web UI's sidebar and its footer spell USAS out as Unattended Server Auto-Setup; the README's
   overview diagram starts from a cloud image or the Ubuntu installer ISO and ends with a firewall and automatic
   updates; and the web UI screenshots are new, with the VMs page in the menu.
+- The README's opening, its `vm_os` row and its supported-versions table, and the Docker Hub page, say that every
+  release installs from its vendor's cloud image, and Ubuntu also from its installer ISO.
 
 - How to let the node user write to a Synology NFS share whose permissions are DSM ACLs: a DSM user with read and
   write on the ISO folder, the same UID for the node user on every node, and the ISOs earlier root builds left

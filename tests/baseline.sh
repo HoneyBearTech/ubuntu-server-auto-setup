@@ -218,9 +218,32 @@ yaml.safe_dump({k: v for k, v in d.items() if k.startswith("time_sync_")}, open(
   play tests/verify-time-sync.yml -e ansible_port=2222 -e expect_time_sync=false
 fi
 
+if [ "$family" = rhel ]; then
+step "firewall_docker_enabled is refused on the RHEL family, before firewalld changes"
+cool_down
+before="$(docker exec "$SRV" firewall-cmd --list-all)"
+if ansible-playbook "${INV[@]}" playbooks/baseline.yml --limit srv-01 --tags firewall "${P2222[@]}" \
+  -e firewall_docker_enabled=true >"$TEST_TMP/docker.log" 2>&1; then
+  cat "$TEST_TMP/docker.log"; echo "ERROR: firewall_docker_enabled wasn't refused on $OS" >&2; exit 1
+fi
+grep -q "firewall_docker_enabled isn't available on" "$TEST_TMP/docker.log" \
+  || { cat "$TEST_TMP/docker.log"; echo "ERROR: the refusal doesn't say why" >&2; exit 1; }
+[ "$(docker exec "$SRV" firewall-cmd --list-all)" = "$before" ] \
+  || { echo "ERROR: firewalld changed before the refusal" >&2; exit 1; }
+else
+step "firewall_docker_enabled without Docker writes no rules and says so"
+cool_down
+play playbooks/baseline.yml --limit srv-01 --tags firewall "${P2222[@]}" -e firewall_docker_enabled=true \
+  -e '{"firewall_docker_sources": ["192.0.2.0/24"], "firewall_docker_allow": [{"port": 8080}]}'
+grep -q "Docker isn't installed on srv-01: no DOCKER-USER rules were written" "$last_log" \
+  || { echo "ERROR: the run didn't say Docker isn't installed" >&2; exit 1; }
+docker exec "$SRV" sh -c '! grep -q DOCKER-USER /etc/ufw/after.rules /etc/ufw/after6.rules' \
+  || { echo "ERROR: DOCKER-USER rules were written without Docker" >&2; exit 1; }
+fi
+
 step "Task coverage of the baseline roles on $OS"
-# Each run counts its own family's task files: the other family's are left out.
-if [ "$family" = rhel ]; then other='*/Debian.yml'; else other='*/RedHat.yml,roles/common/tasks/epel.yml'; fi
+# Each run counts its own family's task files: the other family's are left out (docker.yml is UFW's).
+if [ "$family" = rhel ]; then other='*/Debian.yml,roles/firewall/tasks/docker.yml'; else other='*/RedHat.yml,roles/common/tasks/epel.yml'; fi
 python3 tests/coverage.py "$TASK_COVERAGE_FILE" --min "$MIN_COVERAGE" --roles common,firewall,ssh_hardening,fail2ban \
   --skip-files "$other"
 echo "=== $OS: the baseline passed"

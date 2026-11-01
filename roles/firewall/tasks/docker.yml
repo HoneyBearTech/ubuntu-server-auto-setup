@@ -1,0 +1,53 @@
+---
+# Docker-published ports (firewall_docker_enabled). Docker forwards them through its DOCKER-USER chain before
+# UFW's rules see them, so UFW's after.rules and after6.rules fill that chain, between the role's markers. Only
+# new connections Docker forwards to a published port (conntrack state DNAT) are dropped there unless allowed;
+# replies and the containers' own connections pass. Turned off, the rules come out again. docker_checks.yml
+# checks the settings first.
+
+# A check run on a server without UFW can't read its files; the run that installs it writes them.
+- name: Filter Docker-published ports with UFW
+  when: ansible_facts.os_family == 'Debian' and not (ansible_check_mode and firewall_ufw_install is changed)
+  block:
+    - name: Look for Docker
+      ansible.builtin.service_facts:
+      when: firewall_docker_enabled | bool
+
+    - name: Work out whether to write the rules
+      ansible.builtin.set_fact:
+        firewall_docker_active: "{{ firewall_docker_enabled | bool
+          and firewall_docker_services | select('in', ansible_facts.services | default({})) | list | length > 0 }}"
+
+    - name: Say that Docker isn't installed
+      ansible.builtin.debug:
+        msg: >-
+          firewall_docker_enabled is on, but Docker isn't installed on {{ inventory_hostname }}: no DOCKER-USER rules
+          were written. Run the baseline again after installing Docker.
+      when: firewall_docker_enabled | bool and not firewall_docker_active
+
+    - name: Write the DOCKER-USER rules
+      ansible.builtin.blockinfile:
+        path: "{{ item.path }}"
+        marker: "# {mark} USAS: Docker-published ports (firewall role, firewall_docker_enabled)"
+        block: "{{ lookup('ansible.builtin.template', 'docker-user.rules.j2',
+          template_vars={'firewall_docker_family': item.family}) }}"
+        insertafter: EOF
+        state: "{{ 'present' if firewall_docker_active else 'absent' }}"
+        validate: "{{ item.restore }} --test --noflush %s"
+      loop: "{{ firewall_docker_rules_files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: firewall_docker_rules
+      notify: Reload UFW
+
+    # A reload leaves a chain that after.rules no longer declares as it was: empty it, as Docker leaves it.
+    - name: Empty the DOCKER-USER chain the rules filled
+      ansible.builtin.command:
+        argv: ["{{ item.restore | replace('-restore', '') }}", -w, -F, DOCKER-USER]
+      loop: "{{ firewall_docker_rules.results | selectattr('changed') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when: not firewall_docker_active and not ansible_check_mode
+      register: firewall_docker_flush
+      changed_when: firewall_docker_flush.rc == 0
+      failed_when: firewall_docker_flush.rc not in [0, 1]
