@@ -64,6 +64,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain("/srv/tls/server.crt", "/srv/tls/server.key")
 server = http.server.ThreadingHTTPServer(("0.0.0.0", 443), Handler)  # noqa: S104 (the test network only)
 server.socket = context.wrap_socket(server.socket, server_side=True)
