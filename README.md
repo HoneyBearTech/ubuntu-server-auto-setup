@@ -30,10 +30,11 @@
 container.**
 
 USAS (Unattended Server Auto-Setup; the repository keeps its first name, ubuntu-server-auto-setup) is a set of
-Ansible playbooks that install Ubuntu Server LTS on fresh Proxmox VE VMs with no hands on the keyboard, load
-your GitHub SSH keys, and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic
-security updates. The baseline runs on Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and CentOS Stream,
-Rocky Linux and AlmaLinux 9 and 10, including servers this project didn't install. Run the playbooks from a
+Ansible playbooks that install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, and CentOS Stream, Rocky
+Linux and AlmaLinux 9 and 10 on fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys,
+and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic security updates. Every
+release installs from its vendor's cloud image, and Ubuntu also from its installer ISO; the baseline also runs
+on servers this project didn't install. Run the playbooks from a
 checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
 on Windows, Linux or macOS.
 
@@ -287,7 +288,7 @@ still read until 1.0)
 
 | Variable | Default | What it is |
 | --- | --- | --- |
-| `vm_os` | `ubuntu-26.04` | The operating system, from the [OS catalog](docs/interfaces.md#the-os-catalog). This release installs Ubuntu 22.04, 24.04 and 26.04 LTS with the Ubuntu installer; Debian, CentOS Stream, Rocky Linux and AlmaLinux come with cloud-image installs next. |
+| `vm_os` | `ubuntu-26.04` | The operating system, from the [OS catalog](docs/interfaces.md#the-os-catalog). Every release installs from its vendor's cloud image (`vm_install_method: cloud_image`); Ubuntu also from Ubuntu's installer ISO (`autoinstall`, the default). |
 | `net_mode` | `static` | `static`, or `dhcp`: the address comes from your DHCP server and is read from the VM's guest agent. |
 | `ansible_host` | (required for `static`) | The server's static IP address; the installer configures it. |
 | `pve_vmid` | (required) | The Proxmox VM ID. Only IDs that don't exist anywhere in the cluster yet are created. |
@@ -326,7 +327,7 @@ still read until 1.0)
 
 | What | Supported |
 | --- | --- |
-| Installed on new VMs | Ubuntu Server 22.04, 24.04 and 26.04 LTS (amd64), by Ubuntu's installer (`vm_os` picks the release) |
+| Installed on new VMs | Ubuntu Server 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 (amd64; `vm_os` picks the release), from the vendor's cloud image, or for Ubuntu also by Ubuntu's installer (`vm_install_method`) |
 | Hardened by the baseline | Ubuntu Server 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10 (the OS catalog's releases), including servers this project didn't install; it refuses others unless `baseline_allow_unsupported: true` |
 | Hypervisor | Proxmox VE 8 and 9 |
 | Control node (from a checkout) | Linux or macOS, Python 3.12 or later, ansible-core 2.20 (2.20.7 or later) |
