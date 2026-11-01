@@ -1,0 +1,23 @@
+---
+# Once every node of the cluster is upgraded, on the server that took the lock: remove it, but only if this run
+# took it (a lock another run holds is that run's).
+- name: Read which run holds the upgrade lock
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - --namespace=kube-system
+      - get
+      - configmap
+      - "{{ k3s_upgrade_lock }}"
+      - -o
+      - jsonpath={.data.run}
+  register: k3s_lock_now
+  changed_when: false
+  failed_when: false
+
+- name: Release the cluster's upgrade lock
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, --namespace=kube-system, delete, configmap, "{{ k3s_upgrade_lock }}"]
+  changed_when: true
+  when: k3s_lock_now.rc == 0 and k3s_lock_now.stdout == k3s_lock_run

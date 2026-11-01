@@ -21,9 +21,25 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   LoadBalancer services get addresses from kube-vip's cloud provider; both images by digest. The join tokens come
   from the Vault (`vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>`), never from the playbook, and an
   agent holds only its own. Secrets in etcd are encrypted and the servers tainted by default. The admin
-  kubeconfig stays on the servers; a read-only one can be fetched (`k8s_fetch_readonly_kubeconfig`). It doesn't
-  upgrade k3s: a member on another release is refused. **New outbound dependencies** for Kubernetes members:
+  kubeconfig stays on the servers; a read-only one can be fetched (`k8s_fetch_readonly_kubeconfig`). A member
+  on another release is refused, unless the run is an upgrade (below). **New outbound dependencies** for Kubernetes members:
   k3s' releases on GitHub, `ghcr.io` (kube-vip) and the registries k3s pulls its own images from.
+- **k3s upgrades** ([docs/interfaces.md](docs/interfaces.md#upgrades)): `make kubernetes-upgrade`
+  (`playbooks/kubernetes.yml --tags upgrade`) moves each cluster to its `k8s_version`, forward only and at most one
+  minor release at a time (an older release, or a skipped minor, is refused before anything changes). It takes a
+  lock in the cluster (`kube-system/usas-upgrade-lock`), so a second run stops instead of racing, then upgrades
+  the servers one at a time and then the agents: each node cordoned and drained from another server
+  (`k8s_drain_timeout`), a server holding the VIP first handing it to another server (its kube-vip stopped until
+  the address has moved and the API answers there), the binary replaced only if it matches the catalog, k3s
+  restarted, and the node uncordoned once it's Ready on the new release (and a server's etcd healthy). A run
+  that stopped can be run again; members already upgraded are left alone.
+- **Drain-aware fleet updates** ([docs/updates.md](docs/updates.md#kubernetes-members)): a member of a
+  `k8s_<cluster>_servers` or `_agents` group is cordoned and drained before a reboot and uncordoned once it's back
+  and healthy (`updates_k8s_drain`, on by default; `updates_k8s_drain_timeout`, `updates_k8s_ready_timeout`,
+  `updates_k8s_node_name`); a drain that fails is undone and the server isn't rebooted. With
+  `updates_k8s_wait_longhorn`, the next wave waits until every attached Longhorn volume is healthy again. The
+  wave planner never puts two servers of a cluster, or a server and its agents, in one wave. The report gains
+  `k8s` per server.
 - `make k3s-catalog` and `make k3s-catalog-check` (`tools/update_k3s_catalog.py`) refresh and check the k3s
   catalog against GitHub and GHCR; the weekly "OS catalog" workflow reports it in the same issue.
 

@@ -140,6 +140,15 @@ defaults and the advice in the README's "Running it securely" section and in [we
   (fuzzed in `tests/fuzz/fuzz_k3s_config.py`). A server joins only after it reached etcd's and the API's ports on
   every server already in the cluster, and they its etcd peer port, one server at a time, so etcd keeps its
   quorum.
+- Upgrades (`--tags upgrade`) only move forward, one minor release at a time, from a binary the catalog pins, and
+  one node at a time under a lock in the cluster (the ConfigMap `kube-system/usas-upgrade-lock`, which the API
+  lets only one run create), so two runs never restart nodes at once and etcd keeps its quorum; a server hands
+  the API's address to another before it restarts. A node is drained before it restarts, and a drain that
+  can't finish stops the run instead of forcing pods off. What a run reads back from the cluster (the lock's
+  holder, kubectl's messages, Longhorn's volumes during fleet updates) is checked against patterns and cut
+  before it reaches a message or the updates report.
+- Fleet updates drain a member only through `k3s kubectl` on a server of its own cluster, as root over the same
+  pinned SSH session as the update; no kubeconfig leaves the servers for it.
 - Who has the Vault, or root on any server, controls the cluster; the workloads and what they expose are yours.
 
 <a id="the-proxmox-node-user-optional"></a>

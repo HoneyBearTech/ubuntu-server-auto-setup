@@ -1,7 +1,8 @@
 ---
 # Once every server has been checked: the waves the ready ones are updated in (usas_update_plan). In inventory
 # order, each server goes into the first wave with room for it (updates_serial servers, updates_group_max_parallel
-# of each of its update groups, updates_node_max_parallel that may reboot on its Proxmox node). The waves are set
+# of each of its update groups, updates_node_max_parallel that may reboot on its Proxmox node, one server of a
+# Kubernetes cluster and never a server with that cluster's agents). The waves are set
 # on every server (run_once); in an apply the servers join usas_updates_waves in wave order, and the apply play
 # takes its serial from the waves' sizes. Nothing here connects to a server.
 - name: Note what the waves need to know about the server
@@ -11,6 +12,7 @@
       groups: "{{ usas_updates_result.wave.groups }}"
       node: "{{ usas_updates_result.pve.node }}"
       reboot: "{{ updates_reboot == 'if_required' }}"
+      k8s: "{{ usas_updates_result.k8s }}"
 
 - name: Plan the waves
   ansible.builtin.set_fact:

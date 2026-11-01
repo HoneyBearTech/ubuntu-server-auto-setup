@@ -67,13 +67,15 @@
       - k8s_disable | difference(k3s_disable_choices) | length == 0
       - k8s_flannel_backend in k3s_flannel_backends
       - k8s_ready_timeout | string is match('^[1-9][0-9]{0,4}\Z')
+      - k8s_drain_timeout | string is match('^[1-9][0-9]{0,4}\Z')
     fail_msg: >-
       {{ inventory_hostname }}: k8s_version must be one of the catalog's releases ({{ k3s_catalog | map(attribute='version')
       | join(', ') }}), on {{ k3s_architectures | join(' or ') }}; k8s_api_vip empty or an IPv4 address no member has,
       k8s_api_vip_interface empty or an interface name; k8s_lb_pool empty, or a range (a.b.c.d-a.b.c.e) or network
       (a.b.c.d/n) with k8s_api_vip set and servicelb in k8s_disable; k8s_tls_san a list of DNS names or IPv4
       addresses; k8s_disable a list of {{ k3s_disable_choices | join(', ') }}; k8s_flannel_backend
-      {{ k3s_flannel_backends | join(' or ') }}; k8s_ready_timeout a number of seconds.
+      {{ k3s_flannel_backends | join(' or ') }}; k8s_ready_timeout and k8s_drain_timeout numbers of
+      seconds.
     quiet: true
 
 # The settings every member must agree on, as the inventory sets them.
@@ -137,16 +139,45 @@
   check_mode: false
   when: k3s_binary_stat.stat.exists
 
+- name: Note the k3s release installed, and whether this run upgrades
+  ansible.builtin.set_fact:
+    k3s_installed: "{{ k3s_version_output.stdout | default('') | k3s_installed_version }}"
+    k3s_upgrading: "{{ 'upgrade' in ansible_run_tags }}"
+
 - name: Fail if the member runs another k3s release
   ansible.builtin.assert:
     that: k3s_installed in ['', k8s_version]
     fail_msg: >-
       {{ inventory_hostname }} runs k3s {{ k3s_installed }}, not {{ k8s_version }}. Moving a cluster to another
-      release is an upgrade, one node at a time, which this playbook doesn't do yet: set k8s_version back to
+      release is an upgrade, one node at a time: run the playbook with --tags upgrade, or set k8s_version back to
       {{ k3s_installed }}.
     quiet: true
+  when: not k3s_upgrading
+
+# An upgrade only moves members that already run k3s, forward, one minor release at a time. With other tags the
+# install would replace every member's binary at once, so --tags upgrade runs on its own.
+- name: Check that the member can be upgraded to the release
+  ansible.builtin.assert:
+    that:
+      - ansible_run_tags | difference(['upgrade']) | length == 0
+      - k3s_step in ['same', 'forward']
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ k3s_alone if ansible_run_tags | difference(['upgrade'])
+      else k3s_new if k3s_installed == '' else k3s_older if k3s_step == 'downgrade' else k3s_skip }}
+    quiet: true
   vars:
-    k3s_installed: "{{ k3s_version_output.stdout | default('') | k3s_installed_version }}"
+    k3s_step: "{{ k3s_installed | k3s_upgrade_step(k8s_version) }}"
+    k3s_alone: --tags upgrade runs on its own, without other tags (they'd install every member's binary at once).
+    k3s_new: >-
+      it doesn't run k3s yet, and an upgrade only moves a running cluster to another release: add it with a run
+      without --tags once the cluster runs {{ k8s_version }}.
+    k3s_older: >-
+      it runs k3s {{ k3s_installed }}, newer than {{ k8s_version }}: k3s can't move to an older release (restore the
+      cluster from an etcd snapshot instead).
+    k3s_skip: >-
+      it runs k3s {{ k3s_installed }}, and {{ k8s_version }} is more than one minor release ahead: upgrade to the
+      newest release of the next minor in the catalog first.
+  when: k3s_upgrading
 
 - name: Look for the cluster's data on the server
   ansible.builtin.stat:
@@ -166,6 +197,14 @@
     k3s_release: "{{ k3s_catalog | selectattr('version', 'eq', k8s_version) | first }}"
     k3s_arch: "{{ k3s_architectures[ansible_facts.architecture] }}"
     k3s_selinux: "{{ ansible_facts.selinux.status | default('disabled') == 'enabled' }}"
+    # An upgrade: the server that takes the cluster's upgrade lock (upgrade_lock.yml), the members in the run,
+    # and whether any of them is on another release.
+    k3s_lock_host: "{{ k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host') | first }}"
+    k3s_run_members: "{{ k3s_members | map(attribute='host') | select('in', ansible_play_hosts_all) | list }}"
+    k3s_upgrade_needed: >-
+      {{ k3s_members | map(attribute='host') | select('in', ansible_play_hosts_all) | map('extract', hostvars)
+         | selectattr('k3s_installed', 'defined') | rejectattr('k3s_installed', 'eq', k8s_version) | list
+         | length > 0 }}
   vars:
     k3s_started_servers: >-
       {{ k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host')

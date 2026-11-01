@@ -125,6 +125,24 @@ be tagged; replace them with yours.
   ssh sysadmin@192.0.2.24 'sudo ausearch -m avc -ts recent'   # the AlmaLinux agent: no matches
   ```
 
+- [ ] **A k3s upgrade and drain-aware updates**, if the release touches `k3s`, `updates` or the wave planner, on
+  the same throwaway cluster, built at the catalog's older release, with a small Deployment (3 replicas, a
+  PodDisruptionBudget of `minAvailable: 2`) and, if Longhorn is installed, a volume attached. While a loop on the
+  control node asks the VIP's `/ping` every second, `make kubernetes-upgrade LIMIT=k8s_test` with `k8s_version`
+  set to the next release: one node at a time, servers first, each `SchedulingDisabled` during its turn only, the
+  Deployment always at 2 or more ready, the VIP never unanswered for more than a few seconds, `etcd` with three
+  members afterwards, and the lock gone. A second run changes nothing. Then fleet updates with
+  `updates_reboot: if_required` and `updates_k8s_wait_longhorn: true` on a cluster whose members need a reboot:
+  never two servers, nor a server and an agent, in one wave; each node drained before its reboot and uncordoned
+  after; the Longhorn volume `healthy` before the next wave starts:
+
+  ```bash
+  while sleep 1; do curl -sk -o /dev/null -w "%{http_code} " https://192.0.2.20:6443/ping; done   # 200s throughout
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl get nodes -o wide; sudo k3s kubectl get pdb,deploy -A'
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl -n kube-system get configmap usas-upgrade-lock'   # NotFound afterwards
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl -n longhorn-system get volumes.longhorn.io'   # healthy between waves
+  ```
+
 - [ ] **An extra disk and a spread group**, if the release touches provisioning or the baseline: `test-01` with
   `vm_extra_disks: [{size_gb: 4, label: data, mount: /srv/data}]` and `vm_spread_group: test`. After
   `provision-vms.yml` the VM has `scsi1` with `serial=usas-data`, and after `site.yml` the disk is ext4 with
