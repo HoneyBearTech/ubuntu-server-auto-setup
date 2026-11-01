@@ -34,7 +34,8 @@ Ansible playbooks that install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 
 Linux and AlmaLinux 9 and 10 on fresh Proxmox VE VMs with no hands on the keyboard, load your GitHub SSH keys,
 and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic security updates. Every
 release installs from its vendor's cloud image, and Ubuntu also from its installer ISO; the baseline also runs
-on servers this project didn't install. Run the playbooks from a
+on servers this project didn't install. Afterwards the updates playbook keeps the servers updated, a wave at a
+time, with health checks and a report, by hand or on a schedule. Run the playbooks from a
 checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
 on Windows, Linux or macOS.
 

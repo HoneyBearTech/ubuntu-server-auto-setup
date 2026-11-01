@@ -295,6 +295,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Documentation
 
+- The fleet updates are argued through in the assurance case
+  ([docs/assurance-case.md](docs/assurance-case.md)): a web UI session held without the password is a threat
+  actor of its own, and new rows cover missing authorization for runs nobody watches (CWE-862) and the audit
+  log's updates and schedule entries (CWE-778). [docs/interfaces.md](docs/interfaces.md) lists `USAS_SCHEDULER`,
+  `schedules.json`, `updates/state.json` and the updates reports in `/data`, and the README says what the
+  updates playbook does.
 - The README, the Docker Hub page, the architecture and the roadmap describe the project as it is in 0.7.0:
   USAS, Unattended Server Auto-Setup (the repository keeps its name), installing and hardening Ubuntu, Debian
   and RHEL-family servers, with a supported-versions badge row.
