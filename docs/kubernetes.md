@@ -109,7 +109,8 @@ make kubernetes LIMIT=k8s_lab
 - `make provision` creates the VMs that don't exist yet, checks the spread group and adds the extra disks
   ([architecture.md](architecture.md#how-a-server-is-built)).
 - `make baseline` hardens them as any server, and its `kubernetes_node` role prepares each member: k3s' ports
-  opened between the members only (each rule names one member's address), the kernel modules and sysctls k3s
+  opened between the members only (each rule names one member's address; on the RHEL family firewalld also
+  trusts k3s' pod and service networks, as k3s needs there), the kernel modules and sysctls k3s
   needs, swap off, Longhorn's prerequisites and, on the RHEL family, k3s' SELinux policy
   ([Kubernetes nodes](interfaces.md#kubernetes-nodes)). `make site` runs the first three steps in one go.
 - `make kubernetes` checks every member first, then installs the k3s binary only if it matches the catalog's
