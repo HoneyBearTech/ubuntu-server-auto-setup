@@ -272,6 +272,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- An extra disk whose file system label held a character such as `\x1d` could be taken for the disk's own file
+  system with an empty label, and mounted: the baseline split blkid's output at every character Python counts as a
+  line break. It now splits at newlines only, so such a disk is left alone as "other". Found by the fuzz targets.
 - The VMs page asked to "confirm it is Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux" for a VM whose
   guest agent didn't report its OS; it now says "or". Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
@@ -294,6 +297,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - The updates tests sometimes saw the update phased at 0 % as one to install: apt ignores phasing without a
   machine ID, which a test container that has only just booted may not have yet. The test image now gives apt a
   fixed one (`APT::Machine-ID`).
+- The VM inventory fuzz target failed on a VM tag that would load as another type (`1`, `true`, an empty tag):
+  the web UI writes such a tag as a plain quoted string, not `!unsafe`, on purpose, as it does every such value.
+  The target now expects that, and still checks that every other tag is written `!unsafe`.
 
 ### Documentation
 
