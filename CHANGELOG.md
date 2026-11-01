@@ -8,6 +8,25 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- **k3s clusters** ([docs/interfaces.md](docs/interfaces.md#kubernetes-clusters)): `make kubernetes`
+  (`playbooks/kubernetes.yml`, new `k3s` role) installs k3s on the members of each `k8s_<cluster>_servers` and
+  `k8s_<cluster>_agents` group once the baseline has prepared them. It checks every member before any changes,
+  starts the first server, joins the other servers one at a time (each first checking etcd's and the API's ports
+  with those already in, so a firewall in the way stops the run with the hosts named), then the agents, and waits
+  until every node is Ready. The binary is installed only if it matches the SHA-256 in the new k3s catalog
+  (`roles/k3s/vars/catalog.yml`: v1.36.5+k3s1 and v1.37.1+k3s1), with its own systemd unit and no install script.
+  With `k8s_api_vip`, kube-vip holds the API's address and the others join through it; with `k8s_lb_pool`,
+  LoadBalancer services get addresses from kube-vip's cloud provider; both images by digest. The join tokens come
+  from the Vault (`vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>`), never from the playbook, and an
+  agent holds only its own. Secrets in etcd are encrypted and the servers tainted by default. The admin
+  kubeconfig stays on the servers; a read-only one can be fetched (`k8s_fetch_readonly_kubeconfig`). It doesn't
+  upgrade k3s: a member on another release is refused. **New outbound dependencies** for Kubernetes members:
+  k3s' releases on GitHub, `ghcr.io` (kube-vip) and the registries k3s pulls its own images from.
+- `make k3s-catalog` and `make k3s-catalog-check` (`tools/update_k3s_catalog.py`) refresh and check the k3s
+  catalog against GitHub and GHCR; the weekly "OS catalog" workflow reports it in the same issue.
+
 ## [0.7.0] - 2026-11-01
 
 Servers other than Ubuntu: new VMs install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, and CentOS

@@ -30,7 +30,7 @@ API for other programs. What should be reachable from where is described in the
 | `proxmox_nodes` | each Proxmox VE node the servers use; the inventory host name must equal the Proxmox node name | SSH as `pve_ssh_user` (`ansible_user: "{{ pve_ssh_user }}"`), `root` unless `prepare-node.yml` set up another user; `prepare-node.yml` itself logs in as `root` |
 | `pve_iso_build` | made by `build-installer.yml` while it runs: the nodes that build the installer ISO | as in `proxmox_nodes` |
 | `servers` | each server, new or existing | SSH as `admin_user` with sudo (`ansible_user: "{{ admin_user }}"`) |
-| `k8s_<cluster>_servers`, `k8s_<cluster>_agents` | a Kubernetes cluster's servers and agents, inside `servers` (cluster name `^[a-z][a-z0-9-]{0,30}\Z`, a server in at most one of these groups). They tag the VM `usas-k8s-<cluster>-server` or `-agent` when it's created, and the baseline prepares each member for k3s ([Kubernetes nodes](#kubernetes-nodes)); installing k3s comes later | as in `servers` |
+| `k8s_<cluster>_servers`, `k8s_<cluster>_agents` | a Kubernetes cluster's servers and agents, inside `servers` (cluster name `^[a-z][a-z0-9-]{0,30}\Z`, a server in at most one of these groups). They tag the VM `usas-k8s-<cluster>-server` or `-agent` when it's created, and the baseline prepares each member for k3s ([Kubernetes nodes](#kubernetes-nodes)); `playbooks/kubernetes.yml` installs k3s on them ([Kubernetes clusters](#kubernetes-clusters)) | as in `servers` |
 | `ubuntu_servers` | the group's name before 0.7.0: still read, with `servers`, until 1.0 (each run says so) | as in `servers` |
 | `other_servers` | servers this project didn't install, for the updates playbook only | SSH as their own `ansible_user`, with passwordless sudo or a sudo password of their own (never the Vault admin password unless `updates_allow_shared_become_password`) |
 | `usas_pve_vms` | made by the cluster inventory (`usas_pve`): VMs of the cluster that aren't in the static inventory, as `vm-<vmid>`, to update | SSH with the group's own login (`group_vars/usas_pve_vms.yml`), host key pinned as `usas-<cluster>-<vmid>` (`HostKeyAlias`) |
@@ -393,6 +393,56 @@ What the role does on each member:
 A server that leaves every `k8s_*` group keeps what the role set up; remove its rules by hand
 (`ufw status numbered`, `firewall-cmd --list-rich-rules`).
 
+### Kubernetes clusters
+
+`make kubernetes` (`playbooks/kubernetes.yml`) installs k3s on the members of every `k8s_<cluster>_servers` and
+`k8s_<cluster>_agents` group, once the baseline has prepared them. It's a playbook of its own, not part of
+`make site`. Set the cluster's variables for all its members, in the `group_vars` of a parent group of both
+(`k8s_<cluster>`), and its two join tokens in the Vault.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `k8s_version` | `""` | The k3s release: one of the k3s catalog's (`roles/k3s/vars/catalog.yml`), required. |
+| `k8s_api_vip` | `""` | The API's address on the LAN, an IPv4 address no other host has. kube-vip holds it on one server at a time (by ARP) and moves it when that server stops; the other members join through it, and it's in the API's certificate. Empty: no kube-vip, and every member joins through the first server's address. |
+| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server. Empty: the first server's interface for its default route. |
+| `k8s_lb_pool` | `""` | The addresses LoadBalancer services get from kube-vip's cloud provider: a range (`192.0.2.20-192.0.2.29`) or a network (`192.0.2.32/28`). Needs `k8s_api_vip` and `servicelb` in `k8s_disable`. |
+| `k8s_tls_san` | `[]` | More DNS names or IPv4 addresses the API's certificate is valid for. |
+| `k8s_disable` | `[servicelb]` | k3s' packaged components to leave out: any of `servicelb`, `traefik`, `local-storage`, `metrics-server`. |
+| `k8s_server_taint` | `true` | Keep ordinary workloads off the servers (`CriticalAddonsOnly=true:NoExecute`); k3s' own add-ons still run there. |
+| `k8s_secrets_encryption` | `true` | Encrypt Secrets in etcd. Changing it on a running cluster takes `k3s secrets-encrypt`, not just this setting. |
+| `k8s_fetch_readonly_kubeconfig` | `false` | Write a kubeconfig of a read-only account to `k8s_readonly_kubeconfig` on the control node (0600). |
+| `k8s_readonly_kubeconfig` | `<inventory dir>/kube/<cluster>-readonly.yaml` | Where. |
+| `k8s_ready_timeout` | `300` | Seconds to wait for a node to be Ready after k3s starts. |
+
+`k8s_node_ip` and `k8s_flannel_backend` ([Kubernetes nodes](#kubernetes-nodes)) apply here too: each member's
+`node-ip` is its `k8s_node_ip` (or `ansible_host`), and the node's name in Kubernetes is its inventory name.
+
+What the playbook does:
+
+- **Checks first, on every member:** one cluster group each, every server of the cluster in the run (agents can be
+  added with `--limit`), the settings and both tokens, the baseline's Kubernetes settings in place, and the k3s
+  release a member already runs. Any failure stops the run before a member changes.
+- **Installs** the binary to `/usr/local/bin/k3s` only if it matches the catalog's SHA-256 (the download is checked
+  before it replaces anything), its systemd unit (`k3s`, or `k3s-agent` on an agent), and
+  `/etc/rancher/k3s/config.yaml` (0600, root; the task logs nothing). A server gets both tokens; an agent only the
+  agent token, so it can't join as a server.
+- **Starts** the cluster on its first server (`cluster-init`; the first server that already has the cluster's data,
+  if one has), waits until it's Ready and, with `k8s_api_vip`, until the API answers on the VIP. Then it joins the
+  other servers **one at a time**: before a server joins, it must reach etcd's 2379 and 2380 and the API's 6443 on
+  each server already in, and each of those its 2380; if one can't, the run stops naming both hosts and the port.
+  Then the agents. Each waits until it's Ready.
+- **kube-vip** (with `k8s_api_vip`) and its **cloud provider** (with `k8s_lb_pool`) are manifests in
+  `/var/lib/rancher/k3s/server/manifests/` on every server, with their images by digest; k3s applies them. With
+  `k8s_lb_pool`, kube-vip also announces the addresses the cloud provider hands out.
+- **Finally** it checks that every member is a Ready node and, with `k8s_fetch_readonly_kubeconfig`, writes the
+  read-only kubeconfig: a ServiceAccount (`kube-system/usas-readonly`) bound to the `view` ClusterRole, plus reading
+  nodes. Deleting its Secret (`usas-readonly-token`) revokes the token; the next run makes a new one.
+
+The admin kubeconfig stays on the servers (`/etc/rancher/k3s/k3s.yaml`, 0600): use `sudo k3s kubectl` there. The
+playbook doesn't upgrade k3s yet: a member that runs another release than `k8s_version` is refused. Turning
+kube-vip, the cloud provider or the read-only account off removes their manifests, so k3s stops applying them,
+but what they made stays until you delete it (`sudo k3s kubectl delete ...`).
+
 ### Vault variables
 
 | Variable | Used by | Meaning |
@@ -403,6 +453,7 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | `vault_mail_relay_password` (optional) | `mail_relay_password` | The mail relay's password. |
 | `vault_fail2ban_webhook_url` (optional) | `fail2ban_webhook_url` | The ban webhook's URL, which usually holds a token. |
 | `vault_disk_passphrase` (optional) | `vm_disk_passphrase` | The disk encryption passphrase, also the recovery key at the console. |
+| `vault_k8s_token_<cluster>`, `vault_k8s_agent_token_<cluster>` (for each Kubernetes cluster; a `-` in its name is `_` here) | `playbooks/kubernetes.yml` | The cluster's join tokens, for its servers and for its agents: two different values, each made with `openssl rand -hex 32` (32 to 128 letters and digits). The playbook never makes them. |
 | `vault_become_password_<group>` (optional, any name you choose) | `ansible_become_password` of a group in `other_servers` | That group's own sudo password, for the updates playbook. |
 
 ### Commands
@@ -417,9 +468,12 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
 | `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
 | `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a wave at a time ([waves](updates.md#waves)). Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
+| `make kubernetes` | `playbooks/kubernetes.yml` | the `k8s_<cluster>_servers` and `_agents` groups | Install k3s on each cluster's members and start it: the first server, the others one at a time, then the agents ([Kubernetes clusters](#kubernetes-clusters)). Changes the binary, its unit, its configuration and kube-vip's manifests; refuses a member on another k3s release. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=debian-12` or `OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
+| `make k3s-catalog` | none (`tools/update_k3s_catalog.py`) | none | For maintainers: add the newest patch release of k3s' two newest minor lines to the k3s catalog, with the checksums k3s publishes, and pin the newest kube-vip and cloud provider images by digest. Keeps the releases already pinned. Writes `roles/k3s/vars/catalog.yml` only. |
+| `make k3s-catalog-check` | none (`tools/update_k3s_catalog.py --check`) | none | Check every pin in the k3s catalog against upstream again (checksum, still downloadable, digest) and list newer releases. Exit code 1 if a pin fails. |
 | `make deps`, `make lint`, `make syntax`, `make catalog-test` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
 
 `LIMIT=` becomes `--limit` (for `build-installer`, a node builds only if it is in the limit too), `ARGS=` is passed to `ansible-playbook` unchanged,
@@ -592,6 +646,11 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |
 | Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
+| GitHub's API, k3s' releases (`api.github.com`, `github.com`, its asset hosts) and GHCR (`ghcr.io`) | the maintainer's machine (`make k3s-catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only; GHCR's anonymous pull token; in CI the workflow's read-only token, sent to GitHub's API only | Release lists, k3s' `sha256sum-<arch>.txt` and the images' digests, to build and check the k3s catalog. |
+| k3s' releases (`github.com/k3s-io/k3s/releases`, redirecting to GitHub's asset host) | Kubernetes members | HTTPS, no authentication; the binary must have the SHA-256 the k3s catalog pins | The k3s binary. |
+| `ghcr.io` and the registries k3s pulls its own images from (`docker.io/rancher/...`) | Kubernetes members (containerd) | HTTPS, no authentication; kube-vip's and the cloud provider's images by the digest the catalog pins, k3s' own images by the tags its release names | Container images. |
+| `rpm.rancher.io` | Kubernetes members on the RHEL family | HTTPS; packages signed by Rancher's key, pinned by fingerprint (`gpgcheck=1`), metadata unsigned | `k3s-selinux`. |
+| Kubernetes members | control node | SSH as `admin_user`, key; sudo. The tokens go only into each member's `config.yaml` | Install and start k3s; `k3s kubectl` on the servers, as root, to wait for nodes and read the read-only account's token. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |
 | Servers | control node | SSH as `admin_user`, key; sudo | The baseline. |
 | VMs picked on the VMs page that aren't servers in the inventory | the web UI | SSH as the user chosen for each VM, with the UI's key; passwordless sudo; host keys pinned per cluster and VM ID (`HostKeyAlias=usas-<cluster>-<vmid>`, `StrictHostKeyChecking=yes`), after the user compared the scanned fingerprints with the VM's console | The baseline or the updates playbook, in check mode first; for real only after that check passed and the user confirmed it. `ssh-keyscan` on the address and port the user chose, to show the fingerprints. |

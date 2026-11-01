@@ -110,6 +110,21 @@ be tagged; replace them with yours.
   ssh sysadmin@192.0.2.11 'sudo firewall-cmd --list-rich-rules; rpm -q k3s-selinux; systemctl is-active iscsid'
   ```
 
+- [ ] **A k3s cluster**, if the release touches `k3s`, `kubernetes_node` or the firewall, on throwaway VMs (a test
+  VMID range, never the lab cluster): three servers in `k8s_test_servers` on three different nodes and one or two
+  agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), `k8s_api_vip` and `k8s_lb_pool` set to
+  free addresses, both tokens in the Vault. After `site.yml` and `make kubernetes LIMIT=k8s_test`: every node
+  Ready, the API answers on the VIP, Traefik has a pool address, the agent on AlmaLinux runs a pod with no AVC
+  denial. Stop the VM that holds the VIP: the API answers on it again within about 15 s, from another server, and
+  `etcd` keeps working with two of three. A second `make kubernetes` changes nothing. Remove the VMs, their disks
+  and the read-only kubeconfig afterwards:
+
+  ```bash
+  curl -sk https://192.0.2.20:6443/ping   # pong, before and shortly after stopping the VIP's holder
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl get nodes; sudo k3s kubectl -n kube-system get svc traefik'
+  ssh sysadmin@192.0.2.24 'sudo ausearch -m avc -ts recent'   # the AlmaLinux agent: no matches
+  ```
+
 - [ ] **An extra disk and a spread group**, if the release touches provisioning or the baseline: `test-01` with
   `vm_extra_disks: [{size_gb: 4, label: data, mount: /srv/data}]` and `vm_spread_group: test`. After
   `provision-vms.yml` the VM has `scsi1` with `serial=usas-data`, and after `site.yml` the disk is ext4 with
