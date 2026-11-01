@@ -36,8 +36,8 @@ repository and check out a release tag:
 ```sh
 git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git
 cd ubuntu-server-auto-setup
-git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.6.0   # the tag is signed
-git checkout v0.6.0
+git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.7.0   # the tag is signed
+git checkout v0.7.0
 ```
 
 The latest release is listed on the [releases page](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases);

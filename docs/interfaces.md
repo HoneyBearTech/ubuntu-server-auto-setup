@@ -515,7 +515,7 @@ away; new keys can appear in any release, so ignore keys you don't know.
 ```json
 {
   "schema": 1,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "setup": {"done": 5, "total": 5},
   "running": {"playbook": "site", "check": false, "started": 1792750000},
   "last_run": {"playbook": "baseline", "check": false, "started": 1792740000, "status": "succeeded",

@@ -8,6 +8,18 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-01
+
+Servers other than Ubuntu: new VMs install Ubuntu 22.04, 24.04 and 26.04 LTS, Debian 12 and 13, and CentOS
+Stream, Rocky Linux and AlmaLinux 9 and 10 from the vendor's cloud image, set up by cloud-init in about a
+minute, and the baseline hardens all of them (UFW on Ubuntu and Debian, firewalld and SELinux on the RHEL
+family). An OS catalog pins every image by URL and checksum, checked against the vendors' signatures, and every
+image is booted and hardened in a real VM each week. A new updates playbook, with its own web UI page, schedules
+and VMs-page runs, keeps servers patched in cluster-aware waves with optional snapshots and notifications. VMs
+can get extra disks, spread groups and Kubernetes tags; servers can follow your own time sources; and
+Docker-published ports can obey the firewall. Some variables lose "Ubuntu" or "UFW" from their names: the old
+names are still read until 1.0, and every run lists the ones an inventory still uses.
+
 ### Upgrading
 
 - **New names, old ones still read until 1.0** ([docs/upgrading.md](docs/upgrading.md#to-070-new-names)): the
@@ -960,7 +972,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.7.0
 [0.6.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0
 [0.5.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.5.0
 [0.4.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.4.0

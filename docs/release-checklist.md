@@ -15,7 +15,7 @@ run (now removed by default, `admin_sudo_nopasswd: false`). The steps below chec
 
 Use a disposable VM ID and address, never a server you need: provisioning wipes the VM's disk. In the
 commands, `192.0.2.10` stands for the test VM's address, `test-01` for its inventory name, `9001` for its
-VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.6.0` for the version to
+VM ID, `sysadmin` for the admin user, `<iso-storage>` for the ISO storage and `0.7.0` for the version to
 be tagged; replace them with yours.
 
 ## Pre-flight
@@ -24,7 +24,7 @@ be tagged; replace them with yours.
   it, with the version it will be tagged as, so the web UI shows that version:
 
   ```bash
-  docker build --build-arg USAS_VERSION=0.6.0 -t ubuntu-server-auto-setup:rc .
+  docker build --build-arg USAS_VERSION=0.7.0 -t ubuntu-server-auto-setup:rc .
   docker run -d --name usas-rc -p 127.0.0.1:8080:8080 -v usas-rc-data:/data ubuntu-server-auto-setup:rc
   ```
 
@@ -568,7 +568,7 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
 - [ ] The signature and the build provenance verify on Docker Hub and on GHCR:
 
   ```bash
-  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.6.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.6.0; do
+  for image in docker.io/honeybeartech/ubuntu-server-auto-setup:0.7.0 ghcr.io/honeybeartech/ubuntu-server-auto-setup:0.7.0; do
     cosign verify "$image" \
       --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
