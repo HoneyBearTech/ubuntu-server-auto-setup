@@ -102,10 +102,13 @@
       register: verify_pods_later
       changed_when: false
 
+    # kube-vip exits and restarts when it misses a lease renewal, which is how it hands the VIP over: its pods only
+    # have to be ready (above).
     - name: Check that no pod restarted or went unready in that minute
       ansible.builtin.assert:
         that:
-          - verify_pods_later.stdout_lines | sort == verify_pods.stdout_lines | sort
+          - verify_pods_later.stdout_lines | reject('match', '^kube-vip-ds-') | sort
+            == verify_pods.stdout_lines | reject('match', '^kube-vip-ds-') | sort
         fail_msg: >-
           kube-system's pods changed (name, phase, ready, restarts): {{ verify_pods.stdout_lines }}, a minute later
           {{ verify_pods_later.stdout_lines }}
