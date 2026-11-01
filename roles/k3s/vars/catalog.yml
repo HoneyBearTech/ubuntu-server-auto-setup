@@ -33,3 +33,20 @@ k3s_kube_vip_cloud_provider_image:
   name: ghcr.io/kube-vip/kube-vip-cloud-provider
   tag: v0.0.13
   digest: sha256:b8b6a5180e678b410e2c5dba86b87fa8099ada16e2f067d83f04e749f8ea54ab
+
+# The optional Argo CD bootstrap (k8s_bootstrap_argocd): Helm's archive, by the SHA-256 in its signed checksum
+# file, and Argo CD's chart, by the SHA-256 in its signed provenance file (app_version is the Argo CD release in it).
+k3s_helm:
+  version: v4.3.1
+  binaries:
+    amd64:
+      url: https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz
+      sha256: "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b"
+    arm64:
+      url: https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz
+      sha256: "8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88"
+k3s_argocd_chart:
+  version: 10.11.6
+  app_version: v3.5.6
+  url: https://github.com/argoproj/argo-helm/releases/download/argo-cd-10.11.6/argo-cd-10.11.6.tgz
+  sha256: "d8f096d87513b41ff754053a7f9604c943bf29c15436a79226fd51595ea67d05"

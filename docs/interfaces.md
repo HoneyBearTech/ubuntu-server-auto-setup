@@ -481,6 +481,55 @@ node at a time. Set the new release in the cluster's `group_vars` and run it; `-
 - A pod that can't be evicted in time (a PodDisruptionBudget that doesn't allow it, a pod no controller manages)
   stops the upgrade with its node cordoned and the lock held.
 
+#### Handing a cluster over to Argo CD (optional)
+
+With `k8s_bootstrap_argocd: true`, the last step of `make kubernetes` (not of an upgrade) hands the cluster over to GitOps: on the
+cluster's first server it installs [Argo CD](https://argo-cd.readthedocs.io/) and one **root Application** that
+syncs every Application in a folder of a Git repository (an "app of apps", like
+[homelab-kube](https://github.com/HoneyBearTech/homelab-kube)'s `bootstrap/root.yaml`). That's where USAS stops: it
+never syncs, holds or deletes apps, and once Argo CD and the root Application are there, a later run leaves both as
+they are. Argo CD then manages itself from Git (homelab-kube's `apps/argocd.yaml` adopts the release) and upgrades
+are pull requests in that repository.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `k8s_bootstrap_argocd` | `false` | Install Argo CD and the root Application once the cluster is Ready. |
+| `k8s_bootstrap_repo_url` | `""` | The Git repository: an `https://` URL (a DNS name or an IPv4 address, an optional port and a path), with no user name or password, query or fragment. Required when on. |
+| `k8s_bootstrap_path` | `apps` | The folder in the repository with the Applications (`.` for its top; no `..`). |
+| `k8s_bootstrap_revision` | `main` | The branch, tag or commit the root Application follows. |
+| `k8s_bootstrap_repo_ca` | `""` | PEM certificates of the CA that signed the Git server's certificate, if it isn't a public CA: Argo CD trusts them for that server only. |
+| `k8s_bootstrap_timeout` | `600` | Seconds Helm waits for Argo CD's pods. |
+
+What it does, after every node is Ready:
+
+- **Checks first, on every member, before anything changes:** the settings above (each against a pattern), and
+  that Argo CD's pods have a node to run on: an agent, or `k8s_server_taint: false`.
+- **Helm** ([pinned](dependencies.md) in the k3s catalog, `roles/k3s/vars/catalog.yml`) to `/usr/local/bin/helm`
+  on the first server only, from an archive that must match the catalog's SHA-256; and **Argo CD's chart**
+  (`argo-cd`, from Argo's chart repository), likewise checked. Both are kept in `/usr/local/lib/usas-argocd/`.
+- **Installs Argo CD** with Helm as the release `argocd` in the namespace `argocd`, with the values
+  homelab-kube's `apps/argocd.yaml` adopts it with: the UI's service a `LoadBalancer` (a `ClusterIP` one without
+  `k8s_lb_pool`), Dex off, RBAC scopes `[email]` and no default policy. `k8s_bootstrap_repo_ca` adds the Git
+  server's CA (`configs.tls.certificates`); an Argo CD Application that manages Argo CD itself must carry the same
+  value, or its first sync removes it. Only if there's no Argo CD yet, or USAS' install of it didn't finish; Argo
+  CD installed some other way (its Application type is there without that release) is left alone.
+- **Creates the root Application** `argocd/root` (automated sync, pruning and self-heal) if it isn't there. If it
+  is and follows another repository, folder or revision, the run says so and leaves it: change it in Git, or with
+  `sudo k3s kubectl -n argocd edit application root`.
+- It never reads, prints or deletes Argo CD's initial admin password. Read it on the first server, log in as
+  `admin`, change it, then delete the Secret:
+
+  ```sh
+  sudo k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+  sudo k3s kubectl -n argocd get service argocd-server     # EXTERNAL-IP is Argo CD's address
+  sudo k3s kubectl -n argocd delete secret argocd-initial-admin-secret
+  ```
+
+A private repository needs read access for Argo CD: add it under **Settings → Repositories** in Argo CD (a
+read-only deploy key) once it runs; the root Application syncs as soon as it can read it. Check mode skips this
+step (Helm, the chart and the cluster's objects aren't there to compare with). Removing Argo CD is the GitOps
+repository's business; homelab-kube's `docs/installing.md` ("Uninstalling") shows how.
+
 ### Vault variables
 
 | Variable | Used by | Meaning |
@@ -506,13 +555,13 @@ node at a time. Set the new release in the cluster's `group_vars` and run it; `-
 | `make site` | `playbooks/site.yml` | all | The three playbooks in order. |
 | `make updates-check` | `playbooks/updates.yml --check` | `servers`, `ubuntu_servers` and `other_servers` | Report the pending updates, held, phased and excluded packages, the automatic-update setup and pending reboots of each server, to the screen and `updates_report_dir`. Changes no server (it refreshes the package lists). |
 | `make updates` | `playbooks/updates.yml` | `servers`, `ubuntu_servers` and `other_servers` | Install the updates and, with `updates_reboot: if_required`, reboot the servers that need it, then check their health; a wave at a time ([waves](updates.md#waves)). Never changes a server's configuration. Fails if a server failed or couldn't be reached. |
-| `make kubernetes` | `playbooks/kubernetes.yml` | the `k8s_<cluster>_servers` and `_agents` groups | Install k3s on each cluster's members and start it: the first server, the others one at a time, then the agents ([Kubernetes clusters](#kubernetes-clusters)). Changes the binary, its unit, its configuration and kube-vip's manifests; refuses a member on another k3s release. |
+| `make kubernetes` | `playbooks/kubernetes.yml` | the `k8s_<cluster>_servers` and `_agents` groups | Install k3s on each cluster's members and start it: the first server, the others one at a time, then the agents ([Kubernetes clusters](#kubernetes-clusters)). Changes the binary, its unit, its configuration and kube-vip's manifests; refuses a member on another k3s release. With `k8s_bootstrap_argocd`, installs Helm, Argo CD and the root Application on the first server, once ([Handing a cluster over to Argo CD](#handing-a-cluster-over-to-argo-cd-optional)). |
 | `make kubernetes-upgrade` | `playbooks/kubernetes.yml --tags upgrade` | as `make kubernetes` | Move each cluster to its `k8s_version`, forward one minor release at a time, under a lock in the cluster: the servers one at a time, then the agents, each drained, the VIP handed to another server first, uncordoned once Ready ([upgrades](#upgrades)). Changes the binary and restarts k3s, one member at a time. |
 | `make test-updates` | none | none | The updates playbook's integration tests (`OS=debian-12` or `OS=ubuntu-24.04` picks the release). |
 | `make catalog` | none (`tools/update_os_catalog.py`) | none | For maintainers: pin the newest build of every supported release in the OS catalog, checking the vendors' signatures (needs `gpgv`). Writes `roles/os_catalog/vars/catalog.yml` only. |
 | `make catalog-check` | none (`tools/update_os_catalog.py --check`) | none | Check every image the catalog pins against the vendors again (signature, checksum, still downloadable) and list newer builds. Exit code 1 if a pin fails. |
-| `make k3s-catalog` | none (`tools/update_k3s_catalog.py`) | none | For maintainers: add the newest patch release of k3s' two newest minor lines to the k3s catalog, with the checksums k3s publishes, and pin the newest kube-vip and cloud provider images by digest. Keeps the releases already pinned. Writes `roles/k3s/vars/catalog.yml` only. |
-| `make k3s-catalog-check` | none (`tools/update_k3s_catalog.py --check`) | none | Check every pin in the k3s catalog against upstream again (checksum, still downloadable, digest) and list newer releases. Exit code 1 if a pin fails. |
+| `make k3s-catalog` | none (`tools/update_k3s_catalog.py`) | none | For maintainers: add the newest patch release of k3s' two newest minor lines to the k3s catalog, with the checksums k3s publishes, pin the newest kube-vip and cloud provider images by digest, and the newest Helm and Argo CD chart by the checksums in their signed files (checked with `gpgv` against the keys in `tools/k3s-catalog-keys/`). Keeps the k3s releases already pinned. Writes `roles/k3s/vars/catalog.yml` only. |
+| `make k3s-catalog-check` | none (`tools/update_k3s_catalog.py --check`) | none | Check every pin in the k3s catalog against upstream again (checksum, signature where upstream signs, still downloadable, digest) and list newer releases. Exit code 1 if a pin fails. |
 | `make deps`, `make lint`, `make syntax`, `make catalog-test` | none | none | Development and setup (see [CONTRIBUTING.md](../CONTRIBUTING.md)). |
 
 `LIMIT=` becomes `--limit` (for `build-installer`, a node builds only if it is in the limit too), `ARGS=` is passed to `ansible-playbook` unchanged,
@@ -688,9 +737,12 @@ the pages apply. Cookies, sessions and CSRF tokens play no part in it.
 | Proxmox VE nodes (each node the servers use) | control node | SSH as `pve_ssh_user` (root by default), key, host key checked (strictly, in a check before anything is built or created) | Install `xorriso` and `gpgv` (root only), build ISOs and seed ISOs, delete seed files. As root once, `prepare-node.yml` sets up another user. |
 | `releases.ubuntu.com` (or `ubuntu_iso_base_url`) | Proxmox node | HTTPS, no authentication; the ISO must have the checksum the OS catalog pins. Only for a point release the catalog doesn't pin: `SHA256SUMS` and `SHA256SUMS.gpg` are fetched with a 30-second timeout and up to 3 retries when the connection fails (any answer from the server, an error included, is final), and `SHA256SUMS` is checked against Ubuntu's signature | The Ubuntu ISO (and, for an unpinned point release, `SHA256SUMS` and `SHA256SUMS.gpg`). |
 | Vendor image indexes (`releases.ubuntu.com`, `cloud-images.ubuntu.com`, `cloud.debian.org`, `cloud.centos.org`, `dl.rockylinux.org`, `repo.almalinux.org`) | the maintainer's machine (`make catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only (an image's existence check may follow a redirect to a vendor mirror, HTTPS only); signed checksum files are checked with `gpgv` against the fingerprints pinned in `tools/update_os_catalog.py` | Directory listings, checksum files and their signatures, to build and check the OS catalog. |
-| GitHub's API, k3s' releases (`api.github.com`, `github.com`, its asset hosts) and GHCR (`ghcr.io`) | the maintainer's machine (`make k3s-catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only; GHCR's anonymous pull token; in CI the workflow's read-only token, sent to GitHub's API only | Release lists, k3s' `sha256sum-<arch>.txt` and the images' digests, to build and check the k3s catalog. |
+| GitHub's API, k3s', Helm's and Argo's chart releases (`api.github.com`, `github.com`, its asset hosts), `get.helm.sh` and GHCR (`ghcr.io`) | the maintainer's machine (`make k3s-catalog`) and CI (the weekly OS catalog workflow); never a playbook run | HTTPS only, from those hosts only; GHCR's anonymous pull token; in CI the workflow's read-only token, sent to GitHub's API only | Release lists, k3s' `sha256sum-<arch>.txt`, the images' digests, Helm's signed checksum files and the chart's signed provenance file, to build and check the k3s catalog. |
 | k3s' releases (`github.com/k3s-io/k3s/releases`, redirecting to GitHub's asset host) | Kubernetes members | HTTPS, no authentication; the binary must have the SHA-256 the k3s catalog pins | The k3s binary. |
 | `ghcr.io` and the registries k3s pulls its own images from (`docker.io/rancher/...`) | Kubernetes members (containerd) | HTTPS, no authentication; kube-vip's and the cloud provider's images by the digest the catalog pins, k3s' own images by the tags its release names | Container images. |
+| `get.helm.sh` and Argo's chart releases (`github.com/argoproj/argo-helm/releases`) | a cluster's first server, with `k8s_bootstrap_argocd` | HTTPS, no authentication; Helm's archive and the chart must have the SHA-256 the k3s catalog pins | Helm and Argo CD's chart. |
+| `quay.io`, `ghcr.io`, `ecr-public.aws.com` and the other registries Argo CD's chart names | Kubernetes members (containerd), with `k8s_bootstrap_argocd` | HTTPS, no authentication; images by the tags the pinned chart names | Argo CD's images. |
+| The Git repository in `k8s_bootstrap_repo_url` | Argo CD, in the cluster | HTTPS; public CAs, or `k8s_bootstrap_repo_ca` for that server only; credentials only if the owner adds them in Argo CD | What the root Application syncs. Read by Argo CD, never by USAS. |
 | `rpm.rancher.io` | Kubernetes members on the RHEL family | HTTPS; packages signed by Rancher's key, pinned by fingerprint (`gpgcheck=1`), metadata unsigned | `k3s-selinux`. |
 | Kubernetes members | control node | SSH as `admin_user`, key; sudo. The tokens go only into each member's `config.yaml` | Install, start and upgrade k3s; `k3s kubectl` on the servers, as root, to wait for nodes, read the read-only account's token, take and release the upgrade lock, and cordon, drain and uncordon nodes; `k3s crictl` on a server to stop its kube-vip before its upgrade. The updates playbook too, for its drains: `k3s kubectl` on a server of the cluster (`cordon`, `drain`, `uncordon`, reading the node and, with `updates_k8s_wait_longhorn`, Longhorn's volumes); what it reads is parsed by patterns and cut, like every report value. |
 | `github.com/<github_user>.keys` | control node | HTTPS, no authentication | The public SSH keys to authorize. |

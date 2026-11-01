@@ -1,0 +1,149 @@
+---
+# On each cluster's first server, once every node is Ready, with k8s_bootstrap_argocd: Helm and Argo CD's chart (each
+# only if it matches the catalog's SHA-256), Argo CD installed from that chart once, and the root Application created
+# once. That's the handoff: Argo CD then manages itself (homelab-kube's apps/argocd.yaml adopts the release) and the
+# apps from Git, so a later run leaves both as they are, and nothing here syncs, reads or deletes what Argo CD holds.
+# It never reads argocd-initial-admin-secret: the owner does (docs/interfaces.md).
+- name: Create the folder for Helm and Argo CD's chart
+  ansible.builtin.file:
+    path: "{{ k3s_bootstrap_dir }}/helm-{{ k3s_helm.version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Helm, checked against the catalog
+  ansible.builtin.get_url:
+    url: "{{ k3s_helm.binaries[k3s_arch].url }}"
+    checksum: sha256:{{ k3s_helm.binaries[k3s_arch].sha256 }}
+    dest: "{{ k3s_bootstrap_dir }}/{{ k3s_helm.binaries[k3s_arch].url | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack Helm
+  ansible.builtin.unarchive:
+    src: "{{ k3s_bootstrap_dir }}/{{ k3s_helm.binaries[k3s_arch].url | basename }}"
+    dest: "{{ k3s_bootstrap_dir }}/helm-{{ k3s_helm.version }}"
+    remote_src: true
+    include: ["linux-{{ k3s_arch }}/helm"]
+    creates: "{{ k3s_bootstrap_dir }}/helm-{{ k3s_helm.version }}/linux-{{ k3s_arch }}/helm"
+
+- name: Install Helm
+  ansible.builtin.copy:
+    src: "{{ k3s_bootstrap_dir }}/helm-{{ k3s_helm.version }}/linux-{{ k3s_arch }}/helm"
+    dest: "{{ k3s_helm_binary }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Argo CD's chart, checked against the catalog
+  ansible.builtin.get_url:
+    url: "{{ k3s_argocd_chart.url }}"
+    checksum: sha256:{{ k3s_argocd_chart.sha256 }}
+    dest: "{{ k3s_bootstrap_dir }}/{{ k3s_argocd_chart.url | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Built as a mapping and dumped, so no setting can add a value of its own.
+- name: Write the chart's values
+  ansible.builtin.copy:
+    content: "{{ k3s_values | to_nice_yaml(indent=2) }}"
+    dest: "{{ k3s_bootstrap_dir }}/argocd-values.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    k3s_values: >-
+      {{ {'load_balancer': k8s_lb_pool != '', 'repo_url': k8s_bootstrap_repo_url, 'repo_ca': k8s_bootstrap_repo_ca}
+         | k3s_argocd_values }}
+
+- name: Read Argo CD's Helm release
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_helm_binary }}"
+      - status
+      - "{{ k3s_argocd_release }}"
+      - --namespace={{ k3s_argocd_namespace }}
+      - --output=json
+  environment:
+    KUBECONFIG: "{{ k3s_admin_kubeconfig }}"
+  register: k3s_argocd_status
+  changed_when: false
+  failed_when: false
+
+- name: Look for Argo CD's Application type
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, get, crd, applications.argoproj.io, --ignore-not-found, -o, name]
+  register: k3s_argocd_crd
+  changed_when: false
+
+- name: Note what's there of Argo CD, and the root Application it gets
+  ansible.builtin.set_fact:
+    k3s_argocd: "{{ k3s_argocd_status | k3s_argocd_installed(k3s_argocd_crd) }}"
+    k3s_root_wanted: >-
+      {{ {'name': k3s_argocd_root_app, 'namespace': k3s_argocd_namespace, 'repo_url': k8s_bootstrap_repo_url,
+          'path': k8s_bootstrap_path, 'revision': k8s_bootstrap_revision} | k3s_root_application }}
+
+# Only when there's no Argo CD, or USAS' install of it didn't finish: once it's there, Argo CD upgrades itself.
+- name: Install Argo CD
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_helm_binary }}"
+      - upgrade
+      - --install
+      - "{{ k3s_argocd_release }}"
+      - "{{ k3s_bootstrap_dir }}/{{ k3s_argocd_chart.url | basename }}"
+      - --namespace={{ k3s_argocd_namespace }}
+      - --create-namespace
+      - --values={{ k3s_bootstrap_dir }}/argocd-values.yaml
+      - --wait
+      - --timeout={{ k8s_bootstrap_timeout }}s
+  environment:
+    KUBECONFIG: "{{ k3s_admin_kubeconfig }}"
+  changed_when: true
+  when: k3s_argocd in ['none', 'retry']
+
+- name: Say that Argo CD was installed some other way
+  ansible.builtin.debug:
+    msg: >-
+      Argo CD is already in cluster {{ k3s_cluster }} without the Helm release {{ k3s_argocd_namespace }}/{{
+      k3s_argocd_release }}: left as it is, only the root Application is added if it's missing.
+  when: k3s_argocd == 'other'
+
+- name: Read the root Application
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - --namespace={{ k3s_argocd_namespace }}
+      - get
+      - applications.argoproj.io
+      - "{{ k3s_argocd_root_app }}"
+      - --ignore-not-found
+      - -o
+      - json
+  register: k3s_root_app
+  changed_when: false
+
+- name: Create the root Application
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, create, -f, "-"]
+    stdin: "{{ k3s_root_wanted | to_json }}"
+  changed_when: true
+  when: k3s_root_app.stdout | length == 0
+
+# Git may since have changed it (Argo CD manages it once it's there), so a run never moves it back.
+- name: Say that the root Application follows another source
+  ansible.builtin.debug:
+    msg: >-
+      The root Application {{ k3s_argocd_namespace }}/{{ k3s_argocd_root_app }} already follows {{ k3s_root_source.repoURL
+      | default('?') }} ({{ k3s_root_source.path | default('?') }} at {{ k3s_root_source.targetRevision | default('?') }}),
+      not k8s_bootstrap_repo_url, _path and _revision: left as it is. Change it in Git, or with k3s kubectl edit.
+  when:
+    - k3s_root_app.stdout | length > 0
+    - k3s_root_source != k3s_root_wanted.spec.source
+  vars:
+    k3s_root_source: "{{ (k3s_root_app.stdout | from_json).spec.source | default({}) }}"
