@@ -1,6 +1,20 @@
 ---
-# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux): dnf. Only the reboot check is shared with the baseline
-# so far; listing and installing updates on this family comes with the updates playbook's RHEL support.
+# The RHEL family (CentOS Stream, Rocky Linux, AlmaLinux): dnf.
+updates_os_kernel_packages: [kernel, kernel-*]
+# The Secure Boot chain: the shim and the signed GRUB (the revocation list comes with the shim).
+updates_os_pcr7_packages: [shim, shim-*, grub2-efi-*]
+# Updates that usually want a reboot: dnf needs-restarting's core packages (the kernel, the C library, systemd
+# and D-Bus, firmware and microcode) and the boot chain.
+updates_os_reboot_packages: [kernel, kernel-core, kernel-rt*, glibc, linux-firmware, microcode_ctl, systemd, dbus,
+                             dbus-broker, dbus-daemon, shim, shim-*, grub2-efi-*]
+# What automatic updates run as, and the lock rpm takes (fcntl) for a transaction. dnf's own locks are files
+# that hold the process ID of the dnf that runs.
+updates_os_busy_units: [dnf-automatic.service, dnf-automatic-install.service, dnf-automatic-download.service,
+                        dnf-makecache.service]
+updates_os_locks: [/var/lib/rpm/.rpm.lock]
+updates_os_pid_locks: [/var/cache/dnf/metadata_lock.pid, /var/lib/dnf/rpmdb_lock.pid, /var/cache/dnf/download_lock.pid]
+# How a waiting reboot shows: dnf needs-restarting -r (dnf-plugins-core); where that command is missing, the
+# newest kernel in /boot is compared with the one running. kernel always compares the kernels.
 updates_os_reboot_check: needs-restarting
 # Rocky Linux and AlmaLinux publish security errata (dnf updateinfo); vars/CentOS.yml says CentOS Stream doesn't.
 os_security_errata: true

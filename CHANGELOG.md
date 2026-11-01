@@ -98,6 +98,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Debian-Security, and a waiting reboot found by comparing the newest kernel in `/boot` with the running one.
   The supported releases and their end-of-support dates now follow the OS catalog (Ubuntu's dates move to the
   catalog's). The updates integration tests run on Debian 12 and 13 too.
+- **The updates playbook on CentOS Stream, Rocky Linux and AlmaLinux 9 and 10** ([docs/updates.md](docs/updates.md)):
+  dnf lists the pending updates, a dry run shows what installing them would do (dependencies and new kernels
+  included), and dnf installs them with its signature checks. Security updates are those a security advisory
+  fixes (`dnf updateinfo`); CentOS Stream publishes no errata, so `updates_scope: security` installs every
+  update there, and the report says so. A waiting reboot comes from `dnf needs-restarting -r`, or, without
+  dnf-plugins-core, from the kernels in `/boot`. The report lists the packages locked with dnf versionlock and
+  what dnf-automatic does, and a busy rpm lock makes the server `busy`. Package names and excludes may now
+  have upper case and `_` (`NetworkManager`). The updates integration tests run on all six, against signed dnf
+  repositories with a security advisory.
+- The baseline's reboot check on the RHEL family no longer reports a reboot as needed on a server without
+  dnf-plugins-core (where `dnf needs-restarting` doesn't exist): it compares the kernels in `/boot` instead.
 - **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
   the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
   update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags

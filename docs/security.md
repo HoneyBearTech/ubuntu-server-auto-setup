@@ -266,8 +266,12 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - The updates playbook never configures a server: it reads, installs the updates you chose, reboots only
   with `updates_reboot: if_required`, and checks health. It doesn't stop, mask or change automatic updates,
   write holds, or install anything that isn't an update of an installed package or its new dependency.
-- It never turns off package signature checks: apt checks every package against the server's own keyrings
-  (`tests/updates.sh` fails if the role names an option that would turn that off).
+- It never turns off package signature checks: apt and dnf check every package against the server's own
+  keys (`tests/updates.sh` fails if the role names an option that would turn that off). On the RHEL family
+  the metadata refresh answers no question, so a repository whose key isn't imported yet fails the check
+  instead of being trusted by the playbook; the install itself imports a key only as dnf always does, from
+  the `gpgkey` that root configured for the repository. The packages left out (excludes, versionlock) are
+  passed to dnf as excludes too, and a dry run first skips a server whose updates would pull one in.
 - A server outside `servers` with a `pve_vmid` (in `other_servers`) never gets the Vault admin
   password as its sudo password unless `updates_allow_shared_become_password` says so for it, since root
   there could read it. Host keys are checked strictly on every connection, as for every playbook.
