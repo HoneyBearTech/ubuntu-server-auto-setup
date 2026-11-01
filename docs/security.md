@@ -106,7 +106,8 @@ defaults and the advice in the README's "Running it securely" section and in [we
   VM is created and again before the baseline formats a disk, so none can add an option to a Proxmox disk
   (fuzzed in `tests/fuzz/fuzz_data_disks.py`). The baseline formats only a disk on which `blkid -p` finds
   nothing, found by the serial it was created with, never by its kernel name; a disk that holds anything is left
-  as it is. Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
+  as it is, and one is the disk's own only when blkid reports exactly its file system type and label (blkid's
+  output is read one field per newline, so no character in a label can make up another field). Adding the disks needs no new privilege (`VM.Config.Disk` and `Datastore.AllocateSpace` are already
   in the role), and `vm_spread_group` is checked from the VM list the token already reads.
 
 <a id="the-proxmox-node-user-optional"></a>
