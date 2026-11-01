@@ -145,7 +145,7 @@ def test_warnings_follow_the_tags():
     full = build([101], form=foreign_form(101)).warnings
     assert any("default for incoming traffic is deny" in w and "443/tcp" in w for w in full)
     assert any("ssh_keys_exclusive" in w and "octocat" in w for w in full)
-    assert any("apt_upgrade: dist" in w for w in full)
+    assert "Every package is upgraded (pkg_upgrade: dist)." in full
     assert any("sudoers.d/90-ansible-<user>" in w and "ubuntu" in w for w in full)
     keys = build([101], form=foreign_form(101), tags=["ssh_keys"], preset="keys").warnings
     assert len(keys) == 1 and "ssh_keys_exclusive" in keys[0]

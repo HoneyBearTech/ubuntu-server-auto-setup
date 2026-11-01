@@ -283,6 +283,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The VMs page's plan said "Every package is upgraded (apt_upgrade: dist)", the setting's name before 0.7.0; it
+  now names `pkg_upgrade`. Found by the v0.7.0 release checklist.
 - The updates playbook run with the container image's own Ansible (`docker exec usas ansible-playbook ...`, as
   docs/web-ui.md shows) stopped at "Make the report folder": its report went to the project's folder, which is
   read-only in the image. In the image it now goes to the data volume's `updates/reports`, as the web UI's runs'.
