@@ -179,8 +179,13 @@ if [ "$(uname -s)" = Linux ]; then
   curl -fsSk --max-time 10 "https://$VIP:6443/ping" | grep -qx pong \
     || { echo "ERROR: the API doesn't answer on the VIP $VIP" >&2; exit 1; }
   lb="$(docker exec k3s-s1 k3s kubectl -n kube-system get service traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
-  curl -s -o /dev/null --max-time 10 -w '%{http_code}' "http://$lb/" | grep -qx 404 \
-    || { echo "ERROR: Traefik doesn't answer on its LoadBalancer address $lb" >&2; exit 1; }
+  # The address can be handed out before Traefik serves on it.
+  for _ in $(seq 1 24); do
+    code="$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://$lb/" || true)"
+    [ "$code" = 404 ] && break
+    sleep 5
+  done
+  [ "$code" = 404 ] || { echo "ERROR: Traefik doesn't answer on its LoadBalancer address $lb (HTTP $code)" >&2; exit 1; }
 else
   echo "skipped: the Docker network isn't reachable from this host"
 fi

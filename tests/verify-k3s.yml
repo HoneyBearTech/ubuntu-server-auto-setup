@@ -2,7 +2,8 @@
 # Checks the cluster tests/kubernetes.sh built (cluster ci, tests/inventory/k3s.yml): every node Ready, three etcd
 # members, the servers tainted, ServiceLB off, kube-vip holding the VIP and a LoadBalancer address from the pool,
 # the files' modes, the binary's hash, the tokens where they belong, and the read-only kubeconfig's rights.
-# tokens_file is the test's tokens (-e tokens_file=...).
+# tokens_file is the test's tokens (-e tokens_file=...). k3s by its full path: sudo's secure_path on the RHEL
+# family leaves /usr/local/bin out.
 - name: Check every member's files
   hosts: k8s_ci_servers:k8s_ci_agents
   become: true
@@ -45,7 +46,7 @@
   tasks:
     - name: Read the nodes
       ansible.builtin.command:
-        argv: [k3s, kubectl, get, nodes, -o, json]
+        argv: [/usr/local/bin/k3s, kubectl, get, nodes, -o, json]
       register: verify_nodes
       changed_when: false
 
@@ -53,7 +54,7 @@
     # node is Ready.
     - name: Read the services and daemon sets, once Traefik has a LoadBalancer address
       ansible.builtin.command:
-        argv: [k3s, kubectl, get, "services,daemonsets", --all-namespaces, -o, json]
+        argv: [/usr/local/bin/k3s, kubectl, get, "services,daemonsets", --all-namespaces, -o, json]
       register: verify_objects
       changed_when: false
       until: >-
@@ -99,7 +100,7 @@
     # It may read nodes and pods, and may not create anything or read Secrets.
     - name: Ask what the read-only account may do
       ansible.builtin.command:
-        argv: "{{ ['k3s', 'kubectl', '--kubeconfig', '/root/ci-readonly.yaml', 'auth', 'can-i'] + item.split() }}"
+        argv: "{{ ['/usr/local/bin/k3s', 'kubectl', '--kubeconfig', '/root/ci-readonly.yaml', 'auth', 'can-i'] + item.split() }}"
       loop: [list nodes, list pods, create pods, get secrets, delete nodes]
       register: verify_can
       changed_when: false
