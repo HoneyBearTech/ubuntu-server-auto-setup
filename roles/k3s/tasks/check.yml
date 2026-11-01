@@ -78,6 +78,28 @@
       seconds.
     quiet: true
 
+# The Argo CD bootstrap runs on the first server, so its pods need a node that takes ordinary workloads: an agent, or
+# untainted servers.
+- name: Check the Argo CD bootstrap's settings
+  ansible.builtin.assert:
+    that:
+      - k8s_bootstrap_repo_url is string and k8s_bootstrap_repo_url | length <= 400
+      - k8s_bootstrap_repo_url is match(k3s_bootstrap_url_pattern)
+      - k8s_bootstrap_path is string and k8s_bootstrap_path is match(k3s_bootstrap_path_pattern)
+      - k8s_bootstrap_revision is string and k8s_bootstrap_revision is match(k3s_bootstrap_revision_pattern)
+      - k8s_bootstrap_repo_ca is string and (k8s_bootstrap_repo_ca == '' or k8s_bootstrap_repo_ca is match(k3s_bootstrap_ca_pattern))
+      - k8s_bootstrap_timeout | string is match('^[1-9][0-9]{0,4}\Z')
+      - k3s_helm.binaries[k3s_architectures[ansible_facts.architecture]] is defined
+      - not k8s_server_taint | bool or k3s_members | selectattr('role', 'eq', 'agent') | list | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }}: with k8s_bootstrap_argocd, k8s_bootstrap_repo_url must be the Git repository's
+      https:// URL (a DNS name or IPv4 address, an optional port and a path; no user name or password, query or
+      fragment), k8s_bootstrap_path a folder in it ("." for its top, no ".."), k8s_bootstrap_revision a branch, tag or
+      commit, k8s_bootstrap_repo_ca empty or PEM certificates, k8s_bootstrap_timeout a number of seconds; and Argo CD's
+      pods need an agent in k8s_{{ k3s_cluster }}_agents, or k8s_server_taint false.
+    quiet: true
+  when: k8s_bootstrap_argocd | bool
+
 # The settings every member must agree on, as the inventory sets them.
 - name: Check that the members agree on the cluster's release and addresses
   ansible.builtin.assert:

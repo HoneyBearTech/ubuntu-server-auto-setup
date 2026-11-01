@@ -144,3 +144,13 @@ RUN . /etc/os-release \
  && ssh-keygen -A >/dev/null \
  && if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then \
       echo 'PerSourcePenalties no' > /etc/ssh/sshd_config.d/50-usas-test.conf; fi
+
+# A Git server for tests/kubernetes.sh's Argo CD bootstrap: git-server.py serves the test's repository over HTTPS
+# (Git's smart HTTP protocol, through git http-backend), as the root Application's repository.
+FROM ubuntu-26.04 AS git-server
+# hadolint ignore=DL3008
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git python3 \
+ && rm -rf /var/lib/apt/lists/*
+COPY git-server.py /usr/local/bin/git-server.py
+CMD ["python3", "/usr/local/bin/git-server.py"]

@@ -8,8 +8,8 @@ name: OS catalog
 # fails or a vendor has a newer build, and closes it once the catalog checks out again; the maintainer then runs
 # make catalog and opens a pull request. It's an issue rather than a pull request: one opened with this workflow's
 # token wouldn't run the other checks, and an app's token would be another secret. tools/update_k3s_catalog.py
-# does the same for the k3s catalog (roles/k3s/vars/catalog.yml: k3s' checksums, kube-vip's digests), in the same
-# issue.
+# does the same for the k3s catalog (roles/k3s/vars/catalog.yml: k3s' checksums, kube-vip's digests, and Helm's and
+# the Argo CD chart's checksums, signed, with the keys in tools/k3s-catalog-keys/), in the same issue.
 on:  # yamllint disable-line rule:truthy
   schedule:
     - cron: "41 5 * * 1" # weekly, Monday 05:41 UTC
@@ -21,6 +21,7 @@ on:  # yamllint disable-line rule:truthy
       - "tools/os-catalog-keys/**"
       - "roles/k3s/vars/catalog.yml"
       - "tools/update_k3s_catalog.py"
+      - "tools/k3s-catalog-keys/**"
       - ".github/workflows/catalog.yml"
 
 permissions:

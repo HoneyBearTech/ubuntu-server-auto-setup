@@ -112,6 +112,9 @@ all:
       #       k8s_api_vip: 10.10.10.70             # a free address: kube-vip holds it on one server at a time
       #       k8s_lb_pool: 10.10.10.90-10.10.10.99  # LoadBalancer services' addresses
       #       k8s_api_sources: [10.10.10.5]        # the control node, for kubectl
+      #       # Optional: hand the cluster over to Argo CD, which then syncs the Applications in apps/ from Git.
+      #       # k8s_bootstrap_argocd: true
+      #       # k8s_bootstrap_repo_url: https://github.com/HoneyBearTech/homelab-kube.git
       #     children:
       #       k8s_lab_servers:
       #         hosts: {cp-1: {}, cp-2: {}, cp-3: {}}
