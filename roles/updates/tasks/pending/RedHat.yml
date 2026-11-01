@@ -1,0 +1,107 @@
+---
+# The RHEL family: what dnf would install. Nothing here changes a package; the metadata is refreshed, also in
+# check mode, as the baseline does. No answer is given for dnf: a repository whose metadata key isn't imported
+# yet fails the refresh instead of being trusted here.
+- name: Wait for the package manager
+  ansible.builtin.include_tasks: ../busy.yml
+
+- name: Refresh the repository metadata
+  ansible.builtin.command:
+    argv: [dnf, -q, makecache, "--setopt=metadata_expire={{ updates_refresh_max_age | int }}"]
+  environment:
+    LC_ALL: C
+  changed_when: false
+  check_mode: false
+
+# dnf versionlock (python3-dnf-plugin-versionlock) keeps these at their version; dnf honours the list itself.
+- name: Read the version locks
+  ansible.builtin.slurp:
+    src: /etc/dnf/plugins/versionlock.list
+  register: updates_versionlock
+  failed_when: false
+
+- name: Ask dnf what it would upgrade
+  ansible.builtin.command:
+    argv: [dnf, -q, --cacheonly, repoquery, --upgrades, --latest-limit=1, --qf, "%{name}|%{evr}|%{reponame}"]
+  environment:
+    LC_ALL: C
+  register: updates_dnf_upgrades
+  changed_when: false
+  check_mode: false
+
+# The updates that an advisory of type security fixes (updateinfo). CentOS Stream publishes none.
+- name: Ask dnf which of them fix security issues
+  ansible.builtin.command:
+    argv: [dnf, -q, --cacheonly, repoquery, --upgrades, --security, --latest-limit=1, --qf, "%{name}|%{evr}|%{reponame}"]
+  environment:
+    LC_ALL: C
+  register: updates_dnf_security
+  changed_when: false
+  check_mode: false
+  when: os_security_errata | bool
+
+- name: Ask dnf what is installed
+  ansible.builtin.command:
+    argv: [dnf, -q, --cacheonly, repoquery, --installed, --qf, "%{name}|%{evr}|%{reponame}"]
+  environment:
+    LC_ALL: C
+  register: updates_dnf_installed
+  changed_when: false
+  check_mode: false
+
+# Without errata, "security" would install nothing: such a server gets every update, and the report says so.
+- name: Choose the updates to install
+  ansible.builtin.set_fact:
+    updates_pending: "{{ pending }}"
+    updates_selection: "{{ pending.upgrades | usas_select_updates(scope, excludes, held) }}"
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'held': held, 'deferred': [], 'pending': pending.upgrades,
+      'security_count': pending.upgrades | selectattr('security') | list | length, 'truncated': pending.truncated,
+      'os': usas_updates_result.os | combine({'warning': ([usas_updates_result.os.warning, no_errata] | select
+      | join('; '))})}) }}
+  vars:
+    pending: >-
+      {{ updates_dnf_upgrades.stdout | usas_dnf_updates(updates_dnf_security.stdout | default(''),
+      updates_dnf_installed.stdout, updates_max_entries) }}
+    held: "{{ updates_versionlock.content | default('') | b64decode | usas_versionlock_names }}"
+    excludes: "{{ updates_exclude_packages + ([] if updates_kernel | bool else updates_kernel_packages) }}"
+    scope: "{{ updates_scope if os_security_errata | bool else 'all' }}"
+    no_errata: >-
+      {{ (usas_updates_result.os.facts ~ ' publishes no security errata: updates_scope security installs every update')
+      if updates_scope == 'security' and not os_security_errata | bool else '' }}
+
+# What upgrading exactly those would do (dependencies and new kernels included): an update that needs a package
+# left out would upgrade it anyway, so such a server is skipped instead. dnf --assumeno answers no; a request dnf
+# can't resolve fails here, with dnf's reason.
+- name: Ask dnf what upgrading the chosen updates would do
+  ansible.builtin.command:
+    argv: "{{ ['dnf', '--cacheonly', '--assumeno', 'upgrade'] + updates_selection.install }}"
+  environment:
+    LC_ALL: C
+  register: updates_plan_simulation
+  changed_when: false
+  failed_when: >-
+    updates_plan_simulation.rc != 0
+    and 'Operation aborted.' not in (updates_plan_simulation.stdout ~ updates_plan_simulation.stderr)
+  check_mode: false
+  when: updates_selection.install | length > 0
+
+- name: Note the plan
+  ansible.builtin.set_fact:
+    usas_updates_result: >-
+      {{ usas_updates_result | combine({'planned': planned_names, 'excluded': updates_selection.excluded,
+      'reboot': usas_updates_result.reboot | combine({'expected': planned_names | usas_matching(
+      updates_os_reboot_packages + updates_kernel_packages) | length > 0}), 'removals': plan.removals,
+      'status': 'skipped' if dragged else 'pending',
+      'reason': ('the updates would also upgrade packages left out: ' ~ dragged | join(', ')) if dragged else ''}) }}
+  vars:
+    plan: >-
+      {{ (updates_plan_simulation.stdout | usas_dnf_transaction(updates_max_entries))
+      if updates_plan_simulation is not skipped else {'upgrades': [], 'removals': []} }}
+    planned_names: "{{ plan.upgrades | map(attribute='name') | list }}"
+    dragged: >-
+      {{ planned_names | usas_matching(updates_selection.excluded + usas_updates_result.held) }}
+
+- name: Leave a server alone whose updates need a package left out
+  ansible.builtin.meta: end_host
+  when: usas_updates_result.status != 'pending'
