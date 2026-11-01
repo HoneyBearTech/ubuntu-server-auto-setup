@@ -400,3 +400,16 @@ def test_gpgv_accepts_only_a_good_signature_by_a_pinned_key(tmp_path):
         for home in homes:
             subprocess.run(["gpgconf", "--homedir", home, "--kill", "all"], check=False, capture_output=True)
             shutil.rmtree(home, ignore_errors=True)
+
+
+def test_gpgv_output_that_isnt_utf8_is_read(tmp_path):
+    fingerprint = "2B8F22F57260EFA67BE1C5824B11F800CD9D2252"
+    gpgv = tmp_path / "gpgv"
+    gpgv.write_bytes(b"#!/bin/sh\nprintf 'gpgv: Good signature from \"\\305ukasz\"\\n' >&2\n"
+                     b"printf '[GNUPG:] GOODSIG X \\305ukasz\\n[GNUPG:] VALIDSIG " + ("A" * 40).encode()
+                     + b" 2026-11-01 0 4 0 1 10 01 " + fingerprint.encode() + b"\\n'\n")
+    gpgv.chmod(0o755)
+    data = b"0123  helm-v4.3.1-linux-amd64.tar.gz\n"
+    assert ukc.verify_signature(b"sig", ukc.KEYS["argo-helm"], "sums", data=data, gpgv=str(gpgv)) == data
+    with pytest.raises(ukc.CatalogError, match="isn't by a pinned key"):
+        ukc.verify_signature(b"sig", ukc.KEYS["helm"], "sums", data=data, gpgv=str(gpgv))

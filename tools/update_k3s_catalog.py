@@ -317,11 +317,14 @@ def verify_signature(signature: bytes, key: Key, what: str, data: bytes | None =
         if data is not None:
             (folder / "data").write_bytes(data)
             args.append(str(folder / "data"))
-        result = subprocess.run(args, capture_output=True, text=True, check=False)  # noqa: S603 (fixed arguments)
+        result = subprocess.run(args, capture_output=True, check=False)  # noqa: S603 (fixed arguments)
+    # gpgv prints user IDs as they are in the key, which needn't be UTF-8.
+    status = result.stdout.decode("utf-8", "replace")
     # VALIDSIG's last field is the primary key's fingerprint: only the pinned keys pass.
-    signers = re.findall(r"^\[GNUPG:\] VALIDSIG [0-9A-F]{40} .* ([0-9A-F]{40})$", result.stdout, flags=re.MULTILINE)
+    signers = re.findall(r"^\[GNUPG:\] VALIDSIG [0-9A-F]{40} .* ([0-9A-F]{40})$", status, flags=re.MULTILINE)
     if result.returncode != 0 or not signers or not set(signers) <= key.fingerprints:
-        raise CatalogError(f"the signature on {what} is bad or isn't by a pinned key: {result.stderr.strip()}")
+        raise CatalogError(f"the signature on {what} is bad or isn't by a pinned key: "
+                           f"{result.stderr.decode('utf-8', 'replace').strip()}")
     return text
 
 
