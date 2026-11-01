@@ -6,7 +6,8 @@ This image holds [ubuntu-server-auto-setup](https://github.com/HoneyBearTech/ubu
 Unattended Server Auto-Setup): Ansible playbooks that install Ubuntu 22.04 to 26.04, Debian 12 and 13, and CentOS
 Stream, Rocky Linux and AlmaLinux 9 and 10 on new Proxmox VE VMs with no hands on the keyboard, from the
 vendor's cloud image or Ubuntu's installer, load your GitHub SSH keys, and apply a hardened baseline (SSH, UFW
-or firewalld, Fail2Ban, automatic security updates). Its web UI lays out every option as forms, writes an ordinary Ansible inventory
+or firewalld, Fail2Ban, automatic security updates). They keep the servers updated in waves, and can build
+k3s Kubernetes clusters on them and upgrade them a node at a time. Its web UI lays out every option as forms, writes an ordinary Ansible inventory
 and an encrypted Vault, and runs the playbooks with a live log. It runs the same on Windows (Docker Desktop
 with WSL 2), Linux and macOS.
 

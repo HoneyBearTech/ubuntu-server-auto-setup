@@ -53,7 +53,8 @@ Linux and AlmaLinux installed from their cloud images, and an updates playbook f
   [interfaces.md](interfaces.md#kubernetes-clusters)), an optional handoff to Argo CD (done:
   [interfaces.md](interfaces.md#handing-a-cluster-over-to-argo-cd-optional)), upgrades and drain-aware fleet updates (done:
   [interfaces.md](interfaces.md#upgrades), [updates.md](updates.md#kubernetes-members)) and web UI fields (done:
-  clusters on the Defaults page, members on the Servers page, check-first runs on the Run page).
+  clusters on the Defaults page, members on the Servers page, check-first runs on the Run page). The guide from
+  an empty inventory to a running cluster is [kubernetes.md](kubernetes.md).
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 
@@ -103,6 +104,14 @@ Linux and AlmaLinux installed from their cloud images, and an updates playbook f
   above. The OS catalog lists exactly what is supported.
 - **Manage applications.** It produces a hardened, up-to-date base server. Web servers, databases,
   containers and their configuration belong in your own playbooks on top.
+- **Run workloads on a Kubernetes cluster.** It builds k3s clusters and keeps their nodes updated, but never
+  deploys workloads or holds manifests, Helm values or GitOps state: that's a GitOps repository's job (Argo CD's,
+  after the optional handoff), or yours.
+- **Install other Kubernetes distributions** than k3s, until a real need shows up.
+- **Expose anything to the internet.** Not the Kubernetes API, not Argo CD, not the web UI: the API answers the
+  cluster's members and the addresses in `k8s_api_sources`.
+- **Configure Proxmox HA rules.** It checks that a spread group's VMs (a cluster's servers) are on different
+  nodes, and leaves HA rules to you: the API token has no privilege for them.
 - **Be a compliance benchmark.** It won't claim CIS or STIG conformance; optional hardening stays opt-in
   and documented.
 - **Hold your secrets elsewhere.** Secrets stay in an Ansible Vault you own: on your control node, or in

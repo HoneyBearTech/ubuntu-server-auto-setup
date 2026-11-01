@@ -23,6 +23,8 @@
   with forms for every option.
 - [Keeping servers updated](updates.md): the updates playbook, for the servers this project installed and
   others: report-only checks, what gets installed, reboots, health checks, windows and the report.
+- [Kubernetes clusters](kubernetes.md): k3s on the VMs, from the inventory and the join tokens to a running
+  cluster, then upgrades, drain-aware updates, the optional Argo CD handoff, the web UI and troubleshooting.
 
 ## Using it
 

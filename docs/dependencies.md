@@ -40,18 +40,22 @@ copied into the repository ("vendored").
 | CI container images (gitleaks, actionlint, hadolint, Trivy) | `.github/workflows/checks.yml`, `release.yml` | image digests (`@sha256:…`) | Docker |
 | Fuzzing engine (atheris) | `requirements-fuzz.in`, pinned in `requirements-fuzz.txt` | exact version with SHA-256 hashes | the fuzzing workflow and `make fuzz` |
 | Chromium for the browser tests (Playwright's headless build) | the version of `@playwright/test` in `package-lock.json` | that Playwright release's browser build, downloaded over HTTPS from Playwright's servers (not hash-pinned by this repository); CI caches it by Playwright version | `npx playwright install --with-deps --only-shell chromium` (CI); `npx playwright install chromium` locally |
-| Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test` |
+| Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test`; the Kubernetes tests' Git server is a stage of the Ubuntu target image (`git-server`), with Git and Python from Ubuntu's archive |
 | Operating system images (Ubuntu installer ISOs and cloud images, Debian, CentOS Stream, Rocky Linux and AlmaLinux cloud images) | `roles/os_catalog/vars/catalog.yml` (the OS catalog), built by `tools/update_os_catalog.py` | exact URL and checksum per image; the vendors' signatures checked against pinned fingerprints when the catalog is built (`tools/os-catalog-keys/`) | downloaded by the Proxmox node during a run; the weekly OS catalog workflow reports new builds and gone pins |
 | k3s, kube-vip and kube-vip's cloud provider, on Kubernetes members | `roles/k3s/vars/catalog.yml` (the k3s catalog), built by `tools/update_k3s_catalog.py` | k3s' binary by exact URL and SHA-256 per architecture, from k3s' own `sha256sum-<arch>.txt`; the two images by digest (`@sha256:…`). Neither project signs what it publishes, so the pins rest on HTTPS and review; the weekly OS catalog workflow checks them again and opens an issue when a pin changes upstream or a newer release is out (Dependabot can't read the catalog) | the `k3s` role (`get_url` with the checksum; containerd, from k3s' own manifests directory) |
 | Helm and Argo CD's chart (`argo-cd`), on a cluster's first server with `k8s_bootstrap_argocd` | `roles/k3s/vars/catalog.yml` (`k3s_helm`, `k3s_argocd_chart`), built by `tools/update_k3s_catalog.py` | Helm's archive per architecture and the chart by exact URL and SHA-256, each hash taken from a file signed upstream (Helm's maintainers' keys, Argo's chart repository key, in `tools/k3s-catalog-keys/`, fingerprints in the tool) and checked again weekly; Argo CD's images by the tags the chart names | the `k3s` role (`get_url` with the checksum; Helm installs the chart from the checked file) |
+| The images k3s and Argo CD pull themselves: k3s' system components (CoreDNS, Traefik, metrics-server, local-path-provisioner, the pause image; `docker.io/rancher/...`) and Argo CD's (`quay.io`, `ghcr.io`, `ecr-public.aws.com`) | the pinned k3s release (its `k3s-images.txt`) and the pinned Argo CD chart | the tags that release and chart name, not digests: the release and the chart are pinned by SHA-256, the images they name by tag only, and none of them is signed upstream | containerd on the members, from k3s' own manifests and the chart |
 | k3s' SELinux policy (`k3s-selinux`), on RHEL-family Kubernetes members | Rancher's stable repository (`rpm.rancher.io`), set up by the `kubernetes_node` role | Rancher's signing key, pinned by fingerprint; `gpgcheck=1` (the repository's metadata isn't signed) | dnf |
 | EPEL (Extra Packages for Enterprise Linux), on RHEL-family servers | `epel-release` from the distribution's own repositories | EPEL's signing key, which `epel-release` installs; `gpgcheck` checked to stay on | dnf, for Fail2Ban, `fail2ban-firewalld` and msmtp (only when Fail2Ban or the mail relay is on) |
 | Vendor signing keys (Ubuntu CD image and cloud image keys, Rocky Linux 9 and 10, AlmaLinux 9 and 10) | `roles/installer_iso/files/ubuntu-cdimage-keyring.gpg`, `tools/os-catalog-keys/*.asc` | full fingerprints in `tools/update_os_catalog.py` and `installer_signing_fingerprint` | `gpgv`, when the catalog is built (and at run time for an unpinned Ubuntu point release) |
 | Helm's and Argo's chart repository's signing keys (Helm's `KEYS` file, `argoproj.github.io/argo-helm/pgp_keys.asc`) | `tools/k3s-catalog-keys/*.asc` | full fingerprints in `tools/update_k3s_catalog.py` | `gpgv`, when the k3s catalog is built and checked |
 
-On the systems they manage, the playbooks install packages only from Ubuntu's and Debian's own archives
-(`apt`): `xorriso` and `gpgv` on the Proxmox nodes; UFW, Fail2Ban, unattended-upgrades, qemu-guest-agent and a few
-tools on the servers. The Ubuntu ISO is verified against the checksum the OS catalog pins, which was taken
+On the systems they manage, the playbooks install packages only from the distributions' own repositories
+(`apt` or `dnf`, and EPEL on the RHEL family where the table says): `xorriso` and `gpgv` on the Proxmox nodes;
+UFW or firewalld, Fail2Ban, unattended-upgrades or dnf-automatic, qemu-guest-agent and a few tools on the
+servers; on Kubernetes members also Longhorn's prerequisites and, on the RHEL family, `k3s-selinux` from
+Rancher. Besides packages, `playbooks/kubernetes.yml` installs only what the k3s catalog pins (above): the k3s
+binary on the members, and Helm and Argo CD's chart on a cluster's first server with the handoff on. The Ubuntu ISO is verified against the checksum the OS catalog pins, which was taken
 from Ubuntu's checksum file after `gpgv` checked Ubuntu's signature on it with the CD image signing key (pinned
 by fingerprint; never fetched at run time). A point release the catalog doesn't pin is checked the same way at
 run time, with the key that ships in `roles/installer_iso/files/`. These are runtime inputs on your own
@@ -98,6 +102,13 @@ stay in the image's build stage.
   `tests/check_floors.py` checks every lower bound itself against OSV in the same check. The lower bounds are
   kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy. The npm
   packages have no ranges to check: every version is exact.
+- **The k3s catalog** (k3s, kube-vip, its cloud provider, Helm and Argo CD's chart) has no Dependabot support
+  either. The weekly "OS catalog" workflow runs `tools/update_k3s_catalog.py --check` and opens or updates one
+  issue when a pin no longer matches upstream, a download is gone, or newer releases are out (k3s' newest
+  patch of its two newest minor lines among them); the maintainer adds it with `make k3s-catalog` in a pull request. A new pin
+  never upgrades a cluster: its `k8s_version` does, and Argo CD, once handed over, is upgraded from its GitOps
+  repository. The maintainer reads k3s', kube-vip's, Helm's and Argo CD's security advisories before every
+  release, and re-checks before each one whether Rancher has a stable `k3s-selinux` for EL10.
 - Every release carries an SBOM (SPDX) of the source tree, and the container image an SBOM of its own
   contents, see [verifying-releases.md](verifying-releases.md).
 - **Every release image** is scanned with [Trivy](https://trivy.dev/) before it is pushed; a fixable
@@ -131,6 +142,12 @@ patched release is published.
 - Vulnerabilities in what the playbooks install on servers (OpenSSH, UFW, Fail2Ban, the kernel) are fixed
   by Ubuntu and installed by the baseline's upgrade and by unattended-upgrades; the project changes its
   defaults only if a setting is needed to mitigate one.
+- A vulnerability in k3s, kube-vip, its cloud provider, Helm or Argo CD's chart is fixed by adding the fixed
+  release to the k3s catalog within the same thresholds and saying so in the release notes. Clusters move to
+  it when their operator sets `k8s_version` and runs `make kubernetes-upgrade` (USAS never upgrades a cluster on
+  its own); a pin with a known vulnerability stays in the catalog only while clusters may still run it, since
+  removing it would refuse them, and the release notes name it. Argo CD after the handoff is the GitOps
+  repository's to upgrade.
 
 ## Policy for licenses
 
@@ -149,6 +166,10 @@ One package is listed by name because its license is misdetected: `typing-extens
 `PSF-2.0`, but GitHub's license data reads the license history in its `LICENSE` file as GPL. It reaches CI
 through the lint tools, and the image through FastAPI's dependencies (pydantic).
 
+What the playbooks download onto Kubernetes members is under its upstreams' own licenses and isn't part of
+the repository or its releases: k3s, kube-vip and its cloud provider, Helm, Argo CD and its chart, and
+`k3s-selinux` are all `Apache-2.0`.
+
 The container image also contains the Debian packages of its base image and `openssh-client` and `tzdata`
 under their own (mostly free software) licenses, as any Debian-based image does; its SBOM lists them.
 
@@ -164,7 +185,9 @@ A release is only published when, at the time of the release:
 - the required CI checks passed on the release commit (the release workflow runs them again on the tag);
 - the latest collections allowed by `requirements.yml` and the latest ansible-core in range have been
   used for a run against a disposable VM;
-- the release image passes the Trivy scan and the smoke test (the release workflow stops otherwise).
+- the release image passes the Trivy scan and the smoke test (the release workflow stops otherwise);
+- `make catalog-check` and `make k3s-catalog-check` pass: every pinned image, binary, chart and signature still
+  matches upstream.
 
 ## Policy for findings from static analysis (SAST)
 

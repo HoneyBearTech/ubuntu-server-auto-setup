@@ -35,7 +35,8 @@ Linux and AlmaLinux 9 and 10 on fresh Proxmox VE VMs with no hands on the keyboa
 and apply a hardened baseline: UFW or firewalld, Fail2Ban, SSH hardening and automatic security updates. Every
 release installs from its vendor's cloud image, and Ubuntu also from its installer ISO; the baseline also runs
 on servers this project didn't install. Afterwards the updates playbook keeps the servers updated, a wave at a
-time, with health checks and a report, by hand or on a schedule. Run the playbooks from a
+time, with health checks and a report, by hand or on a schedule, and servers you put in a Kubernetes group become
+a k3s cluster that USAS builds, upgrades and keeps patched one node at a time. Run the playbooks from a
 checkout with `make`, or from the container image, whose web UI lays out every option and runs them for you,
 on Windows, Linux or macOS.
 
@@ -62,6 +63,8 @@ on Windows, Linux or macOS.
   hardened server.
 - [Keeping servers updated](docs/updates.md): report and install package updates on every server,
   including ones this project didn't install, with opt-in reboots and health checks.
+- [Kubernetes clusters](docs/kubernetes.md): k3s on the VMs, from an empty inventory to a running cluster,
+  then upgrades, drain-aware updates, an optional handoff to Argo CD, and troubleshooting.
 - [Security requirements](docs/security.md): what this project does and doesn't protect against, and the
   [assurance case](docs/assurance-case.md) behind it.
 - [External interfaces](docs/interfaces.md): the inventory variables, the commands, and every system
@@ -124,6 +127,29 @@ packages included) and what its automatic updates already do. `make updates` ins
 of servers at a time, never two of an update group together. It reboots only with `updates_reboot: if_required`, inside a window you choose, and
 holds the reboot on an encrypted VM after a Secure Boot update. It then checks each server's health and
 starts no more servers after a failure. Every run writes a JSON report. See [docs/updates.md](docs/updates.md).
+
+Servers in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group are a Kubernetes cluster, and nothing
+changes for the others. The baseline prepares them (k3s' ports open between the members only, kernel settings,
+swap off), and **`playbooks/kubernetes.yml`** installs [k3s](https://k3s.io/) on them from a binary pinned by
+its checksum: the servers one at a time, each first checking etcd's ports with those already in, the API on an
+address [kube-vip](https://kube-vip.io/) moves between them, and addresses for LoadBalancer services. Its join
+tokens come from the Vault, and the admin kubeconfig never leaves the servers. `make kubernetes-upgrade` moves
+a cluster to a new k3s release one node at a time, each drained first; the updates playbook drains a member
+before it reboots it and never reboots two of a cluster's servers at once. An optional last step hands the
+cluster over to Argo CD and a Git repository of your own. See [docs/kubernetes.md](docs/kubernetes.md).
+
+## What it won't do
+
+- Touch an existing VM's disks: provisioning only creates VMs that don't exist yet.
+- Manage your applications: it builds and hardens the servers and keeps them updated; what runs on them is yours.
+- Run or deploy workloads on a Kubernetes cluster, or hold manifests, Helm values or GitOps state: that's a
+  GitOps repository's job (Argo CD's, if you hand the cluster over to it), or yours.
+- Install Kubernetes distributions other than k3s.
+- Expose the Kubernetes API, Argo CD or anything else to the internet.
+- Configure Proxmox HA rules: it checks that a cluster's servers are on different nodes, and leaves the HA
+  rules to you (the API token has no privilege for them).
+
+The full list, with the reasons, is in the [roadmap](docs/roadmap.md#what-ubuntu-server-auto-setup-will-not-do).
 
 ## Getting started
 
@@ -232,6 +258,8 @@ You need:
 | `make keys` | Re-sync the admin user's GitHub keys only (after you add or remove a key on GitHub). |
 | `make updates-check` | Report the package updates each server would get, changing nothing. |
 | `make updates` | Install the package updates, with health checks; reboots only with `updates_reboot: if_required` ([docs/updates.md](docs/updates.md)). |
+| `make kubernetes` | Build the k3s clusters of the `k8s_<cluster>_servers` and `_agents` groups, after the baseline ([docs/kubernetes.md](docs/kubernetes.md)). |
+| `make kubernetes-upgrade` | Move each cluster to its `k8s_version`, one node at a time, servers first, each drained and uncordoned. |
 | `make test-updates` | Run the updates playbook's integration tests (needs Docker; `OS=debian-12` or `OS=ubuntu-24.04` picks the release). |
 
 Two variables apply to every target: `LIMIT=<host or group>` narrows the run (`--limit`), and
@@ -375,6 +403,9 @@ Each release's notes list the exact ansible-core and collection versions its che
   `127.0.0.1` only; anyone who can reach it can try to sign in. Use a strong password (or require a
   passkey), back up the volume like a secret, and see [docs/web-ui.md](docs/web-ui.md#security) before
   exposing it.
+- **A Kubernetes cluster is as safe as the Vault and its servers.** Whoever has the Vault (its join tokens) or
+  root on any member controls the cluster, and whoever can merge to the branch Argo CD follows deploys to it:
+  protect them alike. Keep `k8s_api_sources` to the addresses that need the API.
 - What this project does and doesn't protect against is in [docs/security.md](docs/security.md).
 
 ## Previous version

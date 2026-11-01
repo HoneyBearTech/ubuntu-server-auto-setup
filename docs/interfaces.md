@@ -360,6 +360,9 @@ Until the web UI has fields for them, a web UI save keeps only what it can show,
 
 ### Kubernetes nodes
 
+[kubernetes.md](kubernetes.md) walks through a cluster from the inventory to a running cluster, upgrades and
+troubleshooting; this section and the next are the reference.
+
 A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group is a member of that cluster, and the
 baseline's `kubernetes_node` role (tag `kubernetes`) prepares it for k3s. It doesn't install k3s. Servers in no
 such group are left alone.

@@ -112,17 +112,28 @@ be tagged; replace them with yours.
 
 - [ ] **A k3s cluster**, if the release touches `k3s`, `kubernetes_node` or the firewall, on throwaway VMs (a test
   VMID range, never the lab cluster): three servers in `k8s_test_servers` on three different nodes and one or two
-  agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), `k8s_api_vip` and `k8s_lb_pool` set to
-  free addresses, both tokens in the Vault. After `site.yml` and `make kubernetes LIMIT=k8s_test`: every node
-  Ready, the API answers on the VIP, Traefik has a pool address, the agent on AlmaLinux runs a pod with no AVC
-  denial. Stop the VM that holds the VIP: the API answers on it again within about 15 s, from another server, and
-  `etcd` keeps working with two of three. A second `make kubernetes` changes nothing. Remove the VMs, their disks
-  and the read-only kubeconfig afterwards:
+  agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), the servers in one `vm_spread_group`,
+  `k8s_api_vip` and `k8s_lb_pool` set to free addresses, `k8s_longhorn_prereqs: true` and a `vm_extra_disks`
+  disk for Longhorn on the agents, `k8s_fetch_readonly_kubeconfig: true`. First, with a fourth server given the
+  `pve_node` of one already in the spread group, `make provision` refuses before it creates anything, naming
+  both; and with the tokens not yet in the Vault, `make kubernetes LIMIT=k8s_test` stops in its checks naming
+  the missing token, before any member changes (that's what keeps a hand-built cluster safe,
+  [kubernetes.md](kubernetes.md#an-existing-cluster-fleet-updates-only)). Then both tokens in the Vault. After
+  `site.yml` and `make kubernetes LIMIT=k8s_test`: every node Ready, the API answers on the VIP, Traefik has a
+  pool address, the agent on AlmaLinux runs a pod with no AVC denial, and the read-only kubeconfig lists the
+  nodes from the control node but can't read Secrets. Install Longhorn (homelab-kube's way, or its Helm chart):
+  its manager runs on every agent and each agent's disk is Schedulable. Stop the VM that holds the VIP: the API
+  answers on it again within about 15 s, from another server, and `etcd` keeps working with two of three. Then
+  reboot one Proxmox node that holds a server (its VMs stop with it, or migrate them away first): the API stays
+  up, and every node is Ready again once it's back. A second `make kubernetes` changes nothing. Remove the VMs,
+  their disks and the read-only kubeconfig afterwards ([clean-up](#clean-up)):
 
   ```bash
   curl -sk https://192.0.2.20:6443/ping   # pong, before and shortly after stopping the VIP's holder
   ssh sysadmin@192.0.2.21 'sudo k3s kubectl get nodes; sudo k3s kubectl -n kube-system get svc traefik'
   ssh sysadmin@192.0.2.24 'sudo ausearch -m avc -ts recent'   # the AlmaLinux agent: no matches
+  KUBECONFIG=inventory/kube/test-readonly.yaml kubectl get nodes; KUBECONFIG=inventory/kube/test-readonly.yaml kubectl auth can-i get secrets -A   # no
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl -n longhorn-system get nodes.longhorn.io'   # each agent's disk Schedulable
   ```
 
 - [ ] **A k3s upgrade and drain-aware updates**, if the release touches `k3s`, `updates` or the wave planner, on
@@ -536,6 +547,23 @@ console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) before you add it t
 
 - [ ] A run's output streams to the page as it happens, and the finished run is in **History** with its
   log.
+- [ ] **Kubernetes** ([kubernetes.md](kubernetes.md#8-in-the-web-ui)), if the release touches the web UI's
+  clusters or `k3s`, with the throwaway cluster's VMs: on **Defaults → Kubernetes clusters**, add cluster `test`
+  (the catalog's older release, the VIP, the pool); **Make a token and show it once** for each token: each is
+  shown once, a reload shows only that one is saved, and replacing it needs the tick. On **Servers**, give the
+  members their cluster and role; the VIP or a pool address as a server's address is refused. Saving keeps
+  what `hosts.yml` has by hand (add a variable to `k8s_test` and a host variable to a member first). On **Run**,
+  the Kubernetes card's install check passes, and the real run is offered once and needs the tick; then an
+  upgrade's check, whose real run needs the version typed again (a wrong one is refused). **VMs** shows each
+  member's cluster and role, filters by `test`, never shows the VIP as a VM's address, and warns about a member
+  with `updates_k8s_drain: false`. The audit log has `k8s.token_set`, `run.check`, `run.apply` and
+  `run.finished`, and no token; neither does any run's log:
+
+  ```bash
+  docker exec usas-rc grep -c k8s.token_set /data/audit.jsonl
+  docker exec usas-rc grep -rlF "$TOKEN" /data/runs /data/audit.jsonl || echo none   # TOKEN: a token the page showed
+  ```
+
 - [ ] **VMs** lists every VM and container of the cluster, as `pvesh get /cluster/resources --type vm`
   does. `test-01` shows its address from the guest agent (after the baseline) and *Supported*; a VM
   without an agent shows the address from the Servers page or cloud-init; a template and a container say
@@ -648,11 +676,16 @@ registries ([verifying-releases.md](verifying-releases.md#the-container-image)):
   qm stop 9005; qm destroy 9005 --purge     # the encrypted test VM (its TPM state volume goes too)
   qm stop 9006; qm destroy 9006 --purge     # the VM made by hand for the VMs page's runs
   for vm in 9010 9011 9012; do qm stop $vm; qm destroy $vm --purge; done   # the cloud-image VMs
+  for vm in 9020 9021 9022 9023 9024; do qm stop $vm; qm destroy $vm --purge; done   # the k3s test cluster, or the IDs you gave it (extra disks go too)
   rm -f "$(pvesm path <iso-storage>:iso/seed-test-01.iso)"
   rm -rf /var/tmp/ubuntu-server-auto-setup/seed-test-01 /var/tmp/ubuntu-server-auto-setup/seed-test-03 \
     /var/tmp/ubuntu-server-auto-setup/seed-test-04
   ```
 
+- [ ] Remove the k3s test cluster's leftovers on the control node and in the Vault: the read-only kubeconfig
+  (`rm inventory/kube/test-readonly.yaml`, or `/data/inventory/kube/` in the container), the two tokens
+  (`vault_k8s_token_test`, `vault_k8s_agent_token_test`), and the cluster's VIP and pool from your notes of free
+  addresses (they're free again).
 - [ ] Keep the cloud images for the next run, or delete them: `pvesm list <iso-storage> --content import`,
   then `pvesm free <volume>` for each.
 - [ ] Remove the test keys: any key added to the GitHub account for the run, the test image's key from
@@ -687,6 +720,8 @@ Real Proxmox run (docs/release-checklist.md), <date>
   sudo needs a password, SSH port change (or: not tested, why)
 - Web UI: setup, sign-in, passkey added and used (authenticator), cross-site and token-less posts refused,
   run streamed, status API off (404), token made, used and revoked, version <version>
+- Kubernetes: k3s <old> -> <new> on <n> servers + <n> agents (OS of each), VIP failover <s> s, upgrade and
+  drain-aware updates, Argo CD handoff, web UI cluster flow (or: not tested, why)
 - Anything that failed, and the issue or pull request that fixes it
 ```
 
