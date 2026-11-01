@@ -73,8 +73,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 - **Kubernetes node profile:** pods couldn't reach the API or the kubelets on a member with firewalld (the RHEL
   family), so k3s' own add-ons (CoreDNS, metrics-server, Traefik) kept restarting. The rules now allow k3s' pod
-  network (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, on UFW too; etcd
-  stays closed to it. A server without `/etc/fstab` no longer fails the swap step.
+  network (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, and on firewalld
+  put the pod and service networks in the `trusted` zone, as k3s documents (firewalld rejects forwarded pod traffic
+  otherwise). A server without `/etc/fstab` no longer fails the swap step.
 
 ## [0.7.0] - 2026-11-01
 

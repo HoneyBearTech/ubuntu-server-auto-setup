@@ -269,7 +269,7 @@ RHEL family the role is refused (no stable `k3s-selinux`), and that is what's ch
 
 `tests/kubernetes.sh` builds cluster `ci` (`tests/inventory/k3s.yml`) from four containers of
 `tests/images/ubuntu-target` for one release: three servers and an agent, each on the test's own Docker network
-(`172.29.30.0/24`) with SSH on a local port and k3s' data on a volume (its overlayfs snapshotter can't sit on
+(`10.217.30.0/24`) with SSH on a local port and k3s' data on a volume (its overlayfs snapshotter can't sit on
 the container's own overlay). The VIP and the LoadBalancer pool are free addresses on that network, and the
 control node is the network's gateway, an API source. The join tokens are made fresh for each run.
 
@@ -556,7 +556,7 @@ make test
 ```
 
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
-Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`, 2241 to 2244 and the network `172.29.30.0/24` for `make test-kubernetes`). The web UI's tests need the Python
+Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`, 2241 to 2244 and the network `10.217.30.0/24` for `make test-kubernetes`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
 test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install

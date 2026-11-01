@@ -112,7 +112,10 @@ defaults and the advice in the README's "Running it securely" section and in [we
 - A Kubernetes node's firewall rules (`kubernetes_node`) open k3s' ports to each other member's own address, never
   to the LAN's network: a neighbour inside the cluster's subnet that isn't a member can't reach etcd, the kubelet or
   the pod network. The only network allowed is k3s' own pod network (`10.42.0.0/16`), to the kubelet's port and, on
-  servers, the API's, which pods need (both still require the cluster's credentials); etcd stays closed to pods. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
+  servers, the API's, which pods need (both still require the cluster's credentials); etcd stays closed to pods on
+  UFW. On firewalld (the RHEL family) the pod and service networks are in the `trusted` zone, as k3s documents,
+  because firewalld would otherwise reject the pods' forwarded traffic: there a pod can reach any port on its node,
+  etcd's included, which still requires etcd's client certificates. etcd's ports are open to the other servers only, and the API (6443/tcp) to the members and
   `k8s_api_sources`. Every address is checked against an IPv4 pattern before a rule is written, so none can add
   an option to a UFW or firewalld rule (fuzzed in `tests/fuzz/fuzz_kubernetes_node.py`), and rules for members
   that left are removed. On the RHEL family, `k3s-selinux` comes from Rancher's repository with every package

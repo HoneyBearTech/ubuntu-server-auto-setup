@@ -1,7 +1,9 @@
 ---
-# firewalld: rich rules in the default zone (no trusted zone for the pod network: k3s doesn't need one). Rich rules
-# carry no comment, so on a member the role owns the k3s ports (k8s_node_owned_ports): a rich rule on one of them
-# from an address the cluster doesn't need is removed, unless firewall_allow adds it.
+# firewalld: rich rules in the default zone. Rich rules carry no comment, so on a member the role owns the k3s ports
+# (k8s_node_owned_ports): a rich rule on one of them from an address the cluster doesn't need is removed, unless
+# firewall_allow adds it. And k3s' pod and service networks in the trusted zone, as k3s documents for firewalld:
+# pod traffic between nodes is forwarded, and firewalld rejects forwarded traffic from sources in no zone, which
+# rich rules in the default zone can't change (CoreDNS, metrics-server and Traefik kept restarting without it).
 - name: Look for firewalld
   ansible.builtin.stat:
     path: /usr/bin/firewall-cmd
@@ -24,6 +26,16 @@
   loop: "{{ k8s_node_rules }}"
   loop_control:
     label: "{{ item.port }}/{{ item.proto }} from {{ item.from }}"
+  when: k8s_node_firewalld.stat.exists
+
+- name: Trust k3s' pod and service networks
+  ansible.posix.firewalld:
+    zone: trusted
+    source: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ [k8s_node_pod_cidr, k8s_node_service_cidr] }}"
   when: k8s_node_firewalld.stat.exists
 
 - name: List firewalld's rich rules

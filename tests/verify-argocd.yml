@@ -73,7 +73,7 @@
           - root.spec.source.path == 'apps' and root.spec.source.targetRevision == 'main'
           - root.spec.syncPolicy.automated.prune and root.spec.syncPolicy.automated.selfHeal
           - objects[1].data.from == 'git'
-          - objects[2].status.loadBalancer.ingress[0].ip in ['172.29.30.101', '172.29.30.102']
+          - objects[2].status.loadBalancer.ingress[0].ip in ['10.217.30.101', '10.217.30.102']
           - objects[3].data[k8s_bootstrap_repo_url | urlsplit('hostname')] | trim == k8s_bootstrap_repo_ca | trim
           - objects[4].data.password | length > 0
           - verify_files.results[1].stat.checksum == verify_files.results[0].stat.checksum
