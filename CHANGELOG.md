@@ -283,6 +283,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
+  (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
+  Found by the v0.7.0 release checklist.
 - A Rocky Linux, AlmaLinux or CentOS Stream VM installed from its cloud image came up on DHCP instead of its
   static address, so provisioning timed out waiting for SSH: their cloud-init (24.4) can't read a default route
   written as `to: default` and skipped the whole network configuration. The cloud image's seed now writes it as
