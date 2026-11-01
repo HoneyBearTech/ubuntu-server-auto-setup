@@ -150,6 +150,8 @@ def vm(**kw):
 UBUNTU = v.OsInfo("ubuntu", "26.04", "Ubuntu 26.04 LTS")
 CATALOG = yaml.safe_load((REPO / "roles/os_catalog/vars/catalog.yml").read_text())["os_catalog"]
 RELEASES = v.catalog_releases(CATALOG)
+# A VM is one of the catalog's systems: "or", not "and".
+EITHER = "confirm it is Ubuntu, Debian, CentOS Stream, Rocky Linux or AlmaLinux"
 
 
 def test_the_catalogs_releases():
@@ -167,9 +169,10 @@ def test_the_catalogs_releases():
     (vm(), v.VmConfig(ostype="win11"), None, v.UNSUPPORTED, "Windows: the playbooks set up Ubuntu, Debian"),
     (vm(), v.VmConfig(), v.OsInfo("mswindows", "11", "Windows 11"), v.UNSUPPORTED, "Windows"),
     (vm(), v.VmConfig(ostype="other"), None, v.UNSUPPORTED, "OS type is other"),
-    (vm(), v.VmConfig(ostype="l26"), None, v.UNKNOWN, "confirm"),
-    (vm(status="stopped"), v.VmConfig(ostype="l26"), None, v.UNKNOWN, "Not running"),
-    (vm(), None, None, v.UNKNOWN, "confirm"),
+    (vm(), v.VmConfig(ostype="l26"), None, v.UNKNOWN, EITHER + " before"),
+    (vm(status="stopped"), v.VmConfig(ostype="l26"), None, v.UNKNOWN,
+     "Not running, so its guest agent can't report the OS: " + EITHER + "."),
+    (vm(), None, None, v.UNKNOWN, EITHER + " before"),
     (vm(), v.VmConfig(), v.OsInfo("debian", "13", "Debian GNU/Linux 13"), v.SUPPORTED, "Debian"),
     (vm(), v.VmConfig(), v.OsInfo("debian", "11", "Debian GNU/Linux 11"), v.NEEDS_OVERRIDE, "only Debian 12 and 13"),
     (vm(), v.VmConfig(), v.OsInfo("rocky", "9.4", "Rocky Linux 9.4"), v.SUPPORTED, "Rocky"),
