@@ -8,8 +8,8 @@ Properties, for any cluster members, addresses, API sources and existing firewal
 - every rule renders as a firewalld rich rule the role's own parser reads back, with nothing in it but the address,
   port and protocol;
 - the role's rules as UFW and firewalld list them are never stale; a rule with the role's comment (UFW) or on a k3s
-  port (firewalld) that the cluster doesn't need is, exactly once; a rule with another comment, on another port, or
-  one firewall_allow adds, never is.
+  port (firewalld) that the cluster doesn't need is, exactly once; a rule with another comment (UFW), on another port
+  (firewalld), or one firewall_allow adds, never is.
 """
 
 import sys
@@ -81,7 +81,8 @@ def one_input(data):
                                                                             r["proto"]), (text, r)
 
     # What an earlier run may have left: a rule the cluster no longer needs, one with another comment, one on a
-    # port the role doesn't own, and the owner's firewall_allow rule on the kubelet's port.
+    # port the role doesn't own (UFW: with another comment, since the role owns every rule with its own), and the
+    # owner's firewall_allow rule on the kubelet's port.
     gone = {"port": fdp.PickValueInList(PORTS + ["10250", "6443", "2379:2380"]), "proto": "tcp",
             "from": address(fdp), "comment": comment}
     gone["proto"] = "udp" if gone["port"] in PORTS else "tcp"
@@ -90,7 +91,8 @@ def one_input(data):
     needed = any((r["port"], r["proto"], r["from"]) == (gone["port"], gone["proto"], gone["from"]) for r in rules)
     theirs = dict(gone, comment="kubelet-scraper")
     other_port = dict(gone, port="22", proto="tcp")
-    lines = [ufw_line(r) for r in rules] + [ufw_line(gone), ufw_line(theirs), ufw_line(other_port)]
+    ssh = dict(other_port, comment="ssh")
+    lines = [ufw_line(r) for r in rules] + [ufw_line(gone), ufw_line(theirs), ufw_line(ssh)]
     stale = K8S.k8s_ufw_stale(lines, rules, comment)
     assert len(stale) == (0 if needed else 1), (stale, gone, rules)
     if stale:
