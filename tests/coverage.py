@@ -2,8 +2,9 @@
 """Task coverage for the roles: the share of tasks and handlers that the integration tests ran.
 
 Ansible has no statement coverage tool, so this counts each task and handler in roles/*/tasks (and its
-subfolders, such as the per-family files) and roles/*/handlers (blocks are containers, not tasks; meta tasks are
-skipped) and checks it against the "path:line" records written by tests/callback_plugins/task_coverage.py.
+subfolders, such as the per-family files) and roles/*/handlers (blocks and static imports are containers, not
+tasks; meta tasks are skipped) and checks it against the "path:line" records written by
+tests/callback_plugins/task_coverage.py.
 Each test suite measures the roles it exercises: tests/run.sh every role but updates, tests/updates.sh updates.
 
 Usage: coverage.py RECORDS_FILE [--min PERCENT] [--roles R,...] [--skip-roles R,...] [--skip-files GLOB,...]
@@ -34,7 +35,8 @@ def tasks_in(node, path, out):
                 if section in keys:
                     tasks_in(keys[section], path, out)
             continue
-        if "ansible.builtin.meta" in keys or "meta" in keys:
+        # Static imports, like blocks, only hold their file's tasks, which are counted there.
+        if {"ansible.builtin.meta", "meta", "ansible.builtin.import_tasks", "import_tasks"} & keys.keys():
             continue
         name = keys["name"].value if "name" in keys else "(unnamed)"
         out.append((path, item.start_mark.line + 1, name))

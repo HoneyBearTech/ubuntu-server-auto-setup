@@ -23,3 +23,17 @@ ufw_logging: low
 ufw_ssh_limit: true
 ufw_ssh_sources: [any]
 ufw_allow: []
+
+# Docker-published ports. Docker forwards a published port (docker run -p, ports: in Compose) to its container
+# through its own DOCKER-USER chain, before UFW's rules, so the port is open to everyone whatever UFW says. On,
+# /etc/ufw/after.rules and after6.rules fill that chain: new connections to a published port are dropped unless
+# they come from firewall_docker_sources or match firewall_docker_allow. Replies, and connections the containers
+# make themselves, aren't affected. Skipped, with a message, on a server without Docker (run the baseline again
+# after installing it). Not available on the RHEL family (firewalld) yet: the run stops there instead.
+firewall_docker_enabled: false
+# Addresses or networks (IPv4 or IPv6, CIDR) that may reach every published port.
+firewall_docker_sources: []
+# Published ports open to everyone, or to one network: the port on the server (8080 in -p 8080:80), or a range, e.g.
+#   - { port: "8080", proto: tcp }
+#   - { port: "9000:9010", proto: udp, from: 10.0.0.0/24 }
+firewall_docker_allow: []

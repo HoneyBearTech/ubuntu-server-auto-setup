@@ -1,0 +1,11 @@
+# Stands in for Docker in the integration tests (tests/run.sh copies it into the server container): a "container"
+# with a web server on port 80, published on the server's port 8080 the way Docker publishes a port.
+[Unit]
+Description=Docker stand-in for the firewall role's tests
+After=ufw.service
+
+[Service]
+ExecStartPre=/usr/local/sbin/usas-docker-stand-in start
+ExecStart=/usr/sbin/ip netns exec usas-ctr python3 -m http.server 80 --bind 172.31.255.2
+ExecStopPost=/usr/local/sbin/usas-docker-stand-in stop
+StandardError=append:/var/log/usas-ctr.log
