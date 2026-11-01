@@ -42,6 +42,32 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `k8s` per server.
 - `make k3s-catalog` and `make k3s-catalog-check` (`tools/update_k3s_catalog.py`) refresh and check the k3s
   catalog against GitHub and GHCR; the weekly "OS catalog" workflow reports it in the same issue.
+- **An optional handoff to Argo CD** ([docs/interfaces.md](docs/interfaces.md#handing-a-cluster-over-to-argo-cd-optional)):
+  with `k8s_bootstrap_argocd: true`, `make kubernetes` installs Helm v4.3.1 and Argo CD's chart 10.11.6 (Argo CD
+  v3.5.6) on the cluster's first server, each only if it matches the k3s catalog's SHA-256, with the values
+  homelab-kube's `apps/argocd.yaml` adopts, then creates one root Application that syncs a folder of a Git
+  repository (`k8s_bootstrap_repo_url`, HTTPS only, `k8s_bootstrap_path`, `k8s_bootstrap_revision`, and
+  `k8s_bootstrap_repo_ca` for a Git server with its own CA). It does this once: a later run leaves Argo CD and the
+  root Application to Git. Argo CD's initial admin password is never read or printed; the docs say how to read it.
+  The catalog tool takes Helm's and the chart's hashes only from their upstream signatures (new keys in
+  `tools/k3s-catalog-keys/`). Off by default. **New outbound dependencies** with it on: `get.helm.sh`, Argo's chart
+  releases on GitHub, and the registries Argo CD's images come from (`quay.io`, `ecr-public.aws.com`).
+- **Kubernetes clusters in the web UI**: the Defaults page has a **Kubernetes clusters** section (name, k3s
+  version from the catalog, API address, LoadBalancer pool, API sources, taint, pod network, Longhorn's
+  prerequisites, packaged components and more), written as the `k8s_<cluster>` group's vars, with write-only
+  join tokens that are typed in or made by the server and shown once. The Servers page has a cluster and a role
+  (server, agent or none) per server. The Run page runs `kubernetes.yml` for a cluster with the `install` or
+  `upgrade` tag, a check first, then for real once after a confirmation (an upgrade's names the version), each
+  step in the audit log. The VMs page shows each member's cluster and role, filters by cluster and warns when an
+  update wouldn't drain a member; the Updates page has the drain and Longhorn settings, and a cluster the Argo CD
+  handoff. Groups and variables set by hand in the inventory are kept when the UI saves. The UI never shows a
+  kubeconfig or talks to a cluster itself.
+
+### Fixed
+
+- A Kubernetes cluster's API address (VIP), its LoadBalancer addresses and any other `/32` address a guest agent
+  reports are no longer taken as a VM's address, on the VMs page and in the `usas_pve` inventory plugin (new
+  option `exclude_addresses`): kube-vip puts them on whichever member holds them.
 
 ### Fixed
 

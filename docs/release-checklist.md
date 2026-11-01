@@ -143,6 +143,18 @@ be tagged; replace them with yours.
   ssh sysadmin@192.0.2.21 'sudo k3s kubectl -n longhorn-system get volumes.longhorn.io'   # healthy between waves
   ```
 
+- [ ] **The Argo CD handoff**, if the release touches `k3s`'s bootstrap or the k3s catalog's Helm or chart, on the
+  same throwaway cluster: `k8s_bootstrap_argocd: true` with `k8s_bootstrap_repo_url` a public repository whose
+  `apps/` holds an Application or two (a fork of homelab-kube, or a scratch repository; never the live one's
+  branch). After `make kubernetes LIMIT=k8s_test`: Argo CD's UI answers on its pool address, the initial password
+  from the Secret logs in as `admin`, and `root` and its Applications turn Synced and Healthy. A second run changes
+  nothing. Delete `argocd-initial-admin-secret`, run again: it isn't made again and nothing changes:
+
+  ```bash
+  ssh sysadmin@192.0.2.21 'sudo k3s kubectl -n argocd get applications; sudo k3s kubectl -n argocd get svc argocd-server'
+  ssh sysadmin@192.0.2.21 "sudo k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
+  ```
+
 - [ ] **An extra disk and a spread group**, if the release touches provisioning or the baseline: `test-01` with
   `vm_extra_disks: [{size_gb: 4, label: data, mount: /srv/data}]` and `vm_spread_group: test`. After
   `provision-vms.yml` the VM has `scsi1` with `serial=usas-data`, and after `site.yml` the disk is ext4 with

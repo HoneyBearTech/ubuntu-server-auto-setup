@@ -149,7 +149,30 @@ defaults and the advice in the README's "Running it securely" section and in [we
   before it reaches a message or the updates report.
 - Fleet updates drain a member only through `k3s kubectl` on a server of its own cluster, as root over the same
   pinned SSH session as the update; no kubeconfig leaves the servers for it.
+- In the web UI, the join tokens are write-only: typed into a password field (emptied as soon as the form is
+  sent) or made by the server with `secrets.token_hex(32)` and shown once, then kept only in the Vault; they are
+  never sent back, never in the audit log (which says only which token was set) and replaced by `********` in run
+  logs. Replacing a saved token needs a tick. `kubernetes.yml` runs from the UI only after a passing check run of
+  the same cluster, version and members in the last 30 minutes, with a confirmation (an upgrade's names its
+  version, typed again), each step in the audit log. The UI never shows or offers the admin or the read-only
+  kubeconfig, never runs `kubectl` or `exec`, and doesn't write to a cluster other than through those runs.
+- kube-vip puts a cluster's API address and LoadBalancer addresses on whichever member holds them, so that VM's
+  guest agent reports them as its own: the VMs page and the `usas_pve` inventory plugin never take a `/32`
+  address, the inventory's `k8s_api_vip` or an address in its `k8s_lb_pool` as a VM's address, and the Servers
+  page refuses them as a server's (a run could otherwise reach another member under a pinned host key's name, and
+  be refused by the pin, or a server could be set up on the VIP).
 - Who has the Vault, or root on any server, controls the cluster; the workloads and what they expose are yours.
+- The optional Argo CD handoff (`k8s_bootstrap_argocd`) installs Helm and Argo CD's chart only if each matches the
+  SHA-256 the k3s catalog pins. Both are signed upstream (Helm's checksum files by its maintainers' keys, the
+  chart's provenance file by Argo's chart repository key): the catalog takes each hash only from a good signature
+  by a key in `tools/k3s-catalog-keys/` (`gpgv`, fingerprints pinned in the tool), and the weekly check verifies
+  them again. Argo CD's own images are pulled by the tags the pinned chart names. The repository URL, folder,
+  revision and CA are checked against `\Z`-anchored patterns (an `https://` URL with no credentials, query or
+  fragment), and the chart's values and the root Application are built as mappings by a filter, so none can add a
+  key (fuzzed in `tests/fuzz/fuzz_argocd_bootstrap.py`). USAS never reads, prints or deletes
+  `argocd-initial-admin-secret` (the tests check its password is in no log), never holds Git credentials, and
+  never syncs or changes what Argo CD manages after the first run. Whoever can merge to the repository's
+  followed branch deploys to the cluster, as cluster admin: protect it like the Vault.
 
 <a id="the-proxmox-node-user-optional"></a>
 **The Proxmox node user (optional)**

@@ -3,7 +3,8 @@
 
 import type {
   UpdatesData,
-  AccountData, OverviewData, Run, RunPageData, SectionData, ServersData, SessionData, SshData, Vm, VmsData,
+  AccountData, ClustersData, OverviewData, Run, RunPageData, SectionData, ServersData, SessionData, SshData, Vm,
+  VmsData,
 } from "../src/types";
 import sections from "./fixtures/sections.json";
 
@@ -12,6 +13,7 @@ export const defaults = sections.defaults as unknown as SectionData;
 export const hardening = sections.hardening as unknown as SectionData;
 export const updates = sections.updates as unknown as UpdatesData;
 export const servers = sections.servers as unknown as ServersData;
+export const clusters = sections.clusters as unknown as ClustersData;
 
 export const running: Run = {
   id: "20261021-140211-a1b2c3", action: "provision", check: false, diff: true, limit: "web-01", status: "running",

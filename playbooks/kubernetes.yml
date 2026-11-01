@@ -5,8 +5,9 @@
 # (each checking etcd's ports first), then the agents. A member on another release is refused, unless the run is
 # an upgrade (--tags upgrade, on its own): then every member is checked the same way, the run takes the cluster's
 # lock, and moves the servers one at a time, then the agents one at a time, to k8s_version (drained, the API's
-# address handed to another server first, uncordoned once Ready). docs/interfaces.md ("Kubernetes clusters")
-# describes it; make kubernetes, make kubernetes-upgrade.
+# address handed to another server first, uncordoned once Ready). With k8s_bootstrap_argocd, an install's last step
+# has the first server install Argo CD and a root Application once, and hands the cluster over to Git.
+# docs/interfaces.md ("Kubernetes clusters") describes it; make kubernetes, make kubernetes-upgrade.
 
 - name: Check every member and install k3s
   hosts: k8s_*_servers:k8s_*_agents
@@ -85,6 +86,21 @@
           tags: [install]
       tags: [install]
       when: inventory_hostname == k3s_seed
+
+# Not in check mode: Helm, the chart and the cluster's objects aren't there to compare with until they're installed.
+- name: Hand each cluster that asks for it over to Argo CD
+  hosts: k8s_*_servers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install Argo CD and the root Application from the first server
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: argocd
+        apply:
+          tags: [install]
+      tags: [install]
+      when: inventory_hostname == k3s_seed and k8s_bootstrap_argocd | default(false) | bool and not ansible_check_mode
 
 # An upgrade (--tags upgrade; a run without tags skips these plays): each cluster's lock first, so that no other
 # run upgrades it at the same time.

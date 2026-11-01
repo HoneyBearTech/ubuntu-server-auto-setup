@@ -39,3 +39,21 @@ k8s_ready_timeout: 300
 # Seconds a node's drain may take during an upgrade (k3s kubectl drain --timeout). A pod that can't be evicted
 # in time (a PodDisruptionBudget, a pod no controller manages) stops the upgrade with the node still cordoned.
 k8s_drain_timeout: 300
+
+# The GitOps handoff (optional): once the cluster is Ready, Helm installs Argo CD's chart (both pinned in the catalog)
+# on the cluster's first server, and one root Application makes Argo CD sync the rest from a Git repository (an "app
+# of apps", like homelab-kube's bootstrap/root.yaml). That's where USAS stops: from then on Argo CD manages itself
+# and the apps from Git, and a later run never upgrades, changes or syncs either of them. Argo CD's initial admin
+# password stays in the argocd-initial-admin-secret Secret for the owner to read and delete (docs/interfaces.md).
+k8s_bootstrap_argocd: false
+# The Git repository the root Application syncs: an https:// URL with no user name, password, query or fragment.
+# A private repository needs read access in Argo CD (Settings, Repositories) once it runs.
+k8s_bootstrap_repo_url: ""
+# The folder in the repository with the Applications ("." for its top), and the branch, tag or commit to follow.
+k8s_bootstrap_path: apps
+k8s_bootstrap_revision: main
+# The certificate (PEM) of the CA that signed the Git server's certificate, if it isn't a public CA's: Argo CD trusts
+# it for that server only. Empty: public CAs only.
+k8s_bootstrap_repo_ca: ""
+# Seconds Helm waits for Argo CD's pods to be ready.
+k8s_bootstrap_timeout: 600

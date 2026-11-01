@@ -1,0 +1,88 @@
+---
+# Checks the Argo CD bootstrap tests/kubernetes.sh ran on cluster ci (with -e @argocd.json, the test's settings):
+# Argo CD installed from the catalog's chart with the values homelab-kube's apps/argocd.yaml adopts, its UI on a
+# LoadBalancer address from the pool, the root Application following the test repository and Synced and Healthy
+# (Argo CD has synced the repository's ConfigMap), Helm only as the catalog pins it, and the initial admin
+# password's Secret still there.
+- name: Check the Argo CD handoff
+  hosts: k3s-s1
+  become: true
+  gather_facts: false
+  vars:
+    catalog: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/k3s/vars/catalog.yml') | from_yaml }}"
+  tasks:
+    # Argo CD syncs on its own: the run only created the Application.
+    - name: Wait until the root Application is Synced and Healthy
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, -n, argocd, get, applications.argoproj.io, root, -o,
+               "jsonpath={.status.sync.status}/{.status.health.status}"]
+      register: verify_root_status
+      until: verify_root_status.stdout == 'Synced/Healthy'
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: Read the root Application, the synced ConfigMap, Argo CD's service and its initial password's Secret
+      ansible.builtin.command:
+        argv: "{{ ['/usr/local/bin/k3s', 'kubectl', '-n', 'argocd', 'get', '-o', 'json'] + item.split() }}"
+      loop:
+        - applications.argoproj.io root
+        - configmap usas-handoff
+        - service argocd-server
+        - configmap argocd-tls-certs-cm
+        - secret argocd-initial-admin-secret
+      register: verify_objects
+      changed_when: false
+      no_log: true
+
+    - name: Read Argo CD's Helm release
+      ansible.builtin.command:
+        argv: [/usr/local/bin/helm, list, --namespace, argocd, --output, json]
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: verify_release
+      changed_when: false
+
+    - name: Read the release's values
+      ansible.builtin.command:
+        argv: [/usr/local/bin/helm, get, values, argocd, --namespace, argocd, --output, json]
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: verify_values
+      changed_when: false
+
+    - name: Look at Helm and the values file
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - /usr/local/lib/usas-argocd/helm-{{ catalog.k3s_helm.version }}/linux-amd64/helm
+        - /usr/local/bin/helm
+        - /usr/local/lib/usas-argocd/argocd-values.yaml
+        - /usr/local/lib/usas-argocd/argo-cd-{{ catalog.k3s_argocd_chart.version }}.tgz
+      register: verify_files
+
+    - name: Check the release, the root Application, what it synced and the files
+      ansible.builtin.assert:
+        that:
+          - release.chart == 'argo-cd-' ~ catalog.k3s_argocd_chart.version and release.status == 'deployed'
+          - release.app_version == catalog.k3s_argocd_chart.app_version
+          - values.server.service.type == 'LoadBalancer' and not values.dex.enabled
+          - values.configs.rbac.scopes == '[email]' and values.configs.rbac['policy.default'] == ''
+          - root.spec.source.repoURL == k8s_bootstrap_repo_url
+          - root.spec.source.path == 'apps' and root.spec.source.targetRevision == 'main'
+          - root.spec.syncPolicy.automated.prune and root.spec.syncPolicy.automated.selfHeal
+          - objects[1].data.from == 'git'
+          - objects[2].status.loadBalancer.ingress[0].ip in ['10.217.30.101', '10.217.30.102']
+          - objects[3].data[k8s_bootstrap_repo_url | urlsplit('hostname')] | trim == k8s_bootstrap_repo_ca | trim
+          - objects[4].data.password | length > 0
+          - verify_files.results[1].stat.checksum == verify_files.results[0].stat.checksum
+          - verify_files.results[1].stat.mode == '0755'
+          - verify_files.results[2].stat.mode == '0600'
+          - verify_files.results[3].stat.checksum == catalog.k3s_argocd_chart.sha256
+        quiet: true
+      vars:
+        release: "{{ verify_release.stdout | from_json | selectattr('name', 'eq', 'argocd') | first }}"
+        values: "{{ verify_values.stdout | from_json }}"
+        objects: "{{ verify_objects.results | map(attribute='stdout') | map('from_json') | list }}"
+        root: "{{ objects[0] }}"

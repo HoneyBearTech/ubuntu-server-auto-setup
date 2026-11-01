@@ -5,10 +5,13 @@
 # Kubernetes node profile), then playbooks/kubernetes.yml builds the cluster. Checks: the refusals before anything
 # changes (an unprepared member, a missing token, an unknown release, a binary that doesn't match the catalog), a
 # server that can't reach etcd's peer port stopped with the hosts named, then the cluster itself
-# (tests/verify-k3s.yml), kube-vip's addresses from the control node, the tokens in no log, a second run that changes
-# nothing; then the upgrade to the catalog's next release (--tags upgrade): the refusals (without the tag, a minor
-# skipped, another run's lock), every node cordoned, drained, upgraded and uncordoned once, servers first, the API
-# answering on the VIP throughout, a second upgrade that changes nothing, and going back refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
+# (tests/verify-k3s.yml), kube-vip's addresses from the control node, the Argo CD bootstrap (its settings checked, then
+# Argo CD and a root Application that syncs a test repository from a Git server container, tests/verify-argocd.yml),
+# the tokens and Argo CD's initial password in no log, a second run that changes nothing (and leaves the root
+# Application alone when its settings change); then the upgrade to the catalog's next release (--tags upgrade): the
+# refusals (without the tag, a minor skipped, another run's lock), every node cordoned, drained, upgraded and
+# uncordoned once, servers first, the API answering on the VIP throughout, a second upgrade that changes nothing,
+# and going back refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
 # and rocky-9). Needs Docker (privileged containers, for systemd and k3s), Python with requirements-ci.txt and the
 # Ansible collections, and on Linux the br_netfilter and overlay modules loaded on the host. Run it with
 # make test-kubernetes OS=<id>. See docs/testing.md.
@@ -38,6 +41,7 @@ NODES=(k3s-s1 k3s-s2 k3s-s3 k3s-a1)
 addr() { case "$1" in k3s-s1) echo 10.217.30.11;; k3s-s2) echo 10.217.30.12;; k3s-s3) echo 10.217.30.13;; k3s-a1) echo 10.217.30.21;; esac; }
 port() { case "$1" in k3s-s1) echo 2241;; k3s-s2) echo 2242;; k3s-s3) echo 2243;; k3s-a1) echo 2244;; esac; }
 VIP=10.217.30.100
+GIT=10.217.30.50
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
 
 probe_pid=""
@@ -63,6 +67,7 @@ cleanup() {
       docker rm -f "$node" >/dev/null 2>&1 || true
       docker volume rm "$node-rancher" >/dev/null 2>&1 || true
     done
+    docker rm -f usas-k3s-git >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
   fi
   if [ "$status" -ne 0 ]; then echo "FAILED (logs kept in $TEST_TMP)" >&2; else rm -rf "$TEST_TMP"; fi
@@ -72,7 +77,7 @@ trap cleanup EXIT
 step() { printf '\n=== %s: %s\n' "$OS" "$*"; }
 
 # Runs a playbook and fails unless it succeeds; with --idempotent also fails if anything changed. Every log is kept
-# in $TEST_TMP, where the tokens must never appear.
+# in $TEST_TMP, where the tokens must never appear; LAST_LOG is the last one.
 play() {
   local idempotent=false
   if [ "$1" = "--idempotent" ]; then idempotent=true; shift; fi
@@ -230,6 +235,60 @@ else
   echo "skipped: the Docker network isn't reachable from this host"
 fi
 
+step "the Argo CD bootstrap's settings are checked before anything changes"
+# The root Application's repository: a ConfigMap in apps/, served over HTTPS by a Git server container with a
+# certificate of its own, which the bootstrap tells Argo CD to trust for that server.
+mkdir -p "$TEST_TMP/repo/apps" "$TEST_TMP/git" "$TEST_TMP/tls"
+cat >"$TEST_TMP/repo/apps/handoff.yaml" <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: usas-handoff
+  namespace: argocd
+data:
+  from: git
+EOF
+git -C "$TEST_TMP/repo" init -q -b main
+git -C "$TEST_TMP/repo" add apps
+git -C "$TEST_TMP/repo" -c user.name=test -c user.email=test@invalid -c commit.gpgsign=false commit -q -m "The test's apps"
+git clone -q --bare "$TEST_TMP/repo" "$TEST_TMP/git/handoff.git"
+git -C "$TEST_TMP/git/handoff.git" update-server-info
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=usas-k3s-git -addext "subjectAltName=IP:$GIT" \
+  -keyout "$TEST_TMP/tls/server.key" -out "$TEST_TMP/tls/server.crt" 2>/dev/null
+docker build -q -t usas-test-git --target git-server tests/images/ubuntu-target >/dev/null
+docker rm -f usas-k3s-git >/dev/null 2>&1 || true
+docker run -d --name usas-k3s-git --network "$NET" --ip "$GIT" -v "$TEST_TMP/git:/srv/git:ro" \
+  -v "$TEST_TMP/tls:/srv/tls:ro" usas-test-git >/dev/null
+python3 - "$TEST_TMP/argocd.json" "$TEST_TMP/tls/server.crt" "https://$GIT/handoff.git" <<'EOF'
+import json, sys
+json.dump({"k8s_bootstrap_argocd": True, "k8s_bootstrap_repo_url": sys.argv[3], "k8s_bootstrap_path": "apps",
+           "k8s_bootstrap_revision": "main", "k8s_bootstrap_repo_ca": open(sys.argv[2]).read()}, open(sys.argv[1], "w"))
+EOF
+ARGOCD=(-e "@$TEST_TMP/argocd.json")
+refused "k8s_bootstrap_repo_url must be the Git repository's" playbooks/kubernetes.yml "${ARGOCD[@]}" \
+  -e "k8s_bootstrap_repo_url=http://$GIT/handoff.git"
+refused "k8s_bootstrap_repo_url must be the Git repository's" playbooks/kubernetes.yml "${ARGOCD[@]}" \
+  -e "k8s_bootstrap_repo_url=https://user:secret@$GIT/handoff.git"
+refused "k8s_bootstrap_path a folder in it" playbooks/kubernetes.yml "${ARGOCD[@]}" -e k8s_bootstrap_path=../etc
+none_has /usr/local/bin/helm
+cool_down
+
+step "the Argo CD bootstrap: Helm, Argo CD and the root Application, which syncs the test repository"
+play playbooks/kubernetes.yml "${ARGOCD[@]}"
+cool_down
+play tests/verify-argocd.yml -e "@$TEST_TMP/argocd.json"
+for node in k3s-s2 k3s-s3 k3s-a1; do
+  docker exec "$node" test ! -e /usr/local/bin/helm || { echo "ERROR: $node has Helm, not only the first server" >&2; exit 1; }
+done
+cool_down
+
+step "Argo CD's initial password appears in no log"
+password="$(docker exec k3s-s1 k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+[ -n "$password" ] || { echo "ERROR: argocd-initial-admin-secret has no password" >&2; exit 1; }
+if grep -rlF -- "$password" "$TEST_TMP"/play.* "$TEST_TMP"/refused.* 2>/dev/null; then
+  echo "ERROR: Argo CD's initial password is in the logs above" >&2; exit 1
+fi
+
 step "the tokens appear in no log, and the read-only kubeconfig is 0600"
 while read -r _ token; do
   if grep -rlF -- "$token" "$TEST_TMP"/play.* "$TEST_TMP"/refused.* 2>/dev/null; then
@@ -240,8 +299,14 @@ done <"$TEST_TMP/tokens.yml"
   || { echo "ERROR: the read-only kubeconfig isn't 0600" >&2; exit 1; }
 cool_down
 
-step "a second run changes nothing"
-play --idempotent playbooks/kubernetes.yml
+step "a second run changes nothing, and leaves Argo CD and the root Application as they are"
+play --idempotent playbooks/kubernetes.yml "${ARGOCD[@]}"
+cool_down
+play --idempotent playbooks/kubernetes.yml "${ARGOCD[@]}" -e k8s_bootstrap_revision=other
+grep -qF "not k8s_bootstrap_repo_url, _path and _revision: left as it is" "$LAST_LOG" \
+  || { echo "ERROR: the run didn't say it left the root Application alone" >&2; exit 1; }
+docker exec k3s-s1 k3s kubectl -n argocd get secret argocd-initial-admin-secret -o name >/dev/null \
+  || { echo "ERROR: argocd-initial-admin-secret is gone" >&2; exit 1; }
 cool_down
 
 step "another release is refused without --tags upgrade, and --tags upgrade only on its own"

@@ -50,8 +50,10 @@ Linux and AlmaLinux installed from their cloud images, and an updates playbook f
   VMs on different nodes ([interfaces.md](interfaces.md#disks-and-placement)).
 - Kubernetes (k3s) clusters on Proxmox: the VMs' disks, placement and tags first (done), then a node profile
   (done: [interfaces.md](interfaces.md#kubernetes-nodes)), the k3s install with its API address (done:
-  [interfaces.md](interfaces.md#kubernetes-clusters)), upgrades and drain-aware fleet updates (done:
-  [interfaces.md](interfaces.md#upgrades), [updates.md](updates.md#kubernetes-members)) and web UI fields.
+  [interfaces.md](interfaces.md#kubernetes-clusters)), an optional handoff to Argo CD (done:
+  [interfaces.md](interfaces.md#handing-a-cluster-over-to-argo-cd-optional)), upgrades and drain-aware fleet updates (done:
+  [interfaces.md](interfaces.md#upgrades), [updates.md](updates.md#kubernetes-members)) and web UI fields (done:
+  clusters on the Defaults page, members on the Servers page, check-first runs on the Run page).
 - Done: the ISO build and the seed files can run as a user without root's privileges on the Proxmox node
   (`playbooks/prepare-node.yml`, [installing.md](installing.md#6-optional-a-node-user-other-than-root)).
 

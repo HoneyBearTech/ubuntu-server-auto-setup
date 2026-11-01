@@ -8,7 +8,8 @@ import { ErrorMessage, Loading, Notice, PageHead, StatusBadge } from "../compone
 import { useData } from "../data";
 import { duration, isoTime, plural, runOptions, when } from "../format";
 import { Link, useRouter } from "../router";
-import type { ApplyInfo, IsoPlan, Notice as NoticeT, Run, RunDetailData, RunPageData } from "../types";
+import type { ApplyInfo, IsoPlan, K8sRunCluster, K8sTarget, Notice as NoticeT, Run, RunDetailData, RunPageData }
+  from "../types";
 import { RunsTable } from "./Overview";
 import { ScheduleForm } from "./Updates";
 
@@ -53,6 +54,9 @@ export function RunPage() {
         firewall.</strong> Run against one server first (Limit), and try check mode before a real run.
       </p>
       <IsoPlanCard plan={data.iso_plan} />
+      {data.kubernetes?.clusters.length ? (
+        <KubernetesRuns clusters={data.kubernetes.clusters} actions={data.kubernetes.actions} />
+      ) : null}
       <form className="card" method="post" action="/api/run" noValidate onSubmit={submit}>
         <fieldset className="card-body fieldset">
           <legend>What to run</legend>
@@ -107,6 +111,61 @@ export function RunPage() {
         </div>
       </form>
     </>
+  );
+}
+
+// playbooks/kubernetes.yml for one cluster of the Defaults page: always a check run first (--check --diff), whose
+// page then offers the real run. Nothing here reads or writes the cluster itself.
+function KubernetesRuns({ clusters, actions }: { clusters: K8sRunCluster[]; actions: { key: string; label: string }[] }) {
+  const { navigate } = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const reply = await post<{ redirect?: string; error?: string }>("/api/kubernetes/run",
+      formData(event.currentTarget, (event.nativeEvent as SubmitEvent).submitter));
+    setBusy(false);
+    if (reply.ok && reply.data.redirect) navigate(reply.data.redirect);
+    else setError(reply.data.error ?? `The server answered ${reply.status}.`);
+  };
+  return (
+    <section className="card" aria-labelledby="k8s-runs-heading">
+      <div className="card-body">
+        <h2 id="k8s-runs-heading">Kubernetes clusters</h2>
+        <p>
+          <code>playbooks/kubernetes.yml</code> for one cluster: install builds it or adds new members, upgrade moves
+          it to the version on the Defaults page, one node at a time. Each starts as a check run, which changes
+          nothing; its page then offers the real run for 30 minutes. Run the baseline on new members first.
+        </p>
+        <ErrorMessage message={error} id="k8s-run-error" />
+      </div>
+      {clusters.map((c) => (
+        <form key={c.cluster} className="card-body fieldset k8s-run" method="post" action="/api/kubernetes/run"
+              noValidate onSubmit={submit} aria-labelledby={`k8s-${c.cluster}-heading`}>
+          <h3 id={`k8s-${c.cluster}-heading`}>{c.cluster}</h3>
+          <input type="hidden" name="cluster" value={c.cluster} />
+          <p className="help">
+            {c.version ? <>k3s <code>{c.version}</code>. </> : null}
+            Members: {c.members.length ? c.members.join(", ") : "none yet"}.
+          </p>
+          {c.needs.length ? (
+            <p className="help">Before a run it needs {c.needs.join(", ")}.</p>
+          ) : (
+            <div className="actions">
+              {actions.map((a) => (
+                <button key={a.key} type="submit" name="action" value={a.key} className="button secondary"
+                        aria-disabled={busy || undefined} title={a.label}
+                        aria-label={`Check ${a.key}${a.key === "upgrade" && c.version ? ` to ${c.version}` : ""} for cluster ${c.cluster}`}>
+                  <Icon name="play" />Check {a.key}{a.key === "upgrade" && c.version ? ` to ${c.version}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+        </form>
+      ))}
+    </section>
   );
 }
 
@@ -210,6 +269,81 @@ function useNow(running: boolean): number {
 // After a VMs page check run that passed: the same plan for real, within 30 minutes, once, after a confirmation.
 // For the updates playbook the confirmation names the VMs that may reboot.
 function ApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
+  if (run.kind === "kubernetes") return <K8sApplyPart run={run} apply={apply} />;
+  return <VmApplyPart run={run} apply={apply} />;
+}
+
+function k8sSummary(run: Run): string {
+  const target = (run.targets?.[0] ?? {}) as unknown as K8sTarget;
+  return `${target.cluster ?? "?"}, ${target.action ?? "?"}${target.version ? ` (k3s ${target.version})` : ""}`;
+}
+
+// After a Kubernetes check run that passed: the same cluster and tag for real, within 30 minutes, once. An upgrade's
+// confirmation is its version, typed again.
+function K8sApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
+  const { navigate } = useRouter();
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const target = (run.targets?.[0] ?? {}) as unknown as K8sTarget;
+  const upgrade = target.action === "upgrade";
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const reply = await post<{ redirect?: string; error?: string }>("/api/kubernetes/apply",
+      formData(event.currentTarget));
+    setBusy(false);
+    if (reply.ok && reply.data.redirect) navigate(reply.data.redirect);
+    else setError(reply.data.error ?? `The server answered ${reply.status}.`);
+  };
+  return (
+    <section className="card" aria-labelledby="apply-heading">
+      <div className="card-body">
+        <h2 id="apply-heading">Run it for real</h2>
+        {apply.possible ? (
+          <form noValidate onSubmit={submit} className="stack">
+            <ErrorMessage message={error} id="apply-error" />
+            <input type="hidden" name="run_id" value={run.id} />
+            <p>
+              The same run without check mode: {upgrade ? "upgrade" : "install"} cluster <code>{target.cluster}</code>
+              {" "}({plural(target.members?.length ?? 0, "member", "members")}: {(target.members ?? []).join(", ")})
+              {upgrade ? <>, one node at a time, to k3s <code>{target.version}</code></> : null}
+              {apply.until ? <>; possible until <time dateTime={isoTime(apply.until)}>{when(apply.until)}</time></> : null}.
+            </p>
+            {upgrade ? (
+              <div className="field">
+                <label htmlFor="apply-version">Type the version to confirm the upgrade</label>
+                <input type="text" id="apply-version" name="confirm_version" className="mono" autoComplete="off"
+                       spellCheck={false} aria-describedby="apply-version-help" />
+                <p className="help" id="apply-version-help">
+                  <code>{target.version}</code>: each node is drained, upgraded and uncordoned before the next.
+                </p>
+              </div>
+            ) : null}
+            <div className="check">
+              <input type="checkbox" id="apply-confirm" name="confirm" checked={confirm}
+                     onChange={(e) => setConfirm(e.target.checked)} />
+              <label htmlFor="apply-confirm">
+                {upgrade ? `I have read what would change, and want to upgrade ${target.cluster} to ${target.version} now`
+                  : `I have read what would change, and want to install k3s on ${target.cluster}'s members now`}
+              </label>
+            </div>
+            <div className="actions">
+              <button type="submit" className="button danger" aria-disabled={busy || undefined}>
+                <Icon name="play" />{upgrade ? "Upgrade the cluster for real" : "Install for real"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p>{apply.problem} <Link href="/run">Open the Run page</Link></p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function VmApplyPart({ run, apply }: { run: Run; apply: ApplyInfo }) {
   const { navigate } = useRouter();
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -330,6 +464,9 @@ export function RunDetail({ id }: { id: string }) {
         {run.kind === "vms" || run.kind === "updates" ? (
           <div><dt>Started from</dt><dd>The VMs page{run.kind === "updates" ? " (updates)" : ""}</dd></div>
         ) : null}
+        {run.kind === "kubernetes" ? (
+          <div><dt>Cluster</dt><dd>{k8sSummary(run)}</dd></div>
+        ) : null}
         {run.applied_from ? (
           <div><dt>Checked by</dt><dd><Link href={`/runs/${run.applied_from}`}>check run {run.applied_from}</Link></dd></div>
         ) : null}
@@ -337,7 +474,8 @@ export function RunDetail({ id }: { id: string }) {
       {data.apply && !running ? <ApplyPart run={run} apply={data.apply} /> : null}
       {data.apply?.possible && !running && run.kind === "updates" ? <ScheduleForm run={run} /> : null}
       {run.kind === "vms" || run.kind === "updates" || data.hosts ? (
-        <HostResults runId={run.id} initial={data.hosts ?? null} targets={run.targets ?? []} running={running}
+        <HostResults runId={run.id} initial={data.hosts ?? null}
+                     targets={run.kind === "kubernetes" ? [] : run.targets ?? []} running={running}
                      check={run.check} />
       ) : null}
       <LogView key={run.id} initial={data.log}

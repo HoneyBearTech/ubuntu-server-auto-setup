@@ -4,7 +4,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
-import { checkAxe, checkKeyboard, retype, tabTo } from "./helpers";
+import { checkAxe, checkKeyboard, post, retype, tabTo } from "./helpers";
 
 // The pages the sidebar links to, and the account page; the run page from the flow is added below.
 const PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/updates", "/run", "/runs", "/account"];
@@ -205,7 +205,7 @@ test.describe("keyboard", () => {
     await tabTo(page, passphrase);
     await page.keyboard.type("too short");
     // Enter in this form previews the GitHub keys (its first button), so go to Save.
-    await tabTo(page, page.getByRole("button", { name: "Save" }));
+    await tabTo(page, page.getByRole("button", { name: "Save", exact: true }));
     await page.keyboard.press("Enter");
     const summary = page.locator("#error-summary");
     await expect(summary).toBeFocused();
@@ -217,6 +217,85 @@ test.describe("keyboard", () => {
     await settled(page);
     await expect(page.getByRole("checkbox", { name: "Encrypt the root disk" })).not.toBeChecked();
     await expect(page.locator("#f-vm_disk_passphrase-saved")).toHaveText("Not set yet.");
+  });
+
+  test("a Kubernetes cluster by keyboard: its fields, a write-only token, a member and a check run", async ({ page }) => {
+    await page.goto("/defaults");
+    await settled(page);
+    const clusters = page.getByRole("form", { name: "Kubernetes clusters" });
+    await expect(clusters.getByText("No clusters yet.")).toBeVisible();
+    await tabTo(page, clusters.getByRole("button", { name: "Add a cluster" }));
+    await page.keyboard.press("Enter");
+    await tabTo(page, clusters.getByLabel("Name (required)", { exact: true }));
+    await page.keyboard.type("lab");
+    await tabTo(page, clusters.getByRole("combobox", { name: "k3s version (required)" }));
+    await page.keyboard.type("v1.36"); // type-ahead picks the release
+    await expect(clusters.getByRole("combobox", { name: "k3s version (required)" })).toHaveValue("v1.36.5+k3s1");
+    await tabTo(page, clusters.getByLabel("API address (VIP)", { exact: true }));
+    await page.keyboard.type("10.10.10.99");
+    // The packaged components are a group of checkboxes; servicelb is left out by default.
+    const traefik = clusters.getByRole("checkbox", { name: "traefik" });
+    await tabTo(page, traefik);
+    await page.keyboard.press("Space");
+    await expect(traefik).toBeChecked();
+    await expect(clusters.getByRole("checkbox", { name: "servicelb" })).toBeChecked();
+    const token = clusters.getByLabel("Server join token", { exact: true });
+    await expect(token).toHaveAttribute("type", "password");
+    await tabTo(page, token);
+    await page.keyboard.type("short");
+    await tabTo(page, clusters.getByRole("button", { name: "Save the clusters" }));
+    await page.keyboard.press("Enter");
+    // Refused, and the typed token is gone from the page.
+    const summary = page.locator("#clusters-error-summary");
+    await expect(summary).toBeFocused();
+    await expect(summary).toContainText("Server join token isn't in the accepted format");
+    await expect(token).toHaveValue("");
+    await expect(token).toHaveAttribute("aria-invalid", "true");
+    await checkAxe(page, "/defaults with a cluster error");
+    await tabTo(page, clusters.getByRole("button", { name: "Save the clusters" }));
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: "Saved 1 cluster(s)." })).toBeVisible();
+
+    // A token made by the server is shown once, and gone once hidden.
+    const make = page.getByRole("button", { name: "Make a token and show it once" }).first();
+    await tabTo(page, make);
+    await page.keyboard.press("Enter");
+    const shown = page.getByRole("heading", { name: "Server join token of lab" });
+    await expect(shown).toBeVisible();
+    const value = await page.locator(".token-once code.fp").textContent();
+    expect(value).toMatch(/^[0-9a-f]{64}$/);
+    await checkAxe(page, "/defaults with a token shown once");
+    await checkKeyboard(page, "/defaults");
+    await page.goto("/defaults");
+    await settled(page);
+    await expect(page.locator("body")).not.toContainText(value!);
+    await expect(page.locator("#f-clusters-0-k8s_token-saved")).toHaveText("A token is saved. Leave this empty to keep it.");
+
+    // The flow's server joins as a server; the Run page then offers the cluster's check runs.
+    await page.goto("/servers");
+    await settled(page);
+    const cluster = page.getByRole("combobox", { name: "Kubernetes cluster, row 1" });
+    await tabTo(page, cluster);
+    await page.keyboard.type("lab");
+    await expect(cluster).toHaveValue("lab");
+    const role = page.getByRole("combobox", { name: "Kubernetes role, row 1" });
+    await tabTo(page, role);
+    await page.keyboard.type("server");
+    await expect(role).toHaveValue("server");
+    await tabTo(page, page.getByRole("button", { name: "Save", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: "Saved 1 server(s)." })).toBeVisible();
+    await page.goto("/run");
+    await settled(page);
+    const runs = page.getByRole("region", { name: "Kubernetes clusters" });
+    await expect(runs).toContainText("Before a run it needs its agent join token (Defaults page).");
+    await checkAxe(page, "/run with a cluster");
+    await checkKeyboard(page, "/run");
+
+    // Leave the flow's server and the settings as they were, for the tests after this one.
+    await post(page, "/servers", { server_count: "1", "servers-0-name": "srv-01", "servers-0-ansible_host": "10.10.10.61",
+      "servers-0-pve_vmid": "4061", "servers-0-firewall_ports": "443/tcp" });
+    await post(page, "/clusters", { cluster_count: "0" });
   });
 
   test("the theme switch: arrow keys choose, the page follows at once", async ({ page }) => {

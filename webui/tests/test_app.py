@@ -31,7 +31,7 @@ from .conftest import (
 
 PAGES = ["/", "/proxmox", "/ssh", "/defaults", "/servers", "/hardening", "/vms", "/run", "/runs", "/account"]
 API = ["/api/overview", "/api/proxmox", "/api/ssh", "/api/defaults", "/api/servers", "/api/hardening", "/api/run",
-       "/api/runs"]
+       "/api/runs", "/api/clusters"]
 
 
 def get(c, path):
