@@ -292,6 +292,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - The updates tests sometimes saw the update phased at 0 % as one to install: apt ignores phasing without a
   machine ID, which a test container that has only just booted may not have yet. The test image now gives apt a
   fixed one (`APT::Machine-ID`).
+- The VM inventory fuzz target failed on a VM tag that would load as another type (`1`, `true`, an empty tag):
+  the web UI writes such a tag as a plain quoted string, not `!unsafe`, on purpose, as it does every such value.
+  The target now expects that, and still checks that every other tag is written `!unsafe`.
 
 ### Documentation
 
