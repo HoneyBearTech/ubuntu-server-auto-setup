@@ -272,6 +272,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Fixed
 
+- The updates playbook run with the container image's own Ansible (`docker exec usas ansible-playbook ...`, as
+  docs/web-ui.md shows) stopped at "Make the report folder": its report went to the project's folder, which is
+  read-only in the image. In the image it now goes to the data volume's `updates/reports`, as the web UI's runs'.
+  Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
   Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
   `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
