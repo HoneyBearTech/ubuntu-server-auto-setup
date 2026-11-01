@@ -22,7 +22,7 @@ what you downloaded came from that workflow, unchanged:
 
 This applies to every release from the first one,
 [v0.1.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.1.0). The examples use
-[v0.6.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0); use the version you
+[v0.7.0](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.7.0); use the version you
 downloaded. You need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or later (with
 cosign 2.6, add `--new-bundle-format`), and the [GitHub CLI](https://cli.github.com/) for the provenance.
 
@@ -44,20 +44,20 @@ the archive and the SBOM match it.
 ## Build provenance
 
 ```sh
-gh attestation verify ubuntu-server-auto-setup-0.6.0.tar.gz --repo HoneyBearTech/ubuntu-server-auto-setup \
+gh attestation verify ubuntu-server-auto-setup-0.7.0.tar.gz --repo HoneyBearTech/ubuntu-server-auto-setup \
   --signer-workflow HoneyBearTech/ubuntu-server-auto-setup/.github/workflows/release.yml
 ```
 
 It prints the verified attestation, including the commit and the workflow run. To verify offline, add
-`--bundle ubuntu-server-auto-setup-0.6.0.provenance.sigstore.json`. The same works for the SBOM.
+`--bundle ubuntu-server-auto-setup-0.7.0.provenance.sigstore.json`. The same works for the SBOM.
 
 ## The container image
 
 Check the image's signature before you run it (`start.ps1 -Verify` does the same on Windows). The examples use
-0.6.0; use the version you pull, or `latest`.
+0.7.0; use the version you pull, or `latest`.
 
 ```sh
-cosign verify docker.io/honeybeartech/ubuntu-server-auto-setup:0.6.0 \
+cosign verify docker.io/honeybeartech/ubuntu-server-auto-setup:0.7.0 \
   --certificate-identity-regexp '^https://github\.com/HoneyBearTech/ubuntu-server-auto-setup/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -66,7 +66,7 @@ It proves the image was pushed by the release workflow on a version tag. Its bui
 GitHub attestation:
 
 ```sh
-gh attestation verify oci://docker.io/honeybeartech/ubuntu-server-auto-setup:0.6.0 \
+gh attestation verify oci://docker.io/honeybeartech/ubuntu-server-auto-setup:0.7.0 \
   --repo HoneyBearTech/ubuntu-server-auto-setup \
   --signer-workflow HoneyBearTech/ubuntu-server-auto-setup/.github/workflows/release.yml
 ```
@@ -85,7 +85,7 @@ whose public half is in [`.github/allowed_signers`](../.github/allowed_signers):
 
 ```sh
 git clone https://github.com/HoneyBearTech/ubuntu-server-auto-setup.git && cd ubuntu-server-auto-setup
-git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.6.0
+git -c gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v v0.7.0
 ```
 
 It should print `Good "git" signature for 31805425+HoneyBearTech@users.noreply.github.com`. Check

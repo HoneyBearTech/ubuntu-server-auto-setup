@@ -12,9 +12,10 @@ git history, see the README) into Ansible playbooks: a hands-off Ubuntu Server 2
 VMs, GitHub SSH keys, and a baseline (SSH hardening, UFW, Fail2Ban, unattended upgrades) that also works on
 existing Ubuntu 24.04 and 26.04 servers. **v0.1.0** (October 2026) is the first release of the Ansible
 version, signed and with an SBOM and build provenance, and every playbook is covered by integration tests
-that run on each pull request. Since then, the releases up to **v0.6.0** have added a container image with a
+that run on each pull request. Since then, the releases up to **v0.7.0** have added a container image with a
 web UI, Secure Boot and optional disk encryption for new VMs, DHCP and more network cards, several Proxmox
-nodes per inventory, passkey sign-in, and a read-only status API for dashboards
+nodes per inventory, passkey sign-in, a read-only status API for dashboards, Debian, CentOS Stream, Rocky
+Linux and AlmaLinux installed from their cloud images, and an updates playbook for the whole fleet
 ([CHANGELOG](../CHANGELOG.md)).
 
 ## Over the following year
@@ -58,7 +59,7 @@ nodes per inventory, passkey sign-in, and a read-only status API for dashboards
   Limiting `sudo` to a password after provisioning is the default since 0.3.0.
 - Done: notifications from unattended-upgrades (mail) and Fail2Ban (mail or a webhook), with an optional
   msmtp relay.
-- Time synchronisation settings (chrony or `systemd-timesyncd` servers).
+- Done (0.7.0): time synchronisation settings (chrony or `systemd-timesyncd` servers), off by default.
 
 **The web UI and the container image**
 - Done: a container image (amd64 and arm64, signed, with an SBOM and provenance) with a web UI that lays
