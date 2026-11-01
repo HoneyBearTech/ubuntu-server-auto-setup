@@ -282,8 +282,11 @@ def one_input(data):
     meta = yaml.safe_load(META_DATA.render(values))
     assert meta == {"instance-id": f"{host}-{values['pve_vmid']}", "local-hostname": host}, meta
 
-    # A cloud image's seed: the same network in a file of its own, the same user, keys and sudo.
-    assert yaml.safe_load(NETWORK_CONFIG.render(values)) == {"version": 2, "ethernets": ethernets}
+    # A cloud image's seed: the same network in a file of its own, the default route spelled 0.0.0.0/0 (the RHEL
+    # family's cloud-init can't read "default"), and the same user, keys and sudo.
+    cloud_ethernets = {name: {**eth, "routes": [{**r, "to": "0.0.0.0/0"} for r in eth["routes"]]} if "routes" in eth
+                       else eth for name, eth in ethernets.items()}
+    assert yaml.safe_load(NETWORK_CONFIG.render(values)) == {"version": 2, "ethernets": cloud_ethernets}
     text = CLOUD_USER_DATA.render(values)
     assert text.startswith("#cloud-config\n"), text[:40]
     cloud = yaml.safe_load(text)

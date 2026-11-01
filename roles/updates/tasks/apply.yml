@@ -88,7 +88,7 @@
       vars:
         updates_answers: >-
           {{ [updates_reboot_file | default({}), updates_reboot_pkgs | default({}), updates_boot_kernels | default({}),
-          updates_needrestart | default({})] }}
+          updates_needrestart | default({}), updates_needs_reboot | default({}), updates_needs_services | default({})] }}
         updates_answers_when: while it checked for a reboot
 
     - name: Decide about the reboot
@@ -155,6 +155,6 @@
         status: >-
           {{ 'unreachable' if ansible_failed_result.unreachable | default(false)
           or ansible_failed_task.name | default('') == 'Stop if the server stopped answering'
-          else 'busy' if ansible_failed_task.name | default('') == 'Install the updates with apt'
-          and ansible_failed_result.msg | default('') is search('lock')
+          else 'busy' if ansible_failed_task.name | default('') in ['Install the updates with apt',
+          'Install the updates with dnf'] and ansible_failed_result.msg | default('') is search('lock')
           else 'failed' }}

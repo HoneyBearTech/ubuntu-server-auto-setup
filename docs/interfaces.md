@@ -246,8 +246,8 @@ rules don't apply to it.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `updates_enabled` | `true` | `false` skips the server in every run. |
-| `updates_scope` | `all` | `all` or `security` (only updates from a `-security` suite or ESM). |
-| `updates_apt_upgrade` | `safe` | `safe` (upgrade and new dependencies, never removes) or `dist` (may remove; refused with `security`, excludes or `updates_kernel: false`). |
+| `updates_scope` | `all` | `all` or `security` (only updates from a `-security` suite or ESM, or that a security advisory fixes on Rocky Linux and AlmaLinux; every update on CentOS Stream, which publishes no errata). |
+| `updates_apt_upgrade` | `safe` | Ubuntu and Debian: `safe` (upgrade and new dependencies, never removes) or `dist` (may remove; refused with `security`, excludes or `updates_kernel: false`). dnf upgrades the chosen packages either way. |
 | `updates_exclude_packages` | `[]` | Package-name globs left alone in this run; never written to the server. |
 | `updates_kernel`, `updates_kernel_packages` | `true`, the family's kernel globs | `false` adds the kernel packages to the excludes. |
 | `updates_reboot` | `never` | `never` (report "reboot pending") or `if_required`. |
@@ -255,8 +255,8 @@ rules don't apply to it.
 | `updates_ignore_window` | `false` | Update and reboot outside the windows. |
 | `updates_reboot_timeout`, `updates_post_reboot_delay` | `900`, `0` | Seconds to wait for a rebooted server, and after it answers. |
 | `updates_boot_time_command` | `""` | The command whose output changes at each boot (default: the kernel's boot ID). |
-| `updates_pcr7_packages` | `shim-signed`, the signed GRUB, `secureboot-db` | Updates that hold the reboot on a VM whose disk unlocks with the TPM. |
-| `updates_restart_services` | `host` | `host` (the server's own needrestart setting), `list` or `auto`. |
+| `updates_pcr7_packages` | `shim-signed`, the signed GRUB, `secureboot-db` (the RHEL family: `shim`, `grub2-efi-*`) | Updates that hold the reboot on a VM whose disk unlocks with the TPM. |
+| `updates_restart_services` | `host` | `host` (the server's own needrestart setting), `list` or `auto`. needrestart's, on Ubuntu and Debian; the RHEL family only lists the services (`dnf needs-restarting -s`). |
 | `updates_refresh_max_age` | `3600` | Seconds the package lists may be old before they are refreshed. |
 | `updates_lock_wait` | `600` | Seconds to wait for a busy package manager before the server is `busy`. |
 | `updates_task_timeout` | `3600` | Seconds an upgrade may take (it runs in the background on the server). |

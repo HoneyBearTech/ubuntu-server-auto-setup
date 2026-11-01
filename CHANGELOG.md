@@ -104,6 +104,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   Debian-Security, and a waiting reboot found by comparing the newest kernel in `/boot` with the running one.
   The supported releases and their end-of-support dates now follow the OS catalog (Ubuntu's dates move to the
   catalog's). The updates integration tests run on Debian 12 and 13 too.
+- **The updates playbook on CentOS Stream, Rocky Linux and AlmaLinux 9 and 10** ([docs/updates.md](docs/updates.md)):
+  dnf lists the pending updates, a dry run shows what installing them would do (dependencies and new kernels
+  included), and dnf installs them with its signature checks. Security updates are those a security advisory
+  fixes (`dnf updateinfo`); CentOS Stream publishes no errata, so `updates_scope: security` installs every
+  update there, and the report says so. A waiting reboot comes from `dnf needs-restarting -r`, or, without
+  dnf-plugins-core, from the kernels in `/boot`. The report lists the packages locked with dnf versionlock and
+  what dnf-automatic does, and a busy rpm lock makes the server `busy`. Package names and excludes may now
+  have upper case and `_` (`NetworkManager`). The updates integration tests run on all six, against signed dnf
+  repositories with a security advisory.
+- The baseline's reboot check on the RHEL family no longer reports a reboot as needed on a server without
+  dnf-plugins-core (where `dnf needs-restarting` doesn't exist): it compares the kernels in `/boot` instead.
 - **Waves that know about the cluster** ([docs/updates.md](docs/updates.md#waves)): the updates playbook plans
   the batches it updates servers in. A wave holds at most `updates_serial` servers (25 %), one server of each
   update group (`updates_group_max_parallel: 1`; groups from `updates_group` and the Proxmox tags
@@ -275,6 +286,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - Every new VM was tagged `ubuntu` in Proxmox, whatever its OS. `pve_tags` now defaults to the VM's distribution
   (`vm_os` without its release: `debian`, `rocky`, `alma` and so on) and `ansible`; VMs made before keep their tags.
   Found by the v0.7.0 release checklist.
+- A Rocky Linux, AlmaLinux or CentOS Stream VM installed from its cloud image came up on DHCP instead of its
+  static address, so provisioning timed out waiting for SSH: their cloud-init (24.4) can't read a default route
+  written as `to: default` and skipped the whole network configuration. The cloud image's seed now writes it as
+  `0.0.0.0/0`, which every release's cloud-init reads. The weekly cloud-image test missed it because QEMU's DHCP
+  leased the very address it set statically; it now uses another one, reachable only if network-config was
+  applied. Found by the v0.7.0 release checklist.
+- An extra disk whose file system label held a character such as `\x1d` could be taken for the disk's own file
+  system with an empty label, and mounted: the baseline split blkid's output at every character Python counts as a
+  line break. It now splits at newlines only, so such a disk is left alone as "other". Found by the fuzz targets.
+- The VMs page asked to "confirm it is Ubuntu, Debian, CentOS Stream, Rocky Linux and AlmaLinux" for a VM whose
+  guest agent didn't report its OS; it now says "or". Found by the v0.7.0 release checklist.
 - The SSH page's **Test the SSH login** never showed a node's CPU, so the Servers page couldn't refuse Rocky
   Linux 10 or CentOS Stream 10 on a node without x86-64-v3 (the playbooks still did): ssh passed the CPU check's
   `grep` pattern to the node's shell unquoted, and the shell refused its parentheses. The UI now quotes every
@@ -295,6 +317,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - The updates tests sometimes saw the update phased at 0 % as one to install: apt ignores phasing without a
   machine ID, which a test container that has only just booted may not have yet. The test image now gives apt a
   fixed one (`APT::Machine-ID`).
+- The VM inventory fuzz target failed on a VM tag that would load as another type (`1`, `true`, an empty tag):
+  the web UI writes such a tag as a plain quoted string, not `!unsafe`, on purpose, as it does every such value.
+  The target now expects that, and still checks that every other tag is written `!unsafe`.
 
 ### Documentation
 

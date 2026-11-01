@@ -3,7 +3,8 @@
 (roles/updates/filter_plugins/usas_updates.py).
 
 Properties, for any output a server could send (apt-get -s, apt-mark showhold, needrestart -b, apt-config dump,
-package_facts and service_facts results) and any window:
+dnf repoquery, dnf's transaction table, dnf versionlock's list, dnf-automatic's configuration, package_facts and
+service_facts results) and any window:
 - the parsers never raise, every package and service name they return matches the role's patterns
   (roles/updates/vars/main.yml), every version is plain, and no list is longer than the cap;
 - choosing the updates never names a held or excluded package, a package that isn't installed yet, or (for
@@ -33,7 +34,7 @@ SERVICE = re.compile(V["updates_service_pattern"])
 VERSION = re.compile(r"^[A-Za-z0-9.+~:-]{1,128}\Z")
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
 NAMES = ["usas-test-tool", "libc6", "linux-image-6.8.0-1-generic", "libfoo:i386", "Bad_Name", "a", "x" * 200,
-         "pkg\nInst evil", ""]
+         "pkg\nInst evil", "", "NetworkManager", "kernel-core", "-rf", "a|b"]
 SUITES = ["Ubuntu:26.04/resolute-security", "Ubuntu:26.04/resolute-updates", "UbuntuESM:x/resolute-infra-security",
           "Debian-Security:13/stable-security", "USAS-Test:test-updates", "weird:", "a/b/c-security"]
 # Daylight-saving changes in 2026 (Europe, the US, Lord Howe's half hour), where windows are easiest to get wrong.
@@ -54,7 +55,7 @@ for name in ("updates_package_pattern", "updates_package_glob_pattern", "updates
 
 
 def line(fdp):
-    kind = fdp.ConsumeIntInRange(0, 6)
+    kind = fdp.ConsumeIntInRange(0, 10)
     name = fdp.PickValueInList(NAMES) if fdp.ConsumeBool() else fdp.ConsumeUnicodeNoSurrogates(20)
     version = fdp.PickValueInList(["1.0", "2:1.2-0ubuntu1~24.04.1", "", "1 0", "[x]"])
     origins = ", ".join(fdp.PickValueInList(SUITES) for _ in range(fdp.ConsumeIntInRange(0, 3)))
@@ -72,6 +73,17 @@ def line(fdp):
         key = fdp.PickValueInList(["APT::Periodic::Unattended-Upgrade", "Unattended-Upgrade::Allowed-Origins:",
                                    "Unattended-Upgrade::Automatic-Reboot", "Unattended-Upgrade::Automatic-Reboot-Time"])
         return f'{key} "{fdp.PickValueInList(["1", "0", "true", "${distro_codename}-updates", name, "7d", "always"])}";'
+    if kind == 6:
+        return f"{name}|{version}|{fdp.PickValueInList(['baseos', 'usas-test-security', '@System', 'a b', ''])}"
+    if kind == 7:
+        if fdp.ConsumeBool():
+            return fdp.PickValueInList(list(U.DNF_SECTIONS) + ["Transaction Summary", "====="])
+        return f" {name} {fdp.PickValueInList(['noarch', 'x86_64', ''])} {version} baseos 6.4 k"
+    if kind == 8:
+        return fdp.PickValueInList([f"{name}-0:{version}.*", f"{name}-{version}-1.el9", f"!{name}", "# lock", name])
+    if kind == 9:
+        key = fdp.PickValueInList(["upgrade_type", "apply_updates", "reboot", "[commands]", "[base]", "x"])
+        return f"{key} = {fdp.PickValueInList(['security', 'default', 'yes', 'no', 'when-needed', name])}"
     return fdp.ConsumeUnicodeNoSurrogates(40)
 
 
@@ -134,6 +146,23 @@ def one_input(data):
 
     held = U.usas_package_names(text, limit)
     assert len(held) <= limit and all(PACKAGE.match(n) for n in held) and len(set(held)) == len(held)
+
+    dnf = U.usas_dnf_updates(text, text if fdp.ConsumeBool() else "", text, limit)
+    assert len(dnf["upgrades"]) <= limit and len({u["name"] for u in dnf["upgrades"]}) == len(dnf["upgrades"]), dnf
+    for u in dnf["upgrades"]:
+        assert PACKAGE.match(u["name"]) and VERSION.match(u["candidate"]) and not u["new"], u
+        assert u["current"] == "" or VERSION.match(u["current"]), u
+    transaction = U.usas_dnf_transaction(text, limit)
+    assert len(transaction["upgrades"]) <= limit and len(transaction["removals"]) <= limit, transaction
+    assert all(PACKAGE.match(u["name"]) and VERSION.match(u["candidate"]) for u in transaction["upgrades"])
+    assert all(PACKAGE.match(n) for n in transaction["removals"]), transaction
+    locked = U.usas_versionlock_names(text, limit)
+    assert len(locked) <= limit and all(PACKAGE.match(n) for n in locked) and len(set(locked)) == len(locked)
+    dnf_auto = U.usas_dnf_auto_updates(text, {"dnf-automatic.timer": fdp.PickValueInList(["enabled", "disabled", ""]),
+                                              "dnf-automatic-install.timer": fdp.PickValueInList(["enabled", ""])},
+                                       fdp.ConsumeBool(), fdp.ConsumeBool())
+    clean(dnf_auto["line"], 300)
+    assert dnf_auto["line"].startswith("Automatic: ") and (dnf_auto["enabled"] or not dnf_auto["reboot"])
 
     scope = fdp.PickValueInList(["all", "security"])
     excludes = [fdp.PickValueInList(["usas-test-*", "lib*", "linux-image-*", "*"]) for _ in range(fdp.ConsumeIntInRange(0, 2))]
