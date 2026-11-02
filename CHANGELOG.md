@@ -8,38 +8,7 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-### Fixed
-
-- **Host keys:** provisioning several VMs at once could lose a new VM's host key from the control node's
-  `known_hosts`, so that VM's run stopped with "No ED25519 host key is known" (seen with five new VMs). Each
-  write replaced the whole file while another was writing it; they now take turns, as do the baseline's entries
-  for a new SSH port.
-- **Extra disks:** the baseline couldn't find a `vm_extra_disks` disk on a Proxmox VM ("has no disk with the
-  serial usas-<label>"), so it stopped there. It looked for a `/dev/disk/by-id` link named after the serial, but
-  Proxmox names those links after the drive (`drive-scsi1`), and only some systems add one for the serial. Each
-  disk is now found by the serial `lsblk` reports.
-- **Web UI, Kubernetes clusters:** in an inventory whose servers are still in `ubuntu_servers` (the name before
-  0.7.0), a cluster group added there by hand didn't show on the Defaults or Servers page, and the next save
-  dropped it from `hosts.yml`. It's now read there too, and saved under `servers` with the servers.
-- **Kubernetes docs:** the guide and `k8s_api_vip_interface` now say that a cluster's servers need one interface
-  name for the VIP, which means one OS family on the cloud images (`ens18` on Ubuntu, `eth0` on AlmaLinux and
-  Rocky Linux). A mixed set was refused by `make kubernetes`'s checks, as it should be, but nothing said so up
-  front.
-- **Kubernetes docs:** the guide's cluster example sets `vm_spread_group` and `vm_extra_disks` in `hosts.yml`,
-  where a save from the web UI's Servers page drops them (it has no fields for them). The guide now says to put
-  them in `host_vars/<server>.yml` with the web UI, as interfaces.md did, and what a save keeps; interfaces.md no
-  longer says the `k8s_*` groups need an inventory of your own.
-- **Kubernetes, check mode:** a check run on a cluster not built yet (`make kubernetes --check`, which the guide
-  runs first, and the web UI's check before every real run) failed on the first server with "Could not find the
-  requested service k3s", so the web UI never offered the install. Check mode no longer asks systemd to start a
-  unit that it would only write.
-- **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
-  had no fields for (seen on all five members of a test cluster). It now has an **Extra disks** and a **Spread
-  group** field per server, checked against the `data_disks` and `proxmox_vm` roles' formats. A value either
-  field can't show is kept as written, and the page notes a field whose variable `host_vars/<server>` sets, which
-  applies over the page's. Keeping them in `host_vars/` is now optional.
-
-## [0.8.0] - 2026-11-01
+## [0.8.0] - 2026-11-02
 
 Kubernetes clusters: servers in a `k8s_<cluster>_servers` or `_agents` group become a k3s cluster. The baseline
 prepares them (k3s' ports open between the members only, kernel settings, swap off, Longhorn's prerequisites and
@@ -130,15 +99,45 @@ inventory to a running cluster.
 - A Kubernetes cluster's API address (VIP), its LoadBalancer addresses and any other `/32` address a guest agent
   reports are no longer taken as a VM's address, on the VMs page and in the `usas_pve` inventory plugin (new
   option `exclude_addresses`): kube-vip puts them on whichever member holds them.
-
-### Fixed
-
 - **Kubernetes node profile:** pods reach the API (through its service) and metrics-server reaches the kubelets with
   their own pod-network addresses, which the firewall rules didn't allow. They now allow k3s' pod network
   (`10.42.0.0/16`) to the kubelet's 10250/tcp on every member and to 6443/tcp on servers, on UFW and firewalld. On
   firewalld (the RHEL family) pod traffic between nodes was rejected, so a service whose pod ran on another node,
   a LoadBalancer address included, never answered: the pod and service networks are now in the `trusted` zone
   there, as k3s documents. A server without `/etc/fstab` no longer fails the swap step.
+- **Host keys:** provisioning several VMs at once could lose a new VM's host key from the control node's
+  `known_hosts`, so that VM's run stopped with "No ED25519 host key is known" (seen with five new VMs). Each
+  write replaced the whole file while another was writing it; they now take turns, as do the baseline's entries
+  for a new SSH port.
+- **Extra disks:** the baseline couldn't find a `vm_extra_disks` disk on a Proxmox VM ("has no disk with the
+  serial usas-<label>"), so it stopped there. It looked for a `/dev/disk/by-id` link named after the serial, but
+  Proxmox names those links after the drive (`drive-scsi1`), and only some systems add one for the serial. Each
+  disk is now found by the serial `lsblk` reports.
+- **Web UI, Kubernetes clusters:** in an inventory whose servers are still in `ubuntu_servers` (the name before
+  0.7.0), a cluster group added there by hand didn't show on the Defaults or Servers page, and the next save
+  dropped it from `hosts.yml`. It's now read there too, and saved under `servers` with the servers.
+- **Kubernetes docs:** the guide and `k8s_api_vip_interface` now say that a cluster's servers need one interface
+  name for the VIP, which means one OS family on the cloud images (`ens18` on Ubuntu, `eth0` on AlmaLinux and
+  Rocky Linux). A mixed set was refused by `make kubernetes`'s checks, as it should be, but nothing said so up
+  front.
+- **Kubernetes docs:** the guide's cluster example sets `vm_spread_group` and `vm_extra_disks` in `hosts.yml`,
+  where a save from the web UI's Servers page drops them (it has no fields for them). The guide now says to put
+  them in `host_vars/<server>.yml` with the web UI, as interfaces.md did, and what a save keeps; interfaces.md no
+  longer says the `k8s_*` groups need an inventory of your own.
+- **Kubernetes, check mode:** a check run on a cluster not built yet (`make kubernetes --check`, which the guide
+  runs first, and the web UI's check before every real run) failed on the first server with "Could not find the
+  requested service k3s", so the web UI never offered the install. Check mode no longer asks systemd to start a
+  unit that it would only write.
+- **Web UI, VMs page and update plans:** whether a Kubernetes member is drained before a reboot was worked out
+  once per cluster, from whichever group set `updates_k8s_drain` first. `updates_k8s_drain: false` on one
+  member's entry was missed, so the page showed it as drained and an update plan didn't warn, while the update
+  rebooted it without a drain; set on the agents' group, it marked the servers too. It's now each member's own
+  value, read as Ansible reads it.
+- **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
+  had no fields for (seen on all five members of a test cluster). It now has an **Extra disks** and a **Spread
+  group** field per server, checked against the `data_disks` and `proxmox_vm` roles' formats. A value either
+  field can't show is kept as written, and the page notes a field whose variable `host_vars/<server>` sets, which
+  applies over the page's. Keeping them in `host_vars/` is now optional.
 
 ## [0.7.0] - 2026-11-01
 
