@@ -60,7 +60,7 @@ choice, is one click away.
 
 | Tag | What |
 | --- | --- |
-| `X.Y.Z` | A release, such as `0.7.0`. |
+| `X.Y.Z` | A release, such as `0.8.0`. |
 | `X.Y` | The latest patch release of that minor version. |
 | `latest` | The latest release. |
 
