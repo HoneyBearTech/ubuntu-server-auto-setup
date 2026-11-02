@@ -617,6 +617,28 @@ string, so the UI shell-quotes each word of them (`shlex.join`), and the node's 
   its own address (a routed network, `macvlan`) isn't, and Docker's experimental nftables backend has no
   `DOCKER-USER` chain. On the RHEL family the option isn't available yet; publish ports only on the addresses
   that should reach them (`-p 127.0.0.1:8080:80`).
+- **Whoever has a Kubernetes cluster's Vault, a member's root, or its GitOps branch.** The join tokens are in
+  the Vault: whoever has them can join a node of their own (with the servers' token, a server, and with it etcd).
+  Root on any member reaches what runs on that node, and root on a server reaches the whole cluster: the admin
+  kubeconfig, etcd's data and the key that encrypts Secrets in it (`/var/lib/rancher/k3s/server/`), which is
+  why encryption at rest protects copies of etcd, not a server. With the Argo CD handoff, whoever can merge to the
+  branch the root Application follows deploys to the cluster as its admin. The workloads, what they expose and
+  their own Secrets are yours: USAS hardens the nodes, not what runs on them.
+- **The cluster's traffic on the LAN.** The firewall allows k3s' ports from each member's address, but a host
+  on the same network segment that forges a member's address, or answers ARP for the VIP or a pool address,
+  isn't stopped by it. etcd, the kubelet and the API use TLS (kubectl checks the API's certificate, which k3s
+  signs with the cluster's own CA); flannel's default VXLAN backend carries pod traffic between nodes
+  unencrypted. Keep a cluster on a network segment of its own, or use `k8s_flannel_backend: wireguard-native`
+  where the segment isn't trusted. `k8s_api_sources: [any]` opens the API to the whole network: it still needs a
+  client certificate or token, but keep the list short.
+- **What k3s and kube-vip publish.** Neither signs its binaries, checksum files or images, so the catalog's pins
+  are only as good as GitHub's and GHCR's HTTPS and the review of the pull request that changed them; k3s' own
+  system images and Argo CD's are pulled by the tags their releases name, not by digest.
+- **Changing a running cluster's secrets.** USAS doesn't rotate a cluster's join tokens or turn Secrets
+  encryption on or off in a cluster that runs: both are k3s' own procedures (`k3s token rotate`,
+  `k3s secrets-encrypt`), and a token changed only in the Vault no longer matches the cluster's.
+  A member that leaves a cluster keeps its firewall rules and k3s until you remove them; objects kube-vip or
+  Argo CD made stay in the cluster when their option is turned off.
 - **The servers' applications and wider hardening.** The baseline covers access (SSH, firewall, brute
   force) and updates. It isn't a CIS or STIG benchmark, and it doesn't configure anything your applications
   need. Disk encryption, auditd, AppArmor reporting and kernel parameters are opt-in (above).

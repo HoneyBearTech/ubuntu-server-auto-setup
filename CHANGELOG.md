@@ -8,6 +8,17 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+Kubernetes clusters: servers in a `k8s_<cluster>_servers` or `_agents` group become a k3s cluster. The baseline
+prepares them (k3s' ports open between the members only, kernel settings, swap off, Longhorn's prerequisites and
+k3s' SELinux policy), and a new playbook installs k3s from a binary pinned by its checksum, joins the servers one
+at a time behind an API address kube-vip moves between them, and gives LoadBalancer services addresses from a
+pool. Upgrades go one node at a time, each drained, under a lock in the cluster; fleet updates drain a member
+before its reboot and never reboot two of a cluster's servers together. An optional last step hands the cluster
+to Argo CD and a Git repository, once. The web UI edits clusters with write-only join tokens and runs the
+playbook check first. The join tokens stay in the Vault and the admin kubeconfig on the servers. Without a
+`k8s_*` group, nothing changes. A new guide, [docs/kubernetes.md](docs/kubernetes.md), goes from an empty
+inventory to a running cluster.
+
 ### Added
 
 - **k3s clusters** ([docs/interfaces.md](docs/interfaces.md#kubernetes-clusters)): `make kubernetes`
@@ -62,6 +73,24 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   update wouldn't drain a member; the Updates page has the drain and Longhorn settings, and a cluster the Argo CD
   handoff. Groups and variables set by hand in the inventory are kept when the UI saves. The UI never shows a
   kubeconfig or talks to a cluster itself.
+
+- **[docs/kubernetes.md](docs/kubernetes.md)**: building a k3s cluster from an empty inventory (the groups, the
+  join tokens, provisioning, the baseline, `make kubernetes`), kube-vip and the pool, upgrades, drain-aware
+  updates, the Argo CD handoff, the web UI, how a cluster built by hand joins fleet updates only, and
+  troubleshooting (the etcd port check, UFW's SSH rate limit, a reinstalled node). The README, the roadmap and
+  the docs index link it; the README and the roadmap say what USAS won't do with a cluster.
+
+### Security
+
+- The assurance case covers Kubernetes: new actors (a cluster member that may be hostile, a host on the
+  cluster's network, whoever can merge to the branch Argo CD follows), trust boundaries B28 to B33 (k3s' and
+  kube-vip's downloads, the tokens and configuration written to the members, traffic between members, the API
+  and the read-only kubeconfig, what a cluster reports back, Helm, the chart and the Git repository), Rancher's
+  repository in B21, and the principle that a cluster changes one server at a time with etcd's quorum checked
+  before the next. `docs/security.md` says what it doesn't protect (the Vault, a member's root and the GitOps
+  branch each control the cluster; forged addresses on the LAN; unsigned upstream releases; rotating a running
+  cluster's secrets); `docs/dependencies.md` covers the k3s catalog, the images k3s and Argo CD pull by tag, the
+  upstreams' licenses and how their vulnerabilities are handled.
 
 ### Fixed
 
@@ -734,9 +763,10 @@ and a pre-release checklist on real Proxmox VE.
   page; where focus goes after each action; the run's status in a polite live region while the output
   streams without moving focus; and axe-core's WCAG 2.1 A and AA rules with real layout, so with contrast,
   on every page in the dark, light and system themes. See [docs/testing.md](docs/testing.md#the-browser-tests).
-- A screen-reader walk-through with VoiceOver and NVDA, with what each step should announce and a table for
-  each release's results ([docs/accessibility.md](docs/accessibility.md#screen-reader-walk-through)), now part
-  of the pre-release checklist. It hasn't been run yet.
+- A screen-reader walk-through with VoiceOver and NVDA in the pre-release checklist. It was never run and has
+  since been dropped: screen-reader testing is listed under the
+  [known gaps](docs/accessibility.md#known-gaps), with the structure screen readers rely on checked by the
+  automated tests.
 
 - Optional extra hardening in a new `hardening` role, each part off by default with its own switch:
   `hardening_sysctl_enabled` (kernel and network settings in `/etc/sysctl.d/90-usas-hardening.conf`,

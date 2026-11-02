@@ -517,7 +517,8 @@ What it does to protect them:
   a saved token takes a tick (a running cluster needs k3s' own token rotation first). The UI never shows or offers
   a kubeconfig and doesn't talk to a cluster: `kubernetes.yml` runs only after a passing check of the same
   cluster, version and members, and an upgrade's confirmation is its version typed again. A cluster's API address
-  and LoadBalancer pool are never taken as a VM's address (also not any `/32` address a guest reports).
+  and LoadBalancer pool are never taken as a VM's address (also not any `/32` address a guest reports). The
+  pages for a cluster, in order, are in [kubernetes.md](kubernetes.md#8-in-the-web-ui).
 - **What servers report about their updates is untrusted** too: the run's page keeps only package names that
   look like one, at most 5,000 per list, and shortened text, and shows it as text.
 - **What guests report is untrusted.** The VMs page shows what each VM's guest agent says (its addresses,

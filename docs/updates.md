@@ -111,6 +111,9 @@ Proxmox console and re-enroll the TPM, as [security.md](security.md#secure-boot-
 
 ## Kubernetes members
 
+How a cluster is built and upgraded, and how one built by hand joins fleet updates only, is in
+[kubernetes.md](kubernetes.md).
+
 A server in a `k8s_<cluster>_servers` or `k8s_<cluster>_agents` group (the groups the
 [k3s playbook](interfaces.md#kubernetes-clusters) uses; a cluster built another way can be listed in them too,
 with its servers in the inventory) is a node of that cluster. With `updates_k8s_drain: true` (the default),
