@@ -6,6 +6,8 @@ name: Fuzzing
 # Fail2Ban settings; the web UI's status API token header; and what the OS catalog tool reads from the
 # vendors. A minute per target on every pull request
 # and push to main, ten minutes weekly. A finding fails the job and its input is uploaded as an artifact.
+# With the repository variable SELF_HOSTED_RUNNER set to "true", it runs on the maintainer's self-hosted
+# runner, except for pull requests from forks, which always run on GitHub's runners (docs/testing.md).
 on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
@@ -20,7 +22,10 @@ permissions:
 jobs:
   fuzz:
     name: Fuzz targets
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{ vars.SELF_HOSTED_RUNNER == 'true'
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && fromJSON('["self-hosted", "Linux", "X64"]') || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -8,6 +8,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Changed
+
+- The fuzz job can run on the maintainer's self-hosted runner: with the repository variable
+  `SELF_HOSTED_RUNNER` set to `true`, pushes, the weekly run, manual runs and pull requests from this
+  repository's branches use it; pull requests from forks stay on GitHub's runners
+  ([docs/testing.md](docs/testing.md#fuzzing)).
+
 ### Fixed
 
 - **Host keys:** provisioning several VMs at once could lose a new VM's host key from the control node's

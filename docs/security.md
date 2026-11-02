@@ -331,7 +331,9 @@ Proxmox node as root after that one setup run, and nothing they do there runs as
 - Every change is linted (yamllint, ansible-lint `production` profile), syntax-checked and scanned for
   secrets (gitleaks over the full history) before it can merge; workflows run with read-only tokens and
   pinned actions. The only CI secret, the Docker Hub token that publishes the image, is available only to
-  release runs for a `v*` tag (the `release` environment).
+  release runs for a `v*` tag (the `release` environment). Every job runs on GitHub's runners except the
+  fuzz job, which can run on the maintainer's self-hosted runner, never for a pull request from a fork
+  ([testing.md](testing.md#fuzzing)).
 
 **Updates** (`playbooks/updates.yml`, [updates.md](updates.md))
 

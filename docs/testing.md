@@ -443,7 +443,13 @@ filters and tests, and checks a property for every input the role would accept:
 
 `make fuzz` runs each target for `FUZZ_SECONDS` (default 60). Atheris only ships Linux x86-64 wheels, so it
 runs in CI (`.github/workflows/fuzz.yml`) or on such a machine:
-`pip install --require-hashes -r requirements-ci.txt -r requirements-fuzz.txt`. A finding prints the input
+`pip install --require-hashes -r requirements-ci.txt -r requirements-fuzz.txt`. With the repository variable
+`SELF_HOSTED_RUNNER` set to `true`, the CI job runs on the maintainer's self-hosted runner (labels
+`self-hosted`, `Linux`, `X64`) for pushes, the weekly run, manual runs and pull requests from this
+repository's own branches; pull requests from forks always run on GitHub's runners, so code nobody here
+has reviewed never runs on the maintainer's network. The job needs nothing on the runner but Python
+from `actions/setup-python` and changes nothing outside its workspace. To go back to GitHub's runners,
+for example while the runner is down, delete the variable or set it to anything else: no commit needed. A finding prints the input
 and saves it as `tests/fuzz/crash-*` (uploaded as an artifact in CI); fix the role, then add a case to the
 integration tests that the fix refuses.
 
