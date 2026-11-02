@@ -376,11 +376,13 @@
     provision_known_hosts_name: >-
       {{ ansible_host if (ansible_port | default(22) | int) == 22 else '[' ~ ansible_host ~ ']:' ~ (ansible_port | int) }}
   block:
+    # Each write reads the whole file and replaces it, so new VMs' writes take turns: two at once lose one's key.
     - name: Remove the stale host key
       ansible.builtin.known_hosts:
         path: "{{ provision_known_hosts_file }}"
         name: "{{ provision_known_hosts_name }}"
         state: absent
+      throttle: 1
 
     - name: Scan the new host key
       ansible.builtin.command:
@@ -395,6 +397,7 @@
         name: "{{ provision_known_hosts_name }}"
         key: "{{ pve_host_key.stdout_lines | select('match', '^[^#]') | first }}"
         state: present
+      throttle: 1
 
 # The first-boot user and keys are created by cloud-init, which can lag sshd by a few seconds.
 - name: Wait until the admin user can log in

@@ -93,6 +93,7 @@
         src: /etc/ssh/ssh_host_ed25519_key.pub
       register: ssh_host_key
 
+    # One server at a time: each write reads the whole file and replaces it, so two at once lose one's entry.
     - name: Add a known_hosts entry for the new port
       ansible.builtin.known_hosts:
         path: "{{ ssh_known_hosts_file }}"
@@ -101,6 +102,7 @@
         state: present
       delegate_to: localhost
       become: false
+      throttle: 1
 
     - name: Switch the connection to port {{ ssh_port }}
       ansible.builtin.set_fact:
