@@ -316,9 +316,14 @@ class Store:
         return config
 
     def _load_clusters(self, config: Config, top: dict[str, Any], children: dict[str, Any]) -> None:
-        """The k8s_<cluster> groups under servers (or all), and each listed server's membership."""
+        """The k8s_<cluster> groups under servers (or ubuntu_servers, its name before 0.7.0, or all), and each
+        listed server's membership. Those under either server group are written back under servers, as the
+        servers are."""
         servers = {s["name"]: s for s in config.servers}
-        under_servers = (children.get("servers") or {}).get("children") or {}
+        under_servers: dict[str, Any] = {}
+        for server_group in SERVER_GROUPS:
+            for group, body in ((children.get(server_group) or {}).get("children") or {}).items():
+                under_servers.setdefault(group, body)
         groups = [*under_servers.items(), *((g, b) for g, b in children.items() if g not in under_servers)]
         fields = {f.name: f for f in self.schema.cluster_fields if f.name != "name"}
         for group, body in groups:

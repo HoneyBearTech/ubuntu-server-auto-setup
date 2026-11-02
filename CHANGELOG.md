@@ -18,6 +18,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   serial usas-<label>"), so it stopped there. It looked for a `/dev/disk/by-id` link named after the serial, but
   Proxmox names those links after the drive (`drive-scsi1`), and only some systems add one for the serial. Each
   disk is now found by the serial `lsblk` reports.
+- **Web UI, Kubernetes clusters:** in an inventory whose servers are still in `ubuntu_servers` (the name before
+  0.7.0), a cluster group added there by hand didn't show on the Defaults or Servers page, and the next save
+  dropped it from `hosts.yml`. It's now read there too, and saved under `servers` with the servers.
 
 ## [0.8.0] - 2026-11-01
 
