@@ -581,12 +581,17 @@ play tests/verify-baseline.yml
 cool_down
 
 step "baseline: extra disks formatted while blank and mounted by label, then a rerun that changes nothing"
-# Loop devices stand in for the VM's disks, under the names QEMU gives them by serial.
-DISKS=(--limit srv-disks --tags data_disks -e data_disks_by_id_dir=/srv/test-disks)
+# Loop devices stand in for the VM's disks. They have no serial, so lsblk's answer stands in too, shaped as on
+# Proxmox: the system disk's serial is its drive's name, each extra disk's usas-<label>.
+DISKS=(--limit srv-disks --tags data_disks -e '{"data_disks_lsblk_argv": ["cat", "/srv/test-disks/lsblk.json"]}')
 docker exec "$SRV" sh -euc 'mkdir -p /srv/test-disks; for label in data app-logs other; do
     truncate -s 320M /srv/test-disks/$label.img; d=$(losetup -f --show /srv/test-disks/$label.img)
-    echo "$d" >>/srv/test-disks/loops; ln -s "$d" /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-$label; done
-  mkfs.ext4 -q -L other /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other'
+    echo "$d" >>/srv/test-disks/loops; ln -s "$d" /srv/test-disks/disk-$label; done
+  mkfs.ext4 -q -L other /srv/test-disks/disk-other
+  { printf "{\"blockdevices\": [{\"path\": \"/dev/sda\", \"serial\": \"drive-scsi0\"}"
+    for label in data app-logs other; do
+      printf ", {\"path\": \"/srv/test-disks/disk-%s\", \"serial\": \"usas-%s\"}" "$label" "$label"; done
+    printf "]}\n"; } >/srv/test-disks/lsblk.json'
 play playbooks/baseline.yml "${DISKS[@]}"
 play --idempotent playbooks/baseline.yml "${DISKS[@]}"
 play --idempotent playbooks/baseline.yml "${DISKS[@]}" --check
@@ -597,9 +602,9 @@ play --idempotent playbooks/baseline.yml "${DISKS[@]}" --check
 
 step "baseline: a disk that holds another file system is left alone, and a missing disk is named"
 OTHER=(-e '{"vm_extra_disks": [{"size_gb": 1, "label": "other", "mount": "/srv/other", "fs": "xfs"}]}')
-play_fails "the disk usas-other (/srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other) holds a file system (type ext4, \
+play_fails "the disk usas-other (/srv/test-disks/disk-other) holds a file system (type ext4, \
 label other), not nothing or an xfs file system" playbooks/baseline.yml "${DISKS[@]}" "${OTHER[@]}"
-[ "$(docker exec "$SRV" blkid -p -s TYPE -o value /srv/test-disks/scsi-0QEMU_QEMU_HARDDISK_usas-other)" = ext4 ] \
+[ "$(docker exec "$SRV" blkid -p -s TYPE -o value /srv/test-disks/disk-other)" = ext4 ] \
   || { echo "ERROR: a disk holding a file system was formatted" >&2; exit 1; }
 play_fails 'srv-disks has no disk with the serial usas-gone' playbooks/baseline.yml "${DISKS[@]}" \
   -e '{"vm_extra_disks": [{"size_gb": 1, "label": "gone", "mount": "/srv/gone"}]}'
