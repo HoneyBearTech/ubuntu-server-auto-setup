@@ -404,12 +404,31 @@ def test_an_update_warns_when_a_member_isnt_drained(ui, monkeypatch):
     assert r.status_code == 200 and not any("Kubernetes" in w for w in r.json()["plan"]["warnings"])
 
 
+def test_drain_is_each_members_own():
+    # As Ansible reads updates_k8s_drain: on the member in its member group, then that group, then the cluster. A
+    # value for the agents says nothing about the servers, and one member's says nothing about the others.
+    servers = [{"name": n, "pve_vmid": i, "k8s_cluster": "lab", "k8s_role": r}
+               for i, (n, r) in enumerate([("s1", "server"), ("a1", "agent"), ("a2", "agent")], 1)]
+    cluster = k.Cluster(name="lab", member_vars={"agents": {"updates_k8s_drain": False}})
+    config = k.Config(servers=servers, clusters=[cluster])
+    assert [k.drain(config, cluster, True, i) for i in (1, 2, 3)] == [True, False, False]
+    cluster.member_vars = {}
+    cluster.member_host_vars = {"a2": {"updates_k8s_drain": False}}
+    assert [k.drain(config, cluster, True, i) for i in (1, 2, 3)] == [True, True, False]
+    warnings = k.drain_warnings(config, [(1, "s1"), (2, "a1"), (3, "a2")], {}, True)
+    assert len(warnings) == 1 and warnings[0].startswith("a2 is an agent of Kubernetes cluster lab")
+    # The member's own value comes before its group's, and the group's before the cluster's.
+    cluster.member_vars = {"agents": {"updates_k8s_drain": True}}
+    cluster.extra_vars = {"updates_k8s_drain": False}
+    assert [k.drain(config, cluster, True, i) for i in (1, 2, 3)] == [False, True, False]
+
+
 def test_drain_and_membership_rules():
     cluster = k.Cluster(name="lab", extra_vars={"updates_k8s_drain": True})
     config = k.Config(servers=[{"name": "w", "pve_vmid": 7, "k8s_cluster": "lab", "k8s_role": "agent"}],
                       clusters=[cluster])
     assert k.drain(config, cluster, False) is True
-    assert k.drain(config, k.Cluster(name="x", member_vars={"agents": {"updates_k8s_drain": "false"}}), True) is False
+    assert k.drain(config, k.Cluster(name="x", member_vars={"agents": {"updates_k8s_drain": "false"}}), True) is True
     assert k.drain(config, None, True) is True
     assert k.drain_warnings(config, [(7, "w")], {}, False) == []
     cluster.extra_vars = {}

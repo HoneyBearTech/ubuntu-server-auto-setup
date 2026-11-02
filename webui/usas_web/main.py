@@ -1357,7 +1357,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
             member = clusters.membership(config, row["vmid"], row.get("tags") or [])
             if member is not None:
                 member["drain"] = member["inventory"] and clusters.drain(config, by_name.get(member["cluster"]),
-                                                                        drain_default)
+                                                                        drain_default, row["vmid"])
             row.update(selectable=ok, why_not=why, alias=alias, k8s=member,
                        pinned=[hostkey(k) for k in pins.get(alias, [])])
         return data
