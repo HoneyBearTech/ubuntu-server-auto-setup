@@ -1083,6 +1083,28 @@
     "choices": null
    },
    {
+    "name": "vm_extra_disks",
+    "label": "Extra disks",
+    "kind": "list",
+    "help": "Comma-separated, each a size in GB, a label (lowercase letters, digits, - and _, at most 12) and where it's mounted, then optionally xfs (else ext4) and on a storage (else the VM disk storage). Example: 100 longhorn /var/lib/longhorn, 50 pgdata /srv/pg xfs on fast-ssd. More disks (scsi1, scsi2, ...), each a mapping with these keys (size_gb, label and mount are needed): New VMs only: an existing VM isn't given disks. The baseline (data_disks role) formats each disk while it is still blank, never one that already holds data, and mounts it by label with nofail. Example:.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_extra_disks",
+    "default": null,
+    "choices": null
+   },
+   {
+    "name": "vm_spread_group",
+    "label": "Spread group",
+    "kind": "text",
+    "help": "Servers with the same spread group get their VMs on different nodes; empty: none. Hosts that share a vm_spread_group (any name, such as k8s-lab-servers) must have their VMs on different nodes, so one node going down takes only one of them. Checked before anything is created, against where existing VMs run now, for every host in the inventory with that group, not only those the run includes. Empty for none.",
+    "required": false,
+    "advanced": false,
+    "variable": "vm_spread_group",
+    "default": null,
+    "choices": null
+   },
+   {
     "name": "firewall_ports",
     "label": "Extra firewall rules",
     "kind": "list",
@@ -1134,6 +1156,8 @@
     "vm_memory_mb": "",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
+    "vm_extra_disks": "",
+    "vm_spread_group": "",
     "firewall_ports": "443/tcp",
     "k8s_cluster": "lab",
     "k8s_role": "server"
@@ -1151,10 +1175,16 @@
     "vm_memory_mb": "8192",
     "vm_disk_gb": "",
     "vm_extra_nics": "",
+    "vm_extra_disks": "",
+    "vm_spread_group": "",
     "firewall_ports": "",
     "k8s_cluster": "",
     "k8s_role": ""
    }
+  ],
+  "notes": [
+   {},
+   {}
   ],
   "clusters": [
    "lab"

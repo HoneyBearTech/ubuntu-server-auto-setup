@@ -70,10 +70,10 @@ servers:
   node affinity rule by hand if HA may move them.
 - **`vm_extra_disks`** gives an agent a disk for Longhorn, formatted and mounted while blank.
   `k8s_longhorn_prereqs` installs what Longhorn needs on the node; Longhorn itself is your GitOps repository's.
-- **With the web UI**, put `vm_spread_group` and `vm_extra_disks` in `inventory/host_vars/<server>.yml` instead
-  (`vm_spread_group: k8s-lab-servers` in `host_vars/cp-1.yml`, and so on). The Servers page has no fields for
-  them, and saving it rewrites each server's entry in `hosts.yml` with only the fields it has; it never writes
-  `host_vars/` ([disks and placement](interfaces.md#disks-and-placement)).
+- **With the web UI**, set them on the Servers page: **Spread group** `k8s-lab-servers` on each server, and
+  **Extra disks** `100 longhorn /var/lib/longhorn` on each agent. Keeping them in
+  `inventory/host_vars/<server>.yml` instead is optional; that file applies over the page's value, which the
+  page notes, and the UI never writes it ([disks and placement](interfaces.md#disks-and-placement)).
 - **`k8s_version` has no default.** A new USAS release with a newer k3s in its catalog never upgrades a
   cluster by itself: you change the version, and run an [upgrade](#5-upgrades).
 
@@ -213,7 +213,7 @@ The web UI does all of the above from its pages ([interfaces.md](interfaces.md#t
 - **Defaults → Kubernetes clusters:** a cluster's settings, and its two join tokens, write-only: typed into a
   password field, or made by the server and shown once ("Make a token and show it once"), for you to copy into
   your password manager. A saved token is never shown again.
-- **Servers:** each server's cluster and role (server, agent or none).
+- **Servers:** each server's cluster and role (server, agent or none), spread group and extra disks.
 - **Run:** `kubernetes.yml` for one cluster, to install or upgrade: a check run first, then the real run once,
   within 30 minutes and after a confirmation; an upgrade's confirmation is the version typed again. Each step is
   in the audit log.
@@ -222,8 +222,9 @@ The web UI does all of the above from its pages ([interfaces.md](interfaces.md#t
 
 The UI never shows a kubeconfig, never runs `kubectl` itself and never writes to a cluster except through those
 runs. When it saves, a cluster's groups and what was set in them by hand (variables the page has no field for,
-the member groups' own variables) are kept as they were. A server's own entry keeps only what the Servers page has
-fields for: anything else goes in `host_vars/<server>.yml`, as [the inventory](#1-the-inventory) says.
+the member groups' own variables) are kept as they were. A server's own entry keeps what the Servers page has
+fields for (a spread group or extra disks it can't show is kept as written): anything else goes in
+`host_vars/<server>.yml`.
 
 ## An existing cluster: fleet updates only
 

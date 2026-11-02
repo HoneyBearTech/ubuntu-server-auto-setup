@@ -452,6 +452,36 @@ describe("the servers page", () => {
     expect(body["servers-1-net_mode"]).toBe("static");
   });
 
+  it("sends the extra disks and spread group as typed", async () => {
+    const api = new FakeApi({ "POST /api/servers": () => ({ message: "Saved 2 server(s)." }) });
+    renderAt("/servers");
+    await loaded();
+    await userEvent.type(input("Extra disks, row 1"), "100 longhorn /var/lib/longhorn");
+    await userEvent.type(input("Spread group, row 1"), "k8s-lab");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved 2 server(s).");
+    const body = api.posts("/api/servers")[0].body;
+    expect(body["servers-0-vm_extra_disks"]).toBe("100 longhorn /var/lib/longhorn");
+    expect(body["servers-0-vm_spread_group"]).toBe("k8s-lab");
+    expect(screen.getByText(/Added to new VMs only|New VMs only/)).toBeTruthy();
+  });
+
+  it("notes a value kept as written or set in host_vars, and the note moves with its row", async () => {
+    const notes = [{ vm_spread_group: "Set by hand in the inventory as something this field can't show: kept as "
+      + "written until you enter a value here." }, { vm_extra_disks: "host_vars/db-01 sets this too, and its value "
+      + "applies: the web UI doesn't write that folder." }];
+    new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, notes }) });
+    renderAt("/servers");
+    await loaded();
+    const group = input("Spread group, row 1");
+    expect(group.getAttribute("aria-describedby")).toBe("servers-0-vm_spread_group-note");
+    expect(document.getElementById("servers-0-vm_spread_group-note")?.textContent).toMatch(/kept as written/);
+    expect(input("Extra disks, row 2").getAttribute("aria-describedby")).toBe("servers-1-vm_extra_disks-note");
+    await userEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
+    expect(input("Spread group, row 1").getAttribute("aria-describedby")).toBeNull();
+    expect(document.getElementById("servers-0-vm_extra_disks-note")?.textContent).toMatch(/host_vars\/db-01/);
+  });
+
   it("keeps one empty row when the last is removed", async () => {
     new FakeApi({ "GET /api/servers": () => ({ ...fixtures.servers, rows: [] }) });
     renderAt("/servers");

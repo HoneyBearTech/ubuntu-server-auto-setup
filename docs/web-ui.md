@@ -204,7 +204,17 @@ The overview lists the steps and whether each is done.
    replaces the Defaults page's gateway for that server), then optionally `mtu`, `model` and `mac`:
    `vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 vlan 30 dhcp`. Each value is checked against the
    provisioning role's own formats, and so is the rule that exactly one card has the default route
-   ([interfaces.md](interfaces.md#networks)).
+   ([interfaces.md](interfaces.md#networks)). **Extra disks** become `scsi1`, `scsi2` and so on (at most 29),
+   separated by commas, each written as the size in GB, a label (lowercase letters, digits, `-` and `_`, at
+   most 12) and where it's mounted, then optionally `xfs` (else `ext4`) and `on` a storage (else the VM disk
+   storage): `100 longhorn /var/lib/longhorn, 50 pgdata /srv/pg xfs on fast-ssd`. They are checked against the
+   `data_disks` role's formats (no system folder such as `/var/lib` as the mount, each label and mount its
+   own) and added to new VMs only. Servers with the same **Spread group** (letters, digits, `.`, `_` and `-`,
+   such as `k8s-lab-servers`) get their VMs on different nodes
+   ([interfaces.md](interfaces.md#disks-and-placement)). A spread group or extra disks set by hand in
+   `hosts.yml` as something the field can't show (a template, say) is kept as it was, and the field says so,
+   until you enter a value there. A value in `inventory/host_vars/<server>.yml` applies over the page's, and the
+   field says that too: the UI never writes that folder.
 5. **Hardening**: the SSH port, the users allowed to log in over SSH, root login, passwordless sudo, the
    firewall's SSH sources and rules for every server, whether Docker-published ports obey the firewall (and
    which sources and ports may reach them), and the Fail2Ban settings. Below them, off until you

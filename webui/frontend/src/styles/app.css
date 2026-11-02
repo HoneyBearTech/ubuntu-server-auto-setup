@@ -1133,13 +1133,21 @@ td a {
 }
 
 /* The network cards of a server read as a short sentence each. */
-.servers input[name$="-vm_extra_nics"] {
+.servers input[name$="-vm_extra_nics"],
+.servers input[name$="-vm_extra_disks"] {
   min-width: 18rem;
 }
 
-.servers .error {
+.servers .error,
+.servers .note {
   margin-top: var(--space-1);
   max-width: 14rem;
+}
+
+/* A value the page keeps or that host_vars sets, under its field. */
+.servers .note {
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
 
 /* --- VMs ---------------------------------------------------------------------------------------------------- */

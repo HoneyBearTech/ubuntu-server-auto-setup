@@ -354,9 +354,11 @@ An existing VM counts on the node it runs on now, which may not be its `pve_node
 check, not a Proxmox HA rule: the token has no privilege to make one. To keep the VMs apart when HA moves them
 too, add an HA node affinity rule (Proxmox VE 9) or HA group (Proxmox VE 8) for them by hand.
 
-Until the web UI has fields for them, a web UI save keeps only what it can show, so set `vm_extra_disks` and
-`vm_spread_group` in `host_vars/<server>.yml` next to the inventory (the UI doesn't write that folder). The
-`k8s_*` groups are the UI's own (Defaults, Kubernetes clusters), and it keeps what was set in them by hand.
+The web UI's Servers page has a field for each (**Extra disks**, **Spread group**), checked against the same
+formats. A value it can't show (a template, say) set by hand in `hosts.yml` is kept as written until one is
+entered there. `host_vars/<server>.yml` next to the inventory still works, and applies over `hosts.yml`: the UI
+never writes that folder, and the page notes a field whose variable is set there. The `k8s_*` groups are the
+UI's own (Defaults, Kubernetes clusters), and it keeps what was set in them by hand.
 
 ### Kubernetes nodes
 

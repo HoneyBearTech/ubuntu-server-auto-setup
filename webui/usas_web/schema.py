@@ -19,7 +19,7 @@ import yaml
 from .problems import Problem
 
 ROLES = ("os_catalog", "installer_iso", "proxmox_vm", "common", "firewall", "ssh_hardening", "fail2ban",
-         "hardening", "updates", "kubernetes_node", "k3s")
+         "hardening", "updates", "kubernetes_node", "k3s", "data_disks")
 
 # The k3s catalog (roles/k3s/vars/catalog.yml): a cluster's version field (choices_var=K3S_CATALOG) offers its
 # releases, which the k3s role installs.
@@ -69,11 +69,10 @@ NOT_FORM_FORMATS = frozenset({
     "updates_package_pattern", "updates_url_pattern", "updates_snapshot_name_pattern",
     "updates_snapshot_marker_pattern", "updates_group_pattern", "updates_max_entries", "updates_supported_releases",
     "updates_families",
-    # Spread groups: no form field yet, so set in the inventory (host_vars). The extra disks' formats are the
-    # data_disks role's, which has no form fields yet either. The Kubernetes groups are the Servers page's
+    # The packages that make each file system: not a setting. The Kubernetes groups are the Servers page's
     # cluster and role columns: the UI writes k8s_<cluster>_servers/_agents itself, with a name checked by
     # CLUSTER_NAME (tests/test_schema.py ties it to these three patterns).
-    "provision_spread_group_pattern", "provision_k8s_group_pattern", "k8s_node_group_pattern", "k3s_group_pattern",
+    "data_disks_fs_packages", "provision_k8s_group_pattern", "k8s_node_group_pattern", "k3s_group_pattern",
     # A member's address is its ansible_host, which the Servers page checks with provision_ipv4_pattern.
     "k8s_node_ipv4_pattern",
     # The kubernetes_node and k3s roles' files, ports, packages, services and platforms: not settings.
@@ -100,6 +99,11 @@ K8S_ROLES = ("none", "server", "agent")
 NIC_FORMATS = ("provision_bridge_pattern", "provision_vlan_pattern", "provision_ipv4_pattern",
                "provision_prefix_pattern", "provision_mtu_pattern", "provision_mac_pattern", "provision_nic_models",
                "provision_nic_modes")
+# The extra disks' formats (roles/data_disks/vars/main.yml), for the extra disks column.
+DISK_FORMATS = ("data_disks_keys", "data_disks_fs", "data_disks_size_pattern", "data_disks_label_pattern",
+                "data_disks_storage_pattern", "data_disks_mount_pattern", "data_disks_mount_reserved", "data_disks_max")
+# The size the role takes at most, checked inline in roles/data_disks/tasks/check.yml.
+DISK_SIZE_MAX = 65536
 
 # Formats the roles check inline in their assert tasks rather than in vars/main.yml (kept in step with
 # roles/*/tasks/main.yml; tests/test_schema.py reads those tasks to check).
@@ -152,7 +156,7 @@ class Field:
     pattern: str | None
     choices: tuple[str, ...] | None
     patterns: tuple[str, ...] = ()  # every pattern the value must match (roles that read it may differ)
-    formats: dict[str, Any] = field(default_factory=dict)  # NIC_FORMATS, for the network cards column
+    formats: dict[str, Any] = field(default_factory=dict)  # NIC_FORMATS or DISK_FORMATS, for those two columns
     choice_labels: dict[str, str] = field(default_factory=dict)  # what the form shows for each choice, if not itself
 
     def __getattr__(self, item):
@@ -422,6 +426,12 @@ SERVER_COLUMNS: tuple[Spec, ...] = (
     S("vm_extra_nics", "Extra network cards", "list", "proxmox_vm", ui_pattern="network_cards",
       help="Comma-separated, each a bridge, then vlan and a tag, then dhcp, none or an address/prefix (optionally "
            "via a gateway), optionally mtu, model and mac. Example: vmbr1 vlan 20 10.20.0.5/24 mtu 9000, vmbr1 dhcp."),
+    S("vm_extra_disks", "Extra disks", "list", "proxmox_vm", ui_pattern="data_disks",
+      help="Comma-separated, each a size in GB, a label (lowercase letters, digits, - and _, at most 12) and where "
+           "it's mounted, then optionally xfs (else ext4) and on a storage (else the VM disk storage). Example: "
+           "100 longhorn /var/lib/longhorn, 50 pgdata /srv/pg xfs on fast-ssd."),
+    S("vm_spread_group", "Spread group", "text", "proxmox_vm", pattern_var="provision_spread_group_pattern",
+      help="Servers with the same spread group get their VMs on different nodes; empty: none."),
     S("firewall_ports", "Extra firewall rules", "list", ui_pattern="ufw_rule", default=[],
       help="Comma-separated, for example 80/tcp, 443/tcp, 5432/tcp from 10.0.0.0/24."),
     S("k8s_cluster", "Kubernetes cluster", "text", ui_pattern=CLUSTER_NAME, default="",
@@ -525,9 +535,10 @@ class Schema:
         else:
             choices = spec.ui_choices
         for p in patterns:
-            if p not in ("ufw_rule", "network_cards"):
+            if p not in ("ufw_rule", "network_cards", "data_disks"):
                 re.compile(p)
-        formats = {name: self.roles.var(name) for name in NIC_FORMATS} if spec.ui_pattern == "network_cards" else {}
+        names = {"network_cards": NIC_FORMATS, "data_disks": DISK_FORMATS}.get(spec.ui_pattern or "", ())
+        formats = {name: self.roles.var(name) for name in names}
         return Field(spec=spec, default=default, help=help_text, pattern=pattern, choices=choices, patterns=patterns,
                      formats=formats, choice_labels=labels)
 
@@ -542,6 +553,8 @@ class Schema:
                 used.add(s.choices_var)
             if s.ui_pattern == "network_cards":
                 used.update(NIC_FORMATS)
+            if s.ui_pattern == "data_disks":
+                used.update(DISK_FORMATS)
         return used
 
 
@@ -564,7 +577,7 @@ def _check(patterns: tuple[str, ...], value: str, what: str) -> None:
     for pattern in patterns:
         if pattern == "ufw_rule":
             parse_ufw_rule(value)
-        elif pattern == "network_cards":
+        elif pattern in ("network_cards", "data_disks"):
             pass  # parsed with the role's formats by parse_value
         elif not re.match(pattern, value):
             raise Invalid(f"{what} isn't in the accepted format.")
@@ -653,6 +666,47 @@ def format_nic(nic: dict[str, Any]) -> str:
     return " ".join(words)
 
 
+def parse_disk(text: str, formats: dict[str, Any]) -> dict[str, Any]:
+    """'100 longhorn /var/lib/longhorn' or '50 pgdata /srv/pg xfs on fast-ssd' -> a vm_extra_disks entry, each
+    value checked against the data_disks role's own formats."""
+    words = text.split()
+    if len(words) < 3:
+        raise Invalid(f"'{text}': write the size in GB, the label and the mount path, like 100 data /srv/data.")
+    size, label, mount, rest = words[0], words[1], words[2], words[3:]
+    if not re.match(formats["data_disks_size_pattern"], size) or int(size) > DISK_SIZE_MAX:
+        raise Invalid(f"'{text}': the size is a whole number of GB, 1-{DISK_SIZE_MAX}.")
+    if not re.match(formats["data_disks_label_pattern"], label):
+        raise Invalid(f"'{text}': the label is lowercase letters, digits, '-' and '_', at most 12, starting with a "
+                      "letter or digit.")
+    if not re.match(formats["data_disks_mount_pattern"], mount):
+        raise Invalid(f"'{text}': the mount is an absolute path of plain names, like /srv/data.")
+    if mount in formats["data_disks_mount_reserved"]:
+        raise Invalid(f"'{text}': {mount} is a system folder; mount the disk somewhere else, like /srv/data.")
+    disk: dict[str, Any] = {"size_gb": int(size)}
+    while rest:
+        word = rest.pop(0)
+        if word in formats["data_disks_fs"] and "fs" not in disk:
+            disk["fs"] = word
+        elif word == "on" and rest and "storage" not in disk:
+            disk["storage"] = rest.pop(0)
+            if not re.match(formats["data_disks_storage_pattern"], disk["storage"]):
+                raise Invalid(f"'{text}': on takes a Proxmox storage ID, like local-lvm.")
+        else:
+            raise Invalid(f"'{text}': '{word}' isn't understood here; after the mount, give "
+                          f"{' or '.join(formats['data_disks_fs'])} and on a storage, once each.")
+    disk.update(label=label, mount=mount)
+    return {key: disk[key] for key in formats["data_disks_keys"] if key in disk}
+
+
+def format_disk(disk: dict[str, Any]) -> str:
+    words = [str(disk.get("size_gb", "")), str(disk.get("label", "")), str(disk.get("mount", ""))]
+    if disk.get("fs") not in (None, ""):
+        words.append(str(disk["fs"]))
+    if disk.get("storage") not in (None, ""):
+        words += ["on", str(disk["storage"])]
+    return " ".join(words)
+
+
 def format_ufw_rule(rule: dict[str, Any]) -> str:
     text = f"{rule.get('port')}/{rule.get('proto', 'tcp')}"
     if rule.get("from") and rule.get("from") != "any":
@@ -688,6 +742,15 @@ def parse_value(f: Field, raw: Any) -> Any:
             return [parse_ufw_rule(item) for item in items]
         if f.pattern == "network_cards":
             return [parse_nic(item, f.formats) for item in items]
+        if f.pattern == "data_disks":
+            disks = [parse_disk(item, f.formats) for item in items]
+            if len(disks) > f.formats["data_disks_max"]:
+                raise Invalid(f"{f.label}: at most {f.formats['data_disks_max']}.")
+            for key, what in (("label", "label"), ("mount", "mount path")):
+                values = [d[key] for d in disks]
+                if len(set(values)) != len(values):
+                    raise Invalid(f"{f.label}: each disk needs its own {what}.")
+            return disks
         return items
     if f.kind == "secret":
         # Kept as typed (a password may start or end with a space), but no control characters.
@@ -730,5 +793,7 @@ def display_value(f: Field, value: Any) -> Any:
             return "\n".join(format_ufw_rule(r) for r in value or [])
         if f.pattern == "network_cards":
             return "\n".join(format_nic(n) for n in value or [] if isinstance(n, dict))
+        if f.pattern == "data_disks":
+            return "\n".join(format_disk(d) for d in value or [] if isinstance(d, dict))
         return "\n".join(str(v) for v in value or [])
     return value

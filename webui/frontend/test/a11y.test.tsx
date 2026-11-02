@@ -63,6 +63,21 @@ describe("pages with errors", () => {
     await checkAxe("/servers with errors");
   });
 
+  it("the servers page with notes on its fields", async () => {
+    new FakeApi({
+      "GET /api/servers": () => ({ ...fixtures.servers, notes: [{ vm_spread_group: "Kept as written." }, {}] }),
+      "POST /api/servers": () => reply(422, { errors: { "servers-0-vm_spread_group": "Spread group isn't in the accepted format." } }),
+    });
+    renderAt("/servers");
+    await loaded();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Row 1: Spread group isn't in the accepted format.");
+    expect(document.getElementById("servers-0-vm_spread_group")?.getAttribute("aria-describedby"))
+      .toBe("servers-0-vm_spread_group-error servers-0-vm_spread_group-note");
+    checkStructure(document.body, "/servers with notes and errors");
+    await checkAxe("/servers with notes and errors");
+  });
+
   it("the sign-in page", async () => {
     new FakeApi({ "POST /api/login": () => reply(401, { error: "That password is wrong." }) });
     renderAt("/login");
