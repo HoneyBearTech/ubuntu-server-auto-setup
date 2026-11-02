@@ -30,7 +30,7 @@
           - "'ide3' not in create[0]"
           - create[0].boot == 'order=scsi0'
           - create[0].description == 'Installed by ubuntu-server-auto-setup (Debian 13 cloud image ' ~ image.build ~ ')'
-          - create[0].tags == 'debian,ansible'
+          - create[0].tags == 'debian,ansible,pve-test'
           - "vm.resized == [{'disk': 'scsi0', 'size': '32G'}]"
           # Started for the first boot, powered itself off, the seed detached, started again from its disk.
           - vm.installed

@@ -178,8 +178,8 @@
     provision_k8s_match: "{{ provision_k8s_group | regex_search(provision_k8s_group_pattern, '\\1', '\\2') or [] }}"
   ansible.builtin.set_fact:
     provision_tags: >-
-      {{ pve_tags + (['usas-k8s-' ~ provision_k8s_match[0] ~ '-' ~ provision_k8s_match[1] | regex_replace('s$', '')]
-         if provision_k8s_match else []) }}
+      {{ (pve_tags + (['usas-k8s-' ~ provision_k8s_match[0] ~ '-' ~ provision_k8s_match[1] | regex_replace('s$', '')]
+         if provision_k8s_match else []) + ([pve_node | lower] if pve_tag_node | bool and pve_node | length > 0 else [])) | unique }}
 
 # The TPM only releases the disk key while PCR 7 (Secure Boot state) matches, so encryption without Secure
 # Boot would bind it to nothing. Subiquity encrypts only the lvm layout, and a cloud image comes unencrypted.

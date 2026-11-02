@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Added
+
+- New VMs are also tagged in Proxmox with the node they're created on (`pve_node`, in lower case), so after a
+  migration their tags still say which node they belong on. `pve_tag_node: false` leaves it off; existing VMs
+  keep their tags ([docs/interfaces.md](docs/interfaces.md)).
+
 ### Fixed
 
 - **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
