@@ -7,10 +7,13 @@ Properties, for any disk settings, any blkid output and any hosts, groups, nodes
   and the serial fits Proxmox's 20 characters;
 - a disk is "blank" (and so formatted) only when blkid exited 2 and printed nothing, and "ready" only when blkid
   found its own file system type and label and no partition table: anything else is "other", left alone;
+- a disk is found only on the device whose lsblk serial is usas-<label> and no other device's, whatever else lsblk
+  printed;
 - the spread check reports exactly the (group, node) pairs that more than one host would share, counting an
   existing VM on the node it runs on.
 """
 
+import json
 import re
 import sys
 
@@ -72,6 +75,20 @@ def one_input(data):
         assert "PTTYPE" not in fields, (probe, state)
     else:
         assert state["state"] == "other" and state["found"], (probe, state)
+
+    serials = ["usas-data", "usas-logs", "drive-scsi0", roles.text(fdp, 14), None]
+    devices = [{"path": f"/dev/sd{chr(97 + i)}", "serial": fdp.PickValueInList(serials)}
+               for i in range(fdp.ConsumeIntInRange(0, 4))]
+    readable = fdp.ConsumeIntInRange(0, 7) > 0
+    lsblk = json.dumps({"blockdevices": devices}) if readable else roles.text(fdp, 60)
+    labels = [{"label": fdp.PickValueInList(["data", "logs", "gone", roles.text(fdp, 6)])} for _ in range(2)]
+    for result in DISKS.data_disks_find(lsblk, labels)["results"]:
+        serial = f"usas-{result['item']['label']}"
+        owners = [d["path"] for d in devices if isinstance(d["serial"], str) and d["serial"].strip() == serial]
+        if result["stat"]["exists"]:
+            assert readable and owners == [result["stat"]["path"]], (lsblk, result)
+        else:
+            assert result["stat"]["path"] == "" and (not readable or len(owners) != 1), (lsblk, result)
 
     hosts = [{"host": f"h{i}", "group": fdp.PickValueInList(["g1", "g2", ""]), "node": fdp.PickValueInList(NODES),
               "vmid": fdp.PickValueInList(["", "1", "2", "3"])} for i in range(fdp.ConsumeIntInRange(0, 6))]

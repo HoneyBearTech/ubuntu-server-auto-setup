@@ -342,7 +342,7 @@ Each item of `vm_extra_disks` is a mapping with these keys (up to 29 disks):
 removes the installer's CD-ROMs, so the installer never sees them and can't put the system on one. They are
 added to new VMs only: for an existing VM, add the disk in Proxmox with the serial `usas-<label>` (or leave it
 out of `vm_extra_disks`). The baseline (`data_disks` role, tag `data_disks`) finds each disk by its serial
-(`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_usas-<label>`), formats it only while `blkid` finds nothing on it,
+(the `SERIAL` column of `lsblk`; Proxmox names `/dev/disk/by-id`'s links after the drive, not the serial), formats it only while `blkid` finds nothing on it,
 and mounts it by label with `nofail`, so a missing disk doesn't stop the server from booting. A disk that holds
 anything else (another file system or label, or a partition table) is left as it is and the run stops, naming
 what it found. A disk that isn't attached stops the run too.
