@@ -33,6 +33,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   runs first, and the web UI's check before every real run) failed on the first server with "Could not find the
   requested service k3s", so the web UI never offered the install. Check mode no longer asks systemd to start a
   unit that it would only write.
+- **Web UI, VMs page and update plans:** whether a Kubernetes member is drained before a reboot was worked out
+  once per cluster, from whichever group set `updates_k8s_drain` first. `updates_k8s_drain: false` on one
+  member's entry was missed, so the page showed it as drained and an update plan didn't warn, while the update
+  rebooted it without a drain; set on the agents' group, it marked the servers too. It's now each member's own
+  value, read as Ansible reads it.
 
 ## [0.8.0] - 2026-11-01
 
