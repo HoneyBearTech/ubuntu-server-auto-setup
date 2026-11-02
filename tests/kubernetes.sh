@@ -405,7 +405,8 @@ for labels in (ds["metadata"]["labels"], ds["spec"]["selector"]["matchLabels"], 
     del labels["app.kubernetes.io/instance"]
     labels["app.kubernetes.io/name"] = "kube-vip-ds"
 ds["spec"]["template"]["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"] = {
-    "nodeSelectorTerms": [{"matchFields": [{"key": "metadata.name", "operator": "In", "values": ["k3s-s1", "k3s-s2"]}]}]}
+    "nodeSelectorTerms": [{"matchFields": [{"key": "metadata.name", "operator": "In", "values": [node]}]}
+                          for node in ("k3s-s1", "k3s-s2")]}
 yaml.safe_dump(ds, open(sys.argv[2], "w"))
 EOF
 for node in k3s-s1 k3s-s2 k3s-s3; do docker exec -i "$node" sh -c "cat > $manifest" <"$TEST_TMP/kube-vip-before.yaml"; done
