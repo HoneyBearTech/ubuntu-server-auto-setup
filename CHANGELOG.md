@@ -25,6 +25,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   name for the VIP, which means one OS family on the cloud images (`ens18` on Ubuntu, `eth0` on AlmaLinux and
   Rocky Linux). A mixed set was refused by `make kubernetes`'s checks, as it should be, but nothing said so up
   front.
+- **Kubernetes docs:** the guide's cluster example sets `vm_spread_group` and `vm_extra_disks` in `hosts.yml`,
+  where a save from the web UI's Servers page drops them (it has no fields for them). The guide now says to put
+  them in `host_vars/<server>.yml` with the web UI, as interfaces.md did, and what a save keeps; interfaces.md no
+  longer says the `k8s_*` groups need an inventory of your own.
 
 ## [0.8.0] - 2026-11-01
 
