@@ -184,6 +184,15 @@ none_has /usr/local/bin/k3s
 none_has /etc/rancher/k3s/config.yaml
 cool_down
 
+step "a check run on the new cluster passes and changes nothing"
+# What the guide and the web UI do first: no member has k3s' unit yet, so check mode can't ask systemd to start it.
+play playbooks/kubernetes.yml --check --diff
+none_has /usr/local/bin/k3s
+none_has /etc/systemd/system/k3s.service
+none_has /etc/systemd/system/k3s-agent.service
+none_has /etc/rancher/k3s/config.yaml
+cool_down
+
 step "a server that the others can't reach on etcd's peer port is stopped before it joins, with the hosts named"
 if [ "$family" = rhel ]; then
   docker exec k3s-s2 sh -c "firewall-cmd -q --remove-rich-rule='rule family=\"ipv4\" source address=\"$(addr k3s-s1)\" port port=\"2379-2380\" protocol=\"tcp\" accept'"
