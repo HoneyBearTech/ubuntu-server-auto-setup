@@ -8,6 +8,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- **Host keys:** provisioning several VMs at once could lose a new VM's host key from the control node's
+  `known_hosts`, so that VM's run stopped with "No ED25519 host key is known" (seen with five new VMs). Each
+  write replaced the whole file while another was writing it; they now take turns, as do the baseline's entries
+  for a new SSH port.
+
 ## [0.8.0] - 2026-11-01
 
 Kubernetes clusters: servers in a `k8s_<cluster>_servers` or `_agents` group become a k3s cluster. The baseline
