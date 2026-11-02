@@ -8,6 +8,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-02
+
 ### Added
 
 - New VMs are also tagged in Proxmox with the node they're created on (`pve_node`, in lower case), so after a
@@ -1129,7 +1131,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.8.1
 [0.8.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.8.0
 [0.7.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.7.0
 [0.6.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0

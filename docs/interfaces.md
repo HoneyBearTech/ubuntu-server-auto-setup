@@ -456,7 +456,7 @@ What the playbook does:
   announces the addresses the cloud provider hands out.
 - **Finally** it checks that every member is a Ready node and that kube-vip is ready on every server, then removes
   `kube-system/kube-vip-ds`, the single DaemonSet with one interface name for every server that a cluster built
-  from 0.8.0's release candidate has (the per-server ones share its lease, so one of them takes the VIP within
+  with 0.8.0 has (the per-server ones share its lease, so one of them takes the VIP within
   seconds), and, with `k8s_fetch_readonly_kubeconfig`, writes the
   read-only kubeconfig: a ServiceAccount (`kube-system/usas-readonly`) bound to the `view` ClusterRole, plus reading
   nodes. Deleting its Secret (`usas-readonly-token`) revokes the token; the next run makes a new one.
@@ -733,7 +733,7 @@ away; new keys can appear in any release, so ignore keys you don't know.
 ```json
 {
   "schema": 1,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "setup": {"done": 5, "total": 5},
   "running": {"playbook": "site", "check": false, "started": 1792750000},
   "last_run": {"playbook": "baseline", "check": false, "started": 1792740000, "status": "succeeded",
