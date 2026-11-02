@@ -21,6 +21,9 @@ nothing on this page happens, and `make site` never installs k3s.
   down with it.
 - One free IPv4 address on the servers' network for the API (the VIP), and, for LoadBalancer services, a free
   range or network beside it (the pool). No other host may use them, and no DHCP server may hand them out.
+- With a VIP, servers whose network card has the same name, since kube-vip puts the VIP on one interface name on
+  every server (`k8s_api_vip_interface`). The cloud images don't agree on it (`ens18` on Ubuntu, `eth0` on AlmaLinux
+  and Rocky Linux), so give a cluster's servers one OS family; its agents may be of any.
 - A time service on every member (chrony or systemd-timesyncd, which the supported releases have), since etcd
   needs the servers' clocks in step.
 - On the RHEL family: release 9. Rancher has no stable `k3s-selinux` build for release 10 yet, so a member on

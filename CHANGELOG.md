@@ -21,6 +21,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - **Web UI, Kubernetes clusters:** in an inventory whose servers are still in `ubuntu_servers` (the name before
   0.7.0), a cluster group added there by hand didn't show on the Defaults or Servers page, and the next save
   dropped it from `hosts.yml`. It's now read there too, and saved under `servers` with the servers.
+- **Kubernetes docs:** the guide and `k8s_api_vip_interface` now say that a cluster's servers need one interface
+  name for the VIP, which means one OS family on the cloud images (`ens18` on Ubuntu, `eth0` on AlmaLinux and
+  Rocky Linux). A mixed set was refused by `make kubernetes`'s checks, as it should be, but nothing said so up
+  front.
 
 ## [0.8.0] - 2026-11-01
 
