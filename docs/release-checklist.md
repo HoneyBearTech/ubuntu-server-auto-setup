@@ -111,9 +111,10 @@ be tagged; replace them with yours.
   ```
 
 - [ ] **A k3s cluster**, if the release touches `k3s`, `kubernetes_node` or the firewall, on throwaway VMs (a test
-  VMID range, never the lab cluster): three servers in `k8s_test_servers` on three different nodes and one or two
-  agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), the servers in one `vm_spread_group`,
-  `k8s_api_vip` and `k8s_lb_pool` set to free addresses, `k8s_longhorn_prereqs: true` and a `vm_extra_disks`
+  VMID range, never the lab cluster): three servers in `k8s_test_servers` on three different nodes (two Ubuntu
+  and one Rocky Linux 9, whose cloud images name the card `ens18` and `eth0`, with `k8s_api_vip_interface` left
+  empty) and one or two agents in `k8s_test_agents` (one an AlmaLinux 9 with SELinux enforcing), the servers in
+  one `vm_spread_group`, `k8s_api_vip` and `k8s_lb_pool` set to free addresses, `k8s_longhorn_prereqs: true` and a `vm_extra_disks`
   disk for Longhorn on the agents, `k8s_fetch_readonly_kubeconfig: true`. First, with a fourth server given the
   `pve_node` of one already in the spread group, `make provision` refuses before it creates anything, naming
   both; and with the tokens not yet in the Vault, `make kubernetes LIMIT=k8s_test` stops in its checks naming
@@ -122,8 +123,10 @@ be tagged; replace them with yours.
   `site.yml` and `make kubernetes LIMIT=k8s_test`: every node Ready, the API answers on the VIP, Traefik has a
   pool address, the agent on AlmaLinux runs a pod with no AVC denial, and the read-only kubeconfig lists the
   nodes from the control node but can't read Secrets. Install Longhorn (homelab-kube's way, or its Helm chart):
-  its manager runs on every agent and each agent's disk is Schedulable. Stop the VM that holds the VIP: the API
-  answers on it again within about 30 s, from another server, and `etcd` keeps working with two of three. Then
+  its manager runs on every agent and each agent's disk is Schedulable. Stop the VM that holds the VIP (Proxmox's
+  Stop, not a shutdown): the API answers on it again within about 30 s, from another server, and `etcd` keeps
+  working with two of three. Do it until the Rocky Linux server holds the VIP once, on its `eth0`, and an Ubuntu
+  server once, on its `ens18`. Then
   reboot one Proxmox node that holds a server (its VMs stop with it, or migrate them away first): the API stays
   up, and every node is Ready again once it's back. A second `make kubernetes` changes nothing. Remove the VMs,
   their disks and the read-only kubeconfig afterwards ([clean-up](#clean-up)):
@@ -142,7 +145,8 @@ be tagged; replace them with yours.
   control node asks the VIP's `/ping` every second, `make kubernetes-upgrade LIMIT=k8s_test` with `k8s_version`
   set to the next release: one node at a time, servers first, each `SchedulingDisabled` during its turn only, the
   Deployment always at 2 or more ready, the VIP never unanswered for more than a few seconds, `etcd` with three
-  members afterwards, and the lock gone. A second run changes nothing. Then fleet updates with
+  members afterwards, and the lock gone; the VIP moved between the Ubuntu and Rocky Linux servers on the way. A
+  second run changes nothing. Then fleet updates with
   `updates_reboot: if_required` and `updates_k8s_wait_longhorn: true` on a cluster whose members need a reboot:
   never two servers, nor a server and an agent, in one wave; each node drained before its reboot and uncordoned
   after; the Longhorn volume `healthy` before the next wave starts:

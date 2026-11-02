@@ -11,7 +11,7 @@ change needs a test are in the [test policy](../CONTRIBUTING.md#test-policy).
 | Integration tests | every playbook end to end against containers and a mock Proxmox API, with checks of the results, idempotence and task coverage | `make test` | every pull request and push to `main` (required) |
 | Updates tests | the updates playbook against two servers with updates waiting in a signed test repository (apt, or dnf with a security advisory), on Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and CentOS Stream, Rocky Linux and AlmaLinux 9 and 10: check, apply, reboots, health checks, refusals, idempotence and the updates role's task coverage | `make test-updates` (`OS=rocky-9` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Baseline tests | the baseline on each other release it supports (Ubuntu 22.04 and 24.04, Debian 12 and 13, CentOS Stream, Rocky Linux and AlmaLinux 9 and 10; `tests/run.sh` covers Ubuntu 26.04), against a stand-in for a freshly installed server: check mode, two runs (the second must change nothing), `tests/verify-baseline.yml`, the distribution's unattended-upgrades origins, the reboot check (Debian: a newer kernel in `/boot`; the RHEL family: `dnf needs-restarting` after a core package is installed again), a release the OS catalog doesn't list refused (and run with `baseline_allow_unsupported`), a move to port 2222, notifications and the mail relay, and the baseline roles' task coverage (each run counting its own family's task files) | `make test-baseline` (`OS=debian-12` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
-| Kubernetes tests | `playbooks/kubernetes.yml` building a k3s cluster of three servers and an agent (four containers on their own Docker network, prepared by the baseline) on Ubuntu 26.04, Debian 13 and Rocky Linux 9: the refusals before anything changes (an unprepared member, a token missing, an unknown release, a server left out, a binary that doesn't match the catalog), a server the others can't reach on etcd's peer port stopped with the hosts named, then the cluster through kube-vip's VIP (`tests/verify-k3s.yml`), the VIP and a LoadBalancer address answering the control node, the Argo CD handoff (bad settings refused, then Argo CD and a root Application that reaches Synced against a test repository on a Git server container, `tests/verify-argocd.yml`), the tokens and Argo CD's initial password in no log, a second run that changes nothing; then the upgrade to v1.37.1+k3s1 (`--tags upgrade`): refused without the tag,
+| Kubernetes tests | `playbooks/kubernetes.yml` building a k3s cluster of three servers and an agent (four containers on their own Docker network, prepared by the baseline) on Ubuntu 26.04, Debian 13 and Rocky Linux 9: the refusals before anything changes (an unprepared member, a token missing, an unknown release, a server left out, a binary that doesn't match the catalog), a server the others can't reach on etcd's peer port stopped with the hosts named, a `k8s_api_vip_interface` one server lacks refused, then the cluster through kube-vip's VIP with one server's card named `ens18` and the others' `eth0` (`tests/verify-k3s.yml`), the VIP and a LoadBalancer address answering the control node, the VIP moved onto that server's `ens18`, the Argo CD handoff (bad settings refused, then Argo CD and a root Application that reaches Synced against a test repository on a Git server container, `tests/verify-argocd.yml`), the tokens and Argo CD's initial password in no log, a second run that changes nothing, a cluster with the single kube-vip DaemonSet of before moved to one per server with the VIP answering; then the upgrade to v1.37.1+k3s1 (`--tags upgrade`): refused without the tag,
 with other tags, skipping a minor and while another run holds the lock; every node cordoned, drained, upgraded and
 uncordoned once, servers first, the API answering on the VIP throughout; a second upgrade and a run without tags
 on the new release change nothing, going back is refused; at least 80% task coverage of `k3s` | `make test-kubernetes` (`OS=debian-13` or `OS=rocky-9` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
@@ -271,19 +271,25 @@ RHEL family the role is refused (no stable `k3s-selinux`), and that is what's ch
 `tests/images/ubuntu-target` for one release: three servers and an agent, each on the test's own Docker network
 (`10.217.30.0/24`) with SSH on a local port and k3s' data on a volume (its overlayfs snapshotter can't sit on
 the container's own overlay). The VIP and the LoadBalancer pool are free addresses on that network, and the
-control node is the network's gateway, an API source. The join tokens are made fresh for each run.
+control node is the network's gateway, an API source. The third server's card is `ens18` (Docker's
+`com.docker.network.endpoint.ifname`, Docker 28 or later), the others' `eth0`, as Ubuntu's and Rocky Linux's
+cloud images differ, so each server's kube-vip needs its own interface. The join tokens are made fresh for each
+run.
 
 First a member the baseline hasn't prepared is refused; then the baseline prepares all four (`--tags
 firewall,kubernetes`); then the refusals, each before any member changes: an agent token that isn't one, a
-release the catalog doesn't have, a run without one of the servers, and a catalog whose checksums are wrong
+release the catalog doesn't have, a run without one of the servers, `k8s_api_vip_interface=eth0` (the third
+server has none), and a catalog whose checksums are wrong
 (nothing is installed). Then the second server's firewall loses the rule that lets the first reach its etcd peer
 port: the run starts the first server and stops before the second joins, naming both hosts and the port. With the
 rule back, the cluster: the servers one at a time through the VIP, then the agent. `tests/verify-k3s.yml` checks
 the binary's hash, `config.yaml` 0600 and which tokens each member has (an agent only its own), four Ready nodes
-and three etcd members, the servers tainted and the agent not, no ServiceLB, Traefik with an address from the
+and three etcd members, the servers tainted and the agent not, no ServiceLB, one kube-vip DaemonSet per server
+with that server's interface, Traefik with an address from the
 pool, the admin kubeconfig 0600, and that the read-only kubeconfig may list nodes and pods but not create pods,
 read Secrets or delete nodes. From the control node, the API answers on the VIP and Traefik on its pool address
-(so kube-vip announces both); no log contains a token; a second run changes nothing.
+(so kube-vip announces both). With the other two servers' kube-vip kept off their nodes, the third server takes
+the lease and puts the VIP on its `ens18`, where it answers too.
 
 Then the Argo CD handoff. A Git server container (`tests/images/ubuntu-target`, stage `git-server`:
 `git-server.py`, Git's smart HTTP protocol through `git http-backend`, on HTTPS with a certificate made for the
@@ -295,7 +301,12 @@ catalog's chart, deployed, the values homelab-kube's `apps/argocd.yaml` expects)
 CA in `argocd-tls-certs-cm` for that server only, Helm's and the chart's hashes and the values file 0600. Helm is
 on the first server only; the initial admin password is in no log and its Secret is still there after the second
 run, which changes nothing, nor does a run with another `k8s_bootstrap_revision` (it says it left the root
-Application alone).
+Application alone). No log contains a token.
+
+Then a cluster as it was built before kube-vip had a DaemonSet per server: the single DaemonSet `kube-vip-ds`
+with one interface name (`eth0`, so on the first two servers only), holding the VIP. A run moves it to one DaemonSet per server while the
+control node asks the VIP's `/ping` every half second: the VIP may not go unanswered for more than 30 s, and
+afterwards only the per-server DaemonSets are left.
 
 Then the upgrade from v1.36.5+k3s1 to v1.37.1+k3s1, both in the catalog. Refused before anything changes: a run
 without `--tags upgrade` on the new release, `--tags upgrade` with another tag, a release two minors ahead (from

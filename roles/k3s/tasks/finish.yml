@@ -1,5 +1,6 @@
 ---
-# On each cluster's first server, once every member has started: every member is a Ready node, and with
+# On each cluster's first server, once every member has started: every member is a Ready node, kube-vip runs on
+# every server (a cluster built before it had one per server moves to that here), and with
 # k8s_fetch_readonly_kubeconfig the read-only account's kubeconfig goes to the control node.
 - name: Wait until every member is a Ready node
   ansible.builtin.command:
@@ -18,6 +19,45 @@
   delay: 5
   changed_when: false
   when: not ansible_check_mode
+
+# A cluster built before kube-vip had one DaemonSet per server has it as one DaemonSet, kube-vip-ds, with one interface name for every
+# server. It's removed once each server's own DaemonSet runs a ready kube-vip: they share its lease, so one of them
+# takes the API's address within seconds of the old holder letting it go.
+- name: Move kube-vip to one DaemonSet per server
+  when: k8s_api_vip != '' and not ansible_check_mode
+  block:
+    - name: Wait until kube-vip is ready on every server
+      ansible.builtin.command:
+        argv:
+          - "{{ k3s_binary }}"
+          - kubectl
+          - --namespace=kube-system
+          - get
+          - daemonsets
+          - --selector=app.kubernetes.io/name=kube-vip
+          - -o
+          - jsonpath={range .items[*]}{.metadata.name}={.status.numberReady}{"\n"}{end}
+      register: k3s_vip_daemonsets
+      until: >-
+        k3s_vip_daemonsets.rc == 0 and k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host')
+        | map('regex_replace', '^', 'kube-vip-ds-') | map('regex_replace', '$', '=1')
+        | difference(k3s_vip_daemonsets.stdout_lines) | length == 0
+      retries: "{{ (k8s_ready_timeout | int / 5) | round(0, 'ceil') | int }}"
+      delay: 5
+      changed_when: false
+
+    - name: Remove the single DaemonSet kube-vip ran with one interface name for every server
+      ansible.builtin.command:
+        argv: ["{{ k3s_binary }}", kubectl, --namespace=kube-system, delete, daemonset, kube-vip-ds, --ignore-not-found]
+      register: k3s_old_vip
+      changed_when: k3s_old_vip.stdout | length > 0
+
+    - name: Wait until the API answers on the VIP
+      ansible.builtin.wait_for:
+        host: "{{ k8s_api_vip }}"
+        port: "{{ k3s_api_port }}"
+        timeout: "{{ k8s_ready_timeout | int }}"
+      when: k3s_old_vip.stdout | length > 0
 
 - name: Fetch the read-only kubeconfig
   when: k8s_fetch_readonly_kubeconfig | bool and not ansible_check_mode

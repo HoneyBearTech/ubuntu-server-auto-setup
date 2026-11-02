@@ -4,11 +4,13 @@
 # test's own Docker network, each with a volume for k3s' data. The baseline prepares them (firewall and the
 # Kubernetes node profile), then playbooks/kubernetes.yml builds the cluster. Checks: the refusals before anything
 # changes (an unprepared member, a missing token, an unknown release, a binary that doesn't match the catalog), a
-# server that can't reach etcd's peer port stopped with the hosts named, then the cluster itself
-# (tests/verify-k3s.yml), kube-vip's addresses from the control node, the Argo CD bootstrap (its settings checked, then
+# server that can't reach etcd's peer port stopped with the hosts named, a kube-vip interface one server lacks, then
+# the cluster itself (tests/verify-k3s.yml), kube-vip's addresses from the control node, a hard failover of the VIP
+# to k3s-s3, whose card is ens18 where the others' are eth0 (as Ubuntu's and Rocky Linux's cloud images differ), the Argo CD bootstrap (its settings checked, then
 # Argo CD and a root Application that syncs a test repository from a Git server container, tests/verify-argocd.yml),
 # the tokens and Argo CD's initial password in no log, a second run that changes nothing (and leaves the root
-# Application alone when its settings change); then the upgrade to the catalog's next release (--tags upgrade): the
+# Application alone when its settings change), a cluster with the single kube-vip DaemonSet of before moved to one
+# per server with the VIP answering throughout; then the upgrade to the catalog's next release (--tags upgrade): the
 # refusals (without the tag, a minor skipped, another run's lock), every node cordoned, drained, upgraded and
 # uncordoned once, servers first, the API answering on the VIP throughout, a second upgrade that changes nothing,
 # and going back refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
@@ -40,6 +42,8 @@ NODES=(k3s-s1 k3s-s2 k3s-s3 k3s-a1)
 # bash 3.2 runs this too).
 addr() { case "$1" in k3s-s1) echo 10.217.30.11;; k3s-s2) echo 10.217.30.12;; k3s-s3) echo 10.217.30.13;; k3s-a1) echo 10.217.30.21;; esac; }
 port() { case "$1" in k3s-s1) echo 2241;; k3s-s2) echo 2242;; k3s-s3) echo 2243;; k3s-a1) echo 2244;; esac; }
+# k3s-s3's card is ens18, the others' eth0, so each server's kube-vip needs its own interface.
+ifname() { case "$1" in k3s-s3) echo ens18;; *) echo eth0;; esac; }
 VIP=10.217.30.100
 GIT=10.217.30.50
 MIN_COVERAGE="${MIN_COVERAGE:-80}"
@@ -107,6 +111,45 @@ refused() {
 # UFW limits SSH to 6 new connections in 30 s per source, and every connection comes from the network's gateway.
 cool_down() { sleep 31; }
 
+# From outside the cluster (Linux only: elsewhere the Docker network isn't reachable), every half second, between
+# start_probe and stop_probe: the API on the VIP, which must keep answering while kube-vip moves or servers restart.
+probe_vip() {
+  while :; do
+    if curl -fsSk --max-time 1 "https://$VIP:6443/ping" >/dev/null 2>&1; then echo "$(date +%s.%N) up"
+    else echo "$(date +%s.%N) down"; fi
+    sleep 0.5
+  done
+}
+start_probe() {
+  rm -f "$TEST_TMP/vip.log"
+  if [ "$(uname -s)" = Linux ]; then probe_vip >"$TEST_TMP/vip.log" & probe_pid=$!; fi
+}
+stop_probe() { if [ -n "$probe_pid" ]; then kill "$probe_pid"; probe_pid=""; fi; }
+
+# Fails if the API on the VIP didn't answer for more than $1 seconds at a time while the probe ran, during $2.
+vip_gaps() {
+  [ -s "$TEST_TMP/vip.log" ] || return 0
+  python3 - "$TEST_TMP/vip.log" "$1" "$2" <<'EOF'
+import sys
+probes = [(float(t), state) for t, state in (line.split() for line in open(sys.argv[1]) if line.strip())]
+longest, down_since = 0.0, None
+for moment, state in probes:
+    if state == "down" and down_since is None:
+        down_since = moment
+    elif state == "up" and down_since is not None:
+        longest, down_since = max(longest, moment - down_since), None
+if down_since is not None:
+    longest = max(longest, probes[-1][0] - down_since)
+assert probes and longest <= float(sys.argv[2]), f"the API on the VIP didn't answer for {longest:.1f} s during {sys.argv[3]}"
+print(f"the VIP answered throughout {sys.argv[3]} ({len(probes)} probes, longest gap {longest:.1f} s)")
+EOF
+}
+
+# The node that holds kube-vip's lease, so the VIP.
+vip_holder() {
+  docker exec k3s-s1 k3s kubectl --namespace=kube-system get lease plndr-cp-lock -o 'jsonpath={.spec.holderIdentity}'
+}
+
 # Fails if any member has $1.
 none_has() {
   for node in "${NODES[@]}"; do
@@ -135,7 +178,8 @@ for node in "${NODES[@]}"; do
   # k3s' overlayfs snapshotter needs its data on a volume, not on the container's own overlay (K0). Each node gets a
   # cgroup namespace of its own, as k3d does: with the host's (--cgroupns=host, as the baseline tests use), the four
   # kubelets share one cgroup tree and kill each other's pods ("Pod sandbox changed") whenever another node starts.
-  docker run -d --name "$node" --hostname "$node" --network "$NET" --ip "$(addr "$node")" --privileged \
+  docker run -d --name "$node" --hostname "$node" --privileged \
+    --network "name=$NET,ip=$(addr "$node"),driver-opt=com.docker.network.endpoint.ifname=$(ifname "$node")" \
     --cgroupns=private -v "$node-rancher:/var/lib/rancher" \
     --tmpfs /run --tmpfs /run/lock -p "127.0.0.1:$(port "$node"):22" "$IMAGE" >/dev/null
   docker exec -i "$node" sh -c 'cat > /home/sysadmin/.ssh/authorized_keys && chown sysadmin: /home/sysadmin/.ssh/authorized_keys && chmod 600 /home/sysadmin/.ssh/authorized_keys' \
@@ -150,6 +194,10 @@ for node in "${NODES[@]}"; do
   [ -s "$TEST_TMP/scan" ] || { echo "ERROR: no SSH on port $(port "$node")" >&2; exit 1; }
   sed "s/^127.0.0.1/[127.0.0.1]:$(port "$node")/" "$TEST_TMP/scan" >>"$TEST_TMP/known_hosts"
   for _ in $(seq 1 120); do docker exec "$node" test ! -e /run/nologin && break; sleep 1; done
+done
+for node in "${NODES[@]}"; do
+  docker exec "$node" ip -o link show "$(ifname "$node")" >/dev/null \
+    || { echo "ERROR: $node has no interface $(ifname "$node"): Docker didn't name it (needs Docker 28 or later)" >&2; exit 1; }
 done
 family="$(docker exec k3s-s1 sh -c '. /etc/os-release && case "$ID" in ubuntu|debian) echo debian;; *) echo rhel;; esac')"
 
@@ -167,6 +215,8 @@ refused "needs two different join tokens in the Vault, vault_k8s_token_ci" playb
 refused "k8s_version must be one of the catalog's releases (v1.36.5+k3s1, v1.37.1+k3s1)" playbooks/kubernetes.yml \
   -e k8s_version=v1.30.0+k3s1
 refused "Run it for every server of the cluster: k3s-s3 isn't in this run." playbooks/kubernetes.yml --limit '!k3s-s3'
+refused "k3s-s3 has no interface eth0 for kube-vip to put 10.217.30.100 on" playbooks/kubernetes.yml \
+  -e k8s_api_vip_interface=eth0
 none_has /usr/local/bin/k3s
 cool_down
 
@@ -244,6 +294,30 @@ else
   echo "skipped: the Docker network isn't reachable from this host"
 fi
 
+step "the VIP moves to k3s-s3 and onto its own interface, ens18"
+# The other servers' kube-vip DaemonSets kept off their nodes for a while: their pods stop and let the lease go.
+for node in k3s-s1 k3s-s2; do
+  docker exec k3s-s1 k3s kubectl --namespace=kube-system patch daemonset "kube-vip-ds-$node" --type=json \
+    -p '[{"op": "add", "path": "/spec/template/spec/nodeSelector", "value": {"usas-test/nowhere": "true"}}]' >/dev/null
+done
+for _ in $(seq 1 60); do
+  [ "$(vip_holder)" = k3s-s3 ] && docker exec k3s-s3 ip -o -4 addr show dev ens18 | grep -qF " $VIP/32" && break
+  sleep 2
+done
+[ "$(vip_holder)" = k3s-s3 ] && docker exec k3s-s3 ip -o -4 addr show dev ens18 | grep -qF " $VIP/32" \
+  || { echo "ERROR: k3s-s3 didn't take the VIP on ens18 (holder: $(vip_holder))" >&2; exit 1; }
+if [ "$(uname -s)" = Linux ]; then
+  for _ in $(seq 1 15); do curl -fsSk --max-time 2 "https://$VIP:6443/ping" | grep -qx pong && break; sleep 2; done
+  curl -fsSk --max-time 5 "https://$VIP:6443/ping" | grep -qx pong \
+    || { echo "ERROR: the API doesn't answer on the VIP $VIP held by k3s-s3" >&2; exit 1; }
+fi
+for node in k3s-s1 k3s-s2; do
+  docker exec k3s-s1 k3s kubectl --namespace=kube-system patch daemonset "kube-vip-ds-$node" --type=json \
+    -p '[{"op": "remove", "path": "/spec/template/spec/nodeSelector"}]' >/dev/null
+  docker exec k3s-s1 k3s kubectl --namespace=kube-system rollout status daemonset "kube-vip-ds-$node" --timeout=120s >/dev/null
+done
+echo "k3s-s3 holds the VIP on ens18"
+
 step "the Argo CD bootstrap's settings are checked before anything changes"
 # The root Application's repository: a ConfigMap in apps/, served over HTTPS by a Git server container with a
 # certificate of its own, which the bootstrap tells Argo CD to trust for that server.
@@ -318,6 +392,49 @@ docker exec k3s-s1 k3s kubectl -n argocd get secret argocd-initial-admin-secret 
   || { echo "ERROR: argocd-initial-admin-secret is gone" >&2; exit 1; }
 cool_down
 
+step "a cluster with the single kube-vip DaemonSet of before moves to one per server, the VIP answering"
+# The layout of before, as the role wrote it: kube-vip-ds, with one interface name for every server (eth0). k3s-s3
+# has no eth0, which the role refused then, so here the DaemonSet runs on k3s-s1 and k3s-s2.
+manifest=/var/lib/rancher/k3s/server/manifests/usas-kube-vip.yaml
+docker exec k3s-s1 cat "$manifest" >"$TEST_TMP/kube-vip-now.yaml"
+python3 - "$TEST_TMP/kube-vip-now.yaml" "$TEST_TMP/kube-vip-before.yaml" <<'EOF'
+import sys, yaml
+ds = next(d for d in yaml.safe_load_all(open(sys.argv[1])) if d["metadata"]["name"] == "kube-vip-ds-k3s-s1")
+ds["metadata"]["name"] = "kube-vip-ds"
+for labels in (ds["metadata"]["labels"], ds["spec"]["selector"]["matchLabels"], ds["spec"]["template"]["metadata"]["labels"]):
+    del labels["app.kubernetes.io/instance"]
+    labels["app.kubernetes.io/name"] = "kube-vip-ds"
+ds["spec"]["template"]["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"] = {
+    "nodeSelectorTerms": [{"matchFields": [{"key": "metadata.name", "operator": "In", "values": ["k3s-s1", "k3s-s2"]}]}]}
+yaml.safe_dump(ds, open(sys.argv[2], "w"))
+EOF
+for node in k3s-s1 k3s-s2 k3s-s3; do docker exec -i "$node" sh -c "cat > $manifest" <"$TEST_TMP/kube-vip-before.yaml"; done
+for _ in $(seq 1 60); do
+  [ "$(docker exec k3s-s1 k3s kubectl --namespace=kube-system get daemonset kube-vip-ds -o 'jsonpath={.status.numberReady}' 2>/dev/null)" = 2 ] && break
+  sleep 2
+done
+# k3s may keep what a manifest no longer has: the per-server DaemonSets go by hand if so.
+docker exec k3s-s1 k3s kubectl --namespace=kube-system delete daemonsets --selector=app.kubernetes.io/name=kube-vip \
+  --ignore-not-found --wait >/dev/null
+for _ in $(seq 1 60); do
+  [ -z "$(docker exec k3s-s1 k3s kubectl --namespace=kube-system get pods --selector=app.kubernetes.io/name=kube-vip -o name)" ] \
+    && case "$(vip_holder)" in k3s-s1|k3s-s2) true;; *) false;; esac && break
+  sleep 2
+done
+[ "$(docker exec k3s-s1 k3s kubectl --namespace=kube-system get daemonsets -o name | grep -c kube-vip)" = 1 ] \
+  && case "$(vip_holder)" in k3s-s1|k3s-s2) true;; *) false;; esac \
+  || { echo "ERROR: couldn't put the earlier kube-vip layout in place (holder: $(vip_holder))" >&2; exit 1; }
+cool_down
+start_probe
+play playbooks/kubernetes.yml "${ARGOCD[@]}"
+stop_probe
+vip_gaps 30 "the move to one kube-vip DaemonSet per server"
+daemonsets="$(docker exec k3s-s1 k3s kubectl --namespace=kube-system get daemonsets -o name | grep kube-vip | sort | tr '\n' ' ')"
+[ "$daemonsets" = "daemonset.apps/kube-vip-ds-k3s-s1 daemonset.apps/kube-vip-ds-k3s-s2 daemonset.apps/kube-vip-ds-k3s-s3 " ] \
+  || { echo "ERROR: kube-vip's DaemonSets after the move: $daemonsets" >&2; exit 1; }
+case "$(vip_holder)" in k3s-s1|k3s-s2|k3s-s3) ;; *) echo "ERROR: no server holds the VIP after the move" >&2; exit 1;; esac
+cool_down
+
 step "another release is refused without --tags upgrade, and --tags upgrade only on its own"
 refused "runs k3s v1.36.5+k3s1, not v1.37.1+k3s1. Moving a cluster to another release is an upgrade" \
   playbooks/kubernetes.yml -e k8s_version=v1.37.1+k3s1
@@ -346,17 +463,9 @@ docker exec k3s-s1 k3s kubectl get nodes -o 'jsonpath={.items[*].spec.unschedula
 cool_down
 
 step "the upgrade to v1.37.1+k3s1: servers then the agent, one at a time, each cordoned and uncordoned once"
-# From outside the cluster, every half second: the API on the VIP, which must keep answering while servers restart.
-probe_vip() {
-  while :; do
-    if curl -fsSk --max-time 1 "https://$VIP:6443/ping" >/dev/null 2>&1; then echo "$(date +%s.%N) up"
-    else echo "$(date +%s.%N) down"; fi
-    sleep 0.5
-  done
-}
-if [ "$(uname -s)" = Linux ]; then probe_vip >"$TEST_TMP/vip.log" & probe_pid=$!; fi
+start_probe
 play playbooks/kubernetes.yml --tags upgrade -e k8s_version=v1.37.1+k3s1
-if [ -n "$probe_pid" ]; then kill "$probe_pid"; probe_pid=""; fi
+stop_probe
 python3 - "$LAST_LOG" <<'EOF2'
 import collections, re, sys
 task, done = "", collections.defaultdict(list)
@@ -375,22 +484,7 @@ assert all(h.startswith("k3s-s") for h in done["Stop kube-vip here until another
 print("each node was cordoned, drained, upgraded and uncordoned once, servers first; kube-vip handed over",
       len(done["Stop kube-vip here until another server holds the API's address"]), "time(s)")
 EOF2
-if [ -s "$TEST_TMP/vip.log" ]; then
-  python3 - "$TEST_TMP/vip.log" <<'EOF2'
-import sys
-probes = [(float(t), state) for t, state in (line.split() for line in open(sys.argv[1]) if line.strip())]
-longest, down_since = 0.0, None
-for moment, state in probes:
-    if state == "down" and down_since is None:
-        down_since = moment
-    elif state == "up" and down_since is not None:
-        longest, down_since = max(longest, moment - down_since), None
-if down_since is not None:
-    longest = max(longest, probes[-1][0] - down_since)
-assert probes and longest <= 30, f"the API on the VIP didn't answer for {longest:.1f} s during the upgrade"
-print(f"the VIP answered throughout ({len(probes)} probes, longest gap {longest:.1f} s)")
-EOF2
-fi
+vip_gaps 30 "the upgrade"
 docker exec k3s-s1 k3s kubectl --namespace=kube-system get configmap usas-upgrade-lock >/dev/null 2>&1 \
   && { echo "ERROR: the upgrade left its lock behind" >&2; exit 1; }
 cool_down

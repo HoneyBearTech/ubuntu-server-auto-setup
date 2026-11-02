@@ -418,7 +418,7 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | --- | --- | --- |
 | `k8s_version` | `""` | The k3s release: one of the k3s catalog's (`roles/k3s/vars/catalog.yml`), required. |
 | `k8s_api_vip` | `""` | The API's address on the LAN, an IPv4 address no other host has. kube-vip holds it on one server at a time (by ARP) and moves it when that server stops; the other members join through it, and it's in the API's certificate. Empty: no kube-vip, and every member joins through the first server's address. |
-| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server (`ens18` on Ubuntu's cloud image, `eth0` on AlmaLinux's and Rocky Linux's: give one cluster's servers one OS family). Empty: the first server's interface for its default route. A server without it is refused before anything changes. |
+| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on: in the cluster's group_vars for every server, in a server's `host_vars` for that server alone. Empty: each server's own interface for its default route, so servers whose cards have different names (`ens18` on Ubuntu's cloud image, `eth0` on AlmaLinux's and Rocky Linux's) need nothing set. A server without the interface it would use is refused before anything changes. |
 | `k8s_lb_pool` | `""` | The addresses LoadBalancer services get from kube-vip's cloud provider: a range (`192.0.2.20-192.0.2.29`) or a network (`192.0.2.32/28`). Needs `k8s_api_vip` and `servicelb` in `k8s_disable`. |
 | `k8s_tls_san` | `[]` | More DNS names or IPv4 addresses the API's certificate is valid for. |
 | `k8s_disable` | `[servicelb]` | k3s' packaged components to leave out: any of `servicelb`, `traefik`, `local-storage`, `metrics-server`. |
@@ -447,9 +447,14 @@ What the playbook does:
   each server already in, and each of those its 2380; if one can't, the run stops naming both hosts and the port.
   Then the agents. Each waits until it's Ready.
 - **kube-vip** (with `k8s_api_vip`) and its **cloud provider** (with `k8s_lb_pool`) are manifests in
-  `/var/lib/rancher/k3s/server/manifests/` on every server, with their images by digest; k3s applies them. With
-  `k8s_lb_pool`, kube-vip also announces the addresses the cloud provider hands out.
-- **Finally** it checks that every member is a Ready node and, with `k8s_fetch_readonly_kubeconfig`, writes the
+  `/var/lib/rancher/k3s/server/manifests/` on every server, with their images by digest; k3s applies them. kube-vip
+  is one DaemonSet per server (`kube-system/kube-vip-ds-<server>`), each pinned to its server and with that
+  server's interface, all sharing one lease (`kube-system/plndr-cp-lock`). With `k8s_lb_pool`, kube-vip also
+  announces the addresses the cloud provider hands out.
+- **Finally** it checks that every member is a Ready node and that kube-vip is ready on every server, then removes
+  `kube-system/kube-vip-ds`, the single DaemonSet with one interface name for every server that a cluster built
+  from 0.8.0's release candidate has (the per-server ones share its lease, so one of them takes the VIP within
+  seconds), and, with `k8s_fetch_readonly_kubeconfig`, writes the
   read-only kubeconfig: a ServiceAccount (`kube-system/usas-readonly`) bound to the `view` ClusterRole, plus reading
   nodes. Deleting its Secret (`usas-readonly-token`) revokes the token; the next run makes a new one.
 

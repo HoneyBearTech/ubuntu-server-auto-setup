@@ -21,9 +21,6 @@ nothing on this page happens, and `make site` never installs k3s.
   down with it.
 - One free IPv4 address on the servers' network for the API (the VIP), and, for LoadBalancer services, a free
   range or network beside it (the pool). No other host may use them, and no DHCP server may hand them out.
-- With a VIP, servers whose network card has the same name, since kube-vip puts the VIP on one interface name on
-  every server (`k8s_api_vip_interface`). The cloud images don't agree on it (`ens18` on Ubuntu, `eth0` on AlmaLinux
-  and Rocky Linux), so give a cluster's servers one OS family; its agents may be of any.
 - A time service on every member (chrony or systemd-timesyncd, which the supported releases have), since etcd
   needs the servers' clocks in step.
 - On the RHEL family: release 9. Rancher has no stable `k3s-selinux` build for release 10 yet, so a member on
@@ -143,7 +140,9 @@ KUBECONFIG=inventory/kube/lab-readonly.yaml kubectl get nodes,pods -A
 ## 4. The VIP and the pool
 
 With `k8s_api_vip`, [kube-vip](https://kube-vip.io/) runs on every server and one of them holds the address,
-answering ARP for it. If that server stops, another takes the address within about 20 seconds (kube-vip's default lease), and it doesn't
+answering ARP for it. Each server's kube-vip uses that server's interface for its default route (or
+`k8s_api_vip_interface`), so the servers may be of different OS families, whose cloud images name the card
+differently (`ens18` on Ubuntu, `eth0` on AlmaLinux and Rocky Linux). If that server stops, another takes the address within about 20 seconds (kube-vip's default lease), and it doesn't
 move back by itself. The API's certificate is valid for the VIP, and every member joins the cluster through
 it, so the first server isn't special once the cluster runs. Without a VIP, every member joins through the
 first server's own address, and the cluster's API is that server's.

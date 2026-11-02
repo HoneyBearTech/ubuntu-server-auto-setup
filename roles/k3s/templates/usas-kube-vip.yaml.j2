@@ -1,36 +1,45 @@
-# Managed by Ansible (roles/k3s): kube-vip on every server, as `kube-vip manifest daemonset --inCluster --taint
-# --controlplane --services --arp --leaderElection` writes it, with the image by digest and kube-vip's own lease
-# timing (a dead holder's address moves in about 15 to 20 s). The K0 spike's shorter lease (5/3/1 s, about 11 s)
-# made kube-vip give up and restart whenever the API was slow for 3 s. It announces the LoadBalancer pool's
-# addresses too when k8s_lb_pool is set.
+# Managed by Ansible (roles/k3s): kube-vip on every server, one DaemonSet each, pinned to that server and with its
+# own interface (k3s_vip_interface: k8s_api_vip_interface, else the server's interface for its default route), so the
+# servers' cards may have different names (ens18 on Ubuntu's cloud image, eth0 on AlmaLinux's and Rocky Linux's).
+# Each is what `kube-vip manifest daemonset --inCluster --taint --controlplane --services --arp --leaderElection`
+# writes, with the image by digest and kube-vip's own lease timing (a dead holder's address moves in about 15 to
+# 20 s). The K0 spike's shorter lease (5/3/1 s, about 11 s) made kube-vip give up and restart whenever the API was
+# slow for 3 s. All of them share one lease, so one server at a time holds the address. They announce the
+# LoadBalancer pool's addresses too when k8s_lb_pool is set. A cluster built before this ran one DaemonSet,
+# kube-vip-ds, on every server with one interface name: finish.yml removes it once these run.
+{% for server in k3s_members | selectattr('role', 'eq', 'server') | map(attribute='host') %}
+{% if not loop.first %}
+---
+{% endif %}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   labels:
-    app.kubernetes.io/name: kube-vip-ds
+    app.kubernetes.io/name: kube-vip
+    app.kubernetes.io/instance: {{ server }}
     app.kubernetes.io/version: {{ k3s_kube_vip_image.tag }}
-  name: kube-vip-ds
+  name: kube-vip-ds-{{ server }}
   namespace: kube-system
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: kube-vip-ds
+      app.kubernetes.io/name: kube-vip
+      app.kubernetes.io/instance: {{ server }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: kube-vip-ds
+        app.kubernetes.io/name: kube-vip
+        app.kubernetes.io/instance: {{ server }}
         app.kubernetes.io/version: {{ k3s_kube_vip_image.tag }}
     spec:
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/master
-                    operator: Exists
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: Exists
+              - matchFields:
+                  - key: metadata.name
+                    operator: In
+                    values: [{{ server }}]
       containers:
         - args:
             - manager
@@ -44,7 +53,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: vip_interface
-              value: "{{ k3s_vip_interface }}"
+              value: "{{ hostvars[server].k3s_vip_interface }}"
             - name: vip_subnet
               value: "32"
             - name: dns_mode
@@ -91,3 +100,4 @@ spec:
           operator: Exists
         - effect: NoExecute
           operator: Exists
+{% endfor %}

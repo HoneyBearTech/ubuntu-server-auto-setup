@@ -215,7 +215,8 @@
     k3s_join_url: >-
       https://{{ k8s_api_vip if k8s_api_vip else (k3s_members | selectattr('host', 'eq', k3s_seed_host)
       | map(attribute='address') | first) }}:{{ k3s_api_port }}
-    k3s_vip_interface: "{{ k8s_api_vip_interface or hostvars[k3s_seed_host].ansible_facts.default_ipv4.interface | default('') }}"
+    # Each server's own: kube-vip runs on each with its own DaemonSet (templates/usas-kube-vip.yaml.j2).
+    k3s_vip_interface: "{{ k8s_api_vip_interface or ansible_facts.default_ipv4.interface | default('') }}"
     k3s_release: "{{ k3s_catalog | selectattr('version', 'eq', k8s_version) | first }}"
     k3s_arch: "{{ k3s_architectures[ansible_facts.architecture] }}"
     k3s_selinux: "{{ ansible_facts.selinux.status | default('disabled') == 'enabled' }}"
@@ -237,9 +238,11 @@
 
 - name: Check that kube-vip's interface is on the server
   ansible.builtin.assert:
-    that: k3s_vip_interface in ansible_facts.interfaces
+    that: k3s_vip_interface is match(k3s_interface_pattern) and k3s_vip_interface in ansible_facts.interfaces
     fail_msg: >-
-      {{ inventory_hostname }} has no interface {{ k3s_vip_interface }} for kube-vip to put {{ k8s_api_vip }} on: set
-      k8s_api_vip_interface to the interface every server has on that network.
+      {{ inventory_hostname }} has {{ ('no interface ' ~ k3s_vip_interface) if k3s_vip_interface
+      else 'no default route to take an interface from' }} for kube-vip to put {{ k8s_api_vip }} on: set
+      k8s_api_vip_interface to its interface on that network (in its host_vars if the servers' names differ), or
+      leave it empty for each server's interface for its default route.
     quiet: true
   when: k3s_role == 'server' and k8s_api_vip != ''
