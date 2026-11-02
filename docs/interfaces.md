@@ -418,7 +418,7 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | --- | --- | --- |
 | `k8s_version` | `""` | The k3s release: one of the k3s catalog's (`roles/k3s/vars/catalog.yml`), required. |
 | `k8s_api_vip` | `""` | The API's address on the LAN, an IPv4 address no other host has. kube-vip holds it on one server at a time (by ARP) and moves it when that server stops; the other members join through it, and it's in the API's certificate. Empty: no kube-vip, and every member joins through the first server's address. |
-| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server. Empty: the first server's interface for its default route. |
+| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server (`ens18` on Ubuntu's cloud image, `eth0` on AlmaLinux's and Rocky Linux's: give one cluster's servers one OS family). Empty: the first server's interface for its default route. A server without it is refused before anything changes. |
 | `k8s_lb_pool` | `""` | The addresses LoadBalancer services get from kube-vip's cloud provider: a range (`192.0.2.20-192.0.2.29`) or a network (`192.0.2.32/28`). Needs `k8s_api_vip` and `servicelb` in `k8s_disable`. |
 | `k8s_tls_san` | `[]` | More DNS names or IPv4 addresses the API's certificate is valid for. |
 | `k8s_disable` | `[servicelb]` | k3s' packaged components to leave out: any of `servicelb`, `traefik`, `local-storage`, `metrics-server`. |
