@@ -8,6 +8,20 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
+  had no fields for (seen on all five members of a test cluster). It now has an **Extra disks** and a **Spread
+  group** field per server, checked against the `data_disks` and `proxmox_vm` roles' formats. A value either
+  field can't show is kept as written, and the page notes a field whose variable `host_vars/<server>` sets, which
+  applies over the page's. Keeping them in `host_vars/` is now optional.
+- **Kubernetes clusters:** a cluster's servers may be of different OS families. kube-vip ran as one DaemonSet
+  with one interface name for every server (`k8s_api_vip_interface`), and the cloud images name the card
+  differently (`ens18` on Ubuntu, `eth0` on AlmaLinux and Rocky Linux), so `make kubernetes` refused a mixed set of
+  servers. Each server now has a kube-vip DaemonSet of its own, with its own interface: `k8s_api_vip_interface` if
+  set (in a server's `host_vars`, for that server alone), else the server's interface for its default route. A
+  cluster built with 0.8.0 moves over on its next `make kubernetes`, with the VIP answering throughout.
+
 ## [0.8.0] - 2026-11-02
 
 Kubernetes clusters: servers in a `k8s_<cluster>_servers` or `_agents` group become a k3s cluster. The baseline
@@ -116,13 +130,10 @@ inventory to a running cluster.
 - **Web UI, Kubernetes clusters:** in an inventory whose servers are still in `ubuntu_servers` (the name before
   0.7.0), a cluster group added there by hand didn't show on the Defaults or Servers page, and the next save
   dropped it from `hosts.yml`. It's now read there too, and saved under `servers` with the servers.
-- **Kubernetes clusters:** a cluster's servers may be of different OS families. kube-vip ran as one DaemonSet
-  with one interface name for every server (`k8s_api_vip_interface`), and the cloud images name the card
-  differently (`ens18` on Ubuntu, `eth0` on AlmaLinux and Rocky Linux), so `make kubernetes` refused a mixed set of
-  servers. Each server now has a kube-vip DaemonSet of its own, with its own interface: `k8s_api_vip_interface` if
-  set (in a server's `host_vars`, for that server alone), else the server's interface for its default route. A
-  cluster built from 0.8.0's release candidate moves over on its next `make kubernetes`, with the VIP answering
-  throughout.
+- **Kubernetes docs:** the guide and `k8s_api_vip_interface` now say that a cluster's servers need one interface
+  name for the VIP, which means one OS family on the cloud images (`ens18` on Ubuntu, `eth0` on AlmaLinux and
+  Rocky Linux). A mixed set was refused by `make kubernetes`'s checks, as it should be, but nothing said so up
+  front.
 - **Kubernetes docs:** the guide's cluster example sets `vm_spread_group` and `vm_extra_disks` in `hosts.yml`,
   where a save from the web UI's Servers page drops them (it has no fields for them). The guide now says to put
   them in `host_vars/<server>.yml` with the web UI, as interfaces.md did, and what a save keeps; interfaces.md no
@@ -136,11 +147,6 @@ inventory to a running cluster.
   member's entry was missed, so the page showed it as drained and an update plan didn't warn, while the update
   rebooted it without a drain; set on the agents' group, it marked the servers too. It's now each member's own
   value, read as Ansible reads it.
-- **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
-  had no fields for (seen on all five members of a test cluster). It now has an **Extra disks** and a **Spread
-  group** field per server, checked against the `data_disks` and `proxmox_vm` roles' formats. A value either
-  field can't show is kept as written, and the page notes a field whose variable `host_vars/<server>` sets, which
-  applies over the page's. Keeping them in `host_vars/` is now optional.
 
 ## [0.7.0] - 2026-11-01
 
