@@ -8,6 +8,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- **Provisioning:** VMs are created one at a time. Proxmox copies a cloud image into a new VM's disk under the
+  storage's cluster-wide lock, and with five cloud-image VMs on one shared storage at once, one failed waiting for
+  it (`cfs-lock 'storage-<name>' error: got lock request timeout`); `proxmox_kvm` then waited out its 900 s
+  timeout and reported only the task's first log line. A rerun creates the missing VM.
+
 ## [0.8.1] - 2026-11-02
 
 ### Added
