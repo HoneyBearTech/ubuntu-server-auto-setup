@@ -133,6 +133,11 @@ inventory to a running cluster.
   member's entry was missed, so the page showed it as drained and an update plan didn't warn, while the update
   rebooted it without a drain; set on the agents' group, it marked the servers too. It's now each member's own
   value, read as Ansible reads it.
+- **Web UI, Servers page:** a save dropped each server's `vm_spread_group` and `vm_extra_disks`, which the page
+  had no fields for (seen on all five members of a test cluster). It now has an **Extra disks** and a **Spread
+  group** field per server, checked against the `data_disks` and `proxmox_vm` roles' formats. A value either
+  field can't show is kept as written, and the page notes a field whose variable `host_vars/<server>` sets, which
+  applies over the page's. Keeping them in `host_vars/` is now optional.
 
 ## [0.7.0] - 2026-11-01
 

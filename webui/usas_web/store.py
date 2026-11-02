@@ -10,7 +10,8 @@ inventory/group_vars/all/vault.yml, encrypted with Ansible Vault, and so are the
 A Kubernetes cluster is the group k8s_<cluster> (a child of servers) with the cluster's settings as its vars and
 the children k8s_<cluster>_servers and k8s_<cluster>_agents, whose hosts are the members. Whatever else such a
 group holds (a variable the UI has no field for, a value it can't read back, the member groups' own vars, a
-member the Servers page doesn't list) was set by hand and is written back as it was.
+member the Servers page doesn't list) was set by hand and is written back as it was. So is a server's spread
+group or extra disks that its field can't show (a template, say): the server keeps it until a value is entered.
 """
 
 import json
@@ -26,7 +27,7 @@ import yaml
 from ansible.parsing.vault import VaultLib, VaultSecret
 
 from .config import Settings
-from .schema import Invalid, Schema, parse_value
+from .schema import Invalid, Schema, display_value, parse_value
 
 VAULT_NAMES = ("vault_admin_password", "vault_pve_api_token_id", "vault_pve_api_token_secret",
                "vault_mail_relay_password", "vault_fail2ban_webhook_url", "vault_disk_passphrase")
@@ -40,9 +41,12 @@ MEMBER_GROUPS = {"servers": "server", "agents": "agent"}
 OPTIONAL_SECRETS = {"mail_relay_password": "vault_mail_relay_password",
                     "fail2ban_webhook_url": "vault_fail2ban_webhook_url",
                     "vm_disk_passphrase": "vault_disk_passphrase"}
-SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics")
+SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_mode", "net_mac", "vm_extra_nics",
+                    "vm_extra_disks")
 # Host variables that hold text the user typed (written as !unsafe).
-SERVER_TEXT_VARS = ("pve_node", "vm_os", "vm_install_method")
+SERVER_TEXT_VARS = ("pve_node", "vm_os", "vm_install_method", "vm_spread_group")
+# Host variables whose value, if the field can't show it, is kept as written (a server's "kept").
+SERVER_KEPT_VARS = ("vm_spread_group", "vm_extra_disks")
 # Names an inventory written before 0.7.0 may hold, and the fields they now fill (the playbooks read both until 1.0).
 OLD_NAMES = {"ufw_ssh_limit": "firewall_ssh_limit", "ufw_ssh_sources": "firewall_ssh_sources"}
 # The servers' group, and its name before 0.7.0: an older inventory is read from it and written back as servers.
@@ -308,7 +312,11 @@ class Store:
             host = host or {}
             server = {"name": str(name), "ansible_host": str(host.get("ansible_host", ""))}
             for var in SERVER_HOST_VARS + SERVER_TEXT_VARS:
-                if var in host:
+                if var not in host:
+                    continue
+                if var in SERVER_KEPT_VARS and not self._server_readable(var, host[var]):
+                    server.setdefault("kept", {})[var] = host[var]
+                else:
                     server[var] = host[var]
             server["firewall_ports"] = host.get("webui_firewall_allow_host", host.get("webui_ufw_allow_host", []))
             config.servers.append(server)
@@ -377,6 +385,33 @@ class Store:
             return False
         return True
 
+    def _server_readable(self, name: str, value: Any) -> bool:
+        """Whether a server's field shows a value read from the inventory as it is, so a save writes it back."""
+        f = next(c for c in self.schema.server_columns if c.name == name)
+        try:
+            return parse_value(f, display_value(f, value)) == value
+        except (Invalid, TypeError, ValueError):
+            return False
+
+    def host_vars_set(self, name: str) -> set[str]:
+        """The variables host_vars/<name> next to the inventory sets (a file, .yml or .yaml, or a folder of them),
+        which apply over the inventory's. An encrypted or unreadable file counts as setting nothing."""
+        folder = self.settings.inventory_file.parent / "host_vars"
+        if not name or "/" in name or name.startswith("."):  # a name written by hand that isn't a file's
+            return set()
+        paths = [folder / f"{name}{suffix}" for suffix in ("", ".yml", ".yaml")]
+        if (folder / name).is_dir():
+            paths += sorted(p for p in (folder / name).iterdir() if p.suffix in ("", ".yml", ".yaml"))
+        found: set[str] = set()
+        for path in paths:
+            try:
+                data = load_yaml(path.read_text(encoding="utf-8")) if path.is_file() else None
+            except (OSError, UnicodeDecodeError, yaml.YAMLError):
+                continue
+            if isinstance(data, dict):
+                found.update(str(k) for k in data)
+        return found
+
     def save(self, config: Config) -> None:
         """Writes the whole inventory and the Vault from config."""
         s = self.settings
@@ -432,6 +467,8 @@ class Store:
             for var in SERVER_TEXT_VARS:
                 if srv.get(var):
                     host[var] = Unsafe(str(srv[var]))
+            for var, value in (srv.get("kept") or {}).items():
+                host.setdefault(var, value)  # set by hand, as it was
             # An extra card with the default route replaces the group's gateway on net0.
             if any(nic.get("gateway") for nic in srv.get("vm_extra_nics") or []):
                 host["net_gateway"] = ""

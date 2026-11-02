@@ -300,6 +300,8 @@ export interface SshData {
 export interface ServersData {
   columns: FieldMeta[];
   rows: Record<string, string>[];
+  // Per row, a note on each field whose value isn't the page's: set by hand (kept as written) or in host_vars.
+  notes?: Record<string, string>[];
   nodes: string[]; // the cluster's nodes, from the last connection test
   default_node: string;
   default_os: string; // the Defaults page's OS, an OS catalog id

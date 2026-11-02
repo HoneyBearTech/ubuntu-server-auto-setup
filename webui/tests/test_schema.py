@@ -53,6 +53,7 @@ def test_inline_ranges_match_the_role_asserts():
     assert f"{s.PREFIX_RANGE[0]} <= (net_prefix | int) <= {s.PREFIX_RANGE[1]}" in tasks
     assert "pve_vmid | string is match('^[0-9]+\\Z')" in tasks
     assert "fail2ban_maxretry | string is match('^[0-9]+\\Z')" in (REPO / "roles/fail2ban/tasks/main.yml").read_text()
+    assert f"(item.size_gb | int) <= {s.DISK_SIZE_MAX}" in (REPO / "roles/data_disks/tasks/check.yml").read_text()
 
 
 def test_a_missing_variable_or_pattern_is_an_error(tmp_path, sch):
@@ -224,6 +225,74 @@ def test_network_cards_display(sch):
     assert parse_value(nic_field(sch), "vmbr1 dhcp, vmbr2 none") == [{"mode": "dhcp", "bridge": "vmbr1"},
                                                                        {"mode": "none", "bridge": "vmbr2"}]
     assert set(sch.roles.var("provision_nic_modes")) == {"static", "dhcp", "none"}
+
+
+def disk_field(sch):
+    return next(c for c in sch.server_columns if c.name == "vm_extra_disks")
+
+
+@pytest.mark.parametrize(("text", "disk"), [
+    ("100 longhorn /var/lib/longhorn", {"size_gb": 100, "label": "longhorn", "mount": "/var/lib/longhorn"}),
+    ("50 pgdata /srv/pg xfs on fast-ssd", {"size_gb": 50, "storage": "fast-ssd", "label": "pgdata",
+                                          "mount": "/srv/pg", "fs": "xfs"}),
+    ("65536 a_b-c0123456 /srv/a/b ext4", {"size_gb": 65536, "label": "a_b-c0123456", "mount": "/srv/a/b",
+                                          "fs": "ext4"}),
+])
+def test_extra_disks_are_parsed_with_the_role_formats(sch, text, disk):
+    assert s.parse_disk(text, disk_field(sch).formats) == disk
+    assert s.parse_disk(s.format_disk(disk), disk_field(sch).formats) == disk
+    assert set(disk) <= set(sch.roles.var("data_disks_keys"))
+
+
+@pytest.mark.parametrize(("text", "says"), [
+    ("100 data", "the size in GB, the label and the mount path"),
+    ("0 data /srv/data", "1-65536"),
+    ("65537 data /srv/data", "1-65536"),
+    ("10G data /srv/data", "1-65536"),
+    ("10 Data /srv/data", "lowercase letters"),
+    ("10 thirteenchars /srv/data", "at most 12"),
+    ("10 data srv/data", "absolute path"),
+    ("10 data /srv/../etc", "absolute path"),
+    ("10 data /srv/data/", "absolute path"),
+    ("10 data /var/lib", "system folder"),
+    ("10 data /etc", "system folder"),
+    ("10 data /srv/data btrfs", "isn't understood"),
+    ("10 data /srv/data xfs ext4", "isn't understood"),
+    ("10 data /srv/data on", "isn't understood"),
+    ("10 data /srv/data on 1bad", "storage ID"),
+])
+def test_extra_disks_the_role_would_refuse_are_refused(sch, text, says):
+    with pytest.raises(Invalid) as exc:
+        s.parse_disk(text, disk_field(sch).formats)
+    assert says in exc.value.message
+    with pytest.raises(Invalid):
+        parse_value(disk_field(sch), text)
+
+
+def test_extra_disks_as_a_list(sch):
+    f = disk_field(sch)
+    assert parse_value(f, "10 a /srv/a, 20 b /srv/b xfs") == [
+        {"size_gb": 10, "label": "a", "mount": "/srv/a"}, {"size_gb": 20, "label": "b", "mount": "/srv/b", "fs": "xfs"}]
+    with pytest.raises(Invalid, match="its own label"):
+        parse_value(f, "10 a /srv/a, 20 a /srv/b")
+    with pytest.raises(Invalid, match="its own mount path"):
+        parse_value(f, "10 a /srv/a, 20 b /srv/a")
+    most = sch.roles.var("data_disks_max")
+    assert len(parse_value(f, ", ".join(f"1 d{i} /srv/d{i}" for i in range(most)))) == most
+    with pytest.raises(Invalid, match=f"at most {most}"):
+        parse_value(f, ", ".join(f"1 d{i} /srv/d{i}" for i in range(most + 1)))
+    assert s.display_value(f, [{"size_gb": 10, "label": "a", "mount": "/srv/a", "storage": "nfs"}, "not a disk"]) == (
+        "10 a /srv/a on nfs")
+
+
+def test_spread_group_takes_the_role_s_pattern(sch):
+    f = next(c for c in sch.server_columns if c.name == "vm_spread_group")
+    assert f.pattern == sch.roles.var("provision_spread_group_pattern")
+    assert parse_value(f, "k8s-lab_servers.1") == "k8s-lab_servers.1"
+    assert parse_value(f, "") == ""
+    for bad in ("-lab", "lab servers", "{{ x }}", "a" * 64):
+        with pytest.raises(Invalid):
+            parse_value(f, bad)
 
 
 def test_the_updates_playbook_supports_the_catalogs_releases():

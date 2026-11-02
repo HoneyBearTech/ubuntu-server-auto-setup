@@ -197,6 +197,58 @@ def test_servers_on_several_nodes(store):
     assert {"pve-1", "pve-2", "pve-old"} <= store.host_names()
 
 
+def test_spread_groups_and_extra_disks_round_trip(store):
+    config = sample(store)
+    disks = [{"size_gb": 100, "label": "longhorn", "mount": "/var/lib/longhorn"},
+             {"size_gb": 50, "storage": "fast-ssd", "label": "pg", "mount": "/srv/pg", "fs": "xfs"}]
+    config.servers[0].update(vm_spread_group="k8s-lab-servers", vm_extra_disks=disks)
+    store.save(config)
+    text = store.settings.inventory_file.read_text()
+    assert "vm_spread_group: !unsafe 'k8s-lab-servers'" in text and "label: !unsafe 'longhorn'" in text
+    loaded = store.load()
+    assert loaded.servers[0]["vm_spread_group"] == "k8s-lab-servers"
+    assert loaded.servers[0]["vm_extra_disks"] == disks
+    assert "kept" not in loaded.servers[0] and "vm_extra_disks" not in loaded.servers[1]
+
+
+def test_spread_groups_and_extra_disks_set_by_hand_are_kept(store, settings):
+    """A value the fields can't show stays as it was written, through the server's "kept"."""
+    store.save(sample(store))
+    inventory = load_yaml(settings.inventory_file.read_text())
+    hosts = inventory["all"]["children"]["servers"]["hosts"]
+    hosts["web-01"]["vm_spread_group"] = "{{ spread_name }}"
+    hosts["web-01"]["vm_extra_disks"] = [{"size_gb": "100", "label": "data", "mount": "/srv/data"}]
+    hosts["db-01"]["vm_extra_disks"] = "{{ db_disks }}"
+    write_private(settings.inventory_file, dump_yaml(inventory))
+    loaded = store.load()
+    assert loaded.servers[0]["kept"] == {"vm_spread_group": "{{ spread_name }}",
+                                         "vm_extra_disks": [{"size_gb": "100", "label": "data", "mount": "/srv/data"}]}
+    assert "vm_spread_group" not in loaded.servers[0]
+    assert loaded.servers[1]["kept"] == {"vm_extra_disks": "{{ db_disks }}"}
+    store.save(loaded)
+    assert load_yaml(settings.inventory_file.read_text())["all"]["children"]["servers"]["hosts"] == hosts
+    # A value entered in the field replaces what was kept.
+    loaded.servers[1]["vm_extra_disks"] = [{"size_gb": 10, "label": "db", "mount": "/srv/db"}]
+    store.save(loaded)
+    again = store.load().servers[1]
+    assert again["vm_extra_disks"] == [{"size_gb": 10, "label": "db", "mount": "/srv/db"}] and "kept" not in again
+
+
+def test_variables_set_in_host_vars(store, settings):
+    folder = settings.inventory_file.parent / "host_vars"
+    assert store.host_vars_set("web-01") == set()
+    (folder / "db-01").mkdir(parents=True)
+    (folder / "web-01.yml").write_text("vm_spread_group: lab\n")
+    (folder / "web-01.yaml").write_text("- not a mapping\n")
+    (folder / "db-01" / "disks.yml").write_text("vm_extra_disks: []\n")
+    (folder / "db-01" / "vault").write_text("$ANSIBLE_VAULT;1.1;AES256\n6162\n")
+    (folder / "db-01" / "notes.txt").write_text("vm_cores: 4\n")
+    (folder / "db-01" / "bad.yml").write_text("a: [\n")
+    assert store.host_vars_set("web-01") == {"vm_spread_group"}
+    assert store.host_vars_set("db-01") == {"vm_extra_disks"}
+    assert store.host_vars_set("../host_vars/web-01") == store.host_vars_set(".hidden") == set()
+
+
 def test_an_inventory_from_before_0_7_0_is_read_and_written_with_the_new_names(store, settings):
     # What the web UI wrote before 0.7.0: the group ubuntu_servers, ufw_* names, the point release field.
     store.save(sample(store))

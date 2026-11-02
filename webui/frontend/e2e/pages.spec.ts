@@ -172,6 +172,18 @@ test.describe("keyboard", () => {
     await checkAxe(page, "/servers with a network card error");
   });
 
+  test("the servers table: an extra disk the role would refuse is explained", async ({ page }) => {
+    await page.goto("/servers");
+    await settled(page);
+    await tabTo(page, page.getByRole("textbox", { name: "Extra disks, row 1" }));
+    await retype(page, "100 data /var/lib");
+    await page.keyboard.press("Enter");
+    const summary = page.getByRole("alert").filter({ hasText: "/var/lib is a system folder" });
+    await expect(summary).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Extra disks, row 1" })).toHaveAttribute("aria-invalid", "true");
+    await checkAxe(page, "/servers with an extra disk error");
+  });
+
   test("the servers table: a cloud image by keyboard, and an ISO storage without Import content is explained", async ({ page }) => {
     await page.goto("/servers");
     await settled(page);

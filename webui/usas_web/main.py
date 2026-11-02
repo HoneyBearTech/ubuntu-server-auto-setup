@@ -1083,6 +1083,19 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         elif len(set(macs)) != len(macs):
             errors[f"servers-{i}-vm_extra_nics"] = "Each card needs its own MAC address."
 
+    def server_notes(config: Config) -> list[dict[str, str]]:
+        """Per server, a note on each field whose value isn't the page's to show: a value set by hand that the field
+        can't show (kept as written), or one host_vars/<server> sets, which applies over the inventory's."""
+        notes = []
+        for srv in config.servers:
+            note = {var: "Set by hand in the inventory as something this field can't show: kept as written until "
+                         "you enter a value here." for var in srv.get("kept") or {}}
+            for var in sorted(store.host_vars_set(str(srv["name"])) & {c.name for c in schema.server_columns}):
+                note[var] = (f"host_vars/{srv['name']} sets this too, and its value applies: the web UI doesn't "
+                             "write that folder.")
+            notes.append(note)
+        return notes
+
     def server_rows(config: Config) -> list[dict[str, str]]:
         rows = []
         for srv in config.servers:
@@ -1098,7 +1111,7 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         require_login(request)
         config = store.load()
         return reply(columns=[field_json(c) for c in schema.server_columns], rows=server_rows(config),
-                     clusters=[c.name for c in config.clusters],
+                     notes=server_notes(config), clusters=[c.name for c in config.clusters],
                      nodes=sorted(store.cluster().get("nodes") or {}), default_node=config.default_node,
                      default_os=str(setting(config, "vm_os")),
                      default_install_method=str(setting(config, "vm_install_method")))
@@ -1111,7 +1124,14 @@ def create_app(settings: Settings | None = None, *, background: bool = True) -> 
         parsed, errors = parse_servers(form, config)
         if errors:
             return reply(422, errors=errors)
+        # What a server's fields can't show stays, by the server's name, until a value is entered there.
+        kept = {str(s["name"]): s["kept"] for s in config.servers if s.get("kept")}
         config.servers = [{k: v for k, v in r.items() if not k.startswith("_")} for r in parsed]
+        for srv in config.servers:
+            still = {var: value for var, value in kept.get(str(srv["name"]), {}).items()
+                     if srv.get(var) in (None, "", [])}
+            if still:
+                srv["kept"] = still
         store.save(config)
         return reply(message=f"Saved {len(config.servers)} server(s).")
 

@@ -13,7 +13,7 @@ from usas_web import main as m
 from usas_web import remote
 from usas_web.remote import PveResult, RemoteProblem
 from usas_web.sshkeys import HostKey, KeyProblem
-from usas_web.store import load_yaml
+from usas_web.store import dump_yaml, load_yaml, write_private
 
 from .conftest import (
     DEFAULTS,
@@ -874,6 +874,52 @@ def test_servers_networks(ui):
     assert gateway_step["done"] and gateway_done()  # every server has its default route without that gateway
     post(ui, "/servers", {"server_count": "0"})
     assert not gateway_done()
+
+
+def test_servers_spread_groups_and_extra_disks(ui):
+    configure(ui, servers=2)
+    rows = {"server_count": "2", "servers-0-name": "web-00", "servers-0-ansible_host": "10.0.0.10",
+            "servers-0-pve_vmid": "4000", "servers-1-name": "web-01", "servers-1-ansible_host": "10.0.0.11",
+            "servers-1-pve_vmid": "4001"}
+    r = post(ui, "/servers", {**rows, "servers-0-vm_spread_group": "lab servers",
+                              "servers-1-vm_extra_disks": "100 data /srv/data, 20 data /srv/more"})
+    assert "isn't in the accepted format" in r.json()["errors"]["servers-0-vm_spread_group"]
+    assert "its own label" in r.json()["errors"]["servers-1-vm_extra_disks"]
+    assert "system folder" in post(ui, "/servers", {**rows, "servers-1-vm_extra_disks": "10 data /var"}).json()[
+        "errors"]["servers-1-vm_extra_disks"]
+    r = post(ui, "/servers", {**rows, "servers-0-vm_spread_group": "k8s-lab", "servers-1-vm_spread_group": "k8s-lab",
+                              "servers-1-vm_extra_disks": "100 longhorn /var/lib/longhorn, 50 pg /srv/pg xfs on nfs"})
+    assert r.status_code == 200
+    hosts = load_yaml(ui.app_state.settings.inventory_file.read_text())["all"]["children"]["servers"]["hosts"]
+    assert hosts["web-00"]["vm_spread_group"] == "k8s-lab" and "vm_extra_disks" not in hosts["web-00"]
+    assert hosts["web-01"]["vm_extra_disks"] == [
+        {"size_gb": 100, "label": "longhorn", "mount": "/var/lib/longhorn"},
+        {"size_gb": 50, "storage": "nfs", "label": "pg", "mount": "/srv/pg", "fs": "xfs"}]
+    data = get(ui, "/api/servers").json()
+    assert data["rows"][1]["vm_extra_disks"] == "100 longhorn /var/lib/longhorn, 50 pg /srv/pg xfs on nfs"
+    assert data["rows"][1]["vm_spread_group"] == "k8s-lab" and data["notes"] == [{}, {}]
+
+    # Set by hand as something the fields can't show: kept through a save of the page, by the server's name, and
+    # noted on the field; host_vars/<server> is noted too.
+    path = ui.app_state.settings.inventory_file
+    inventory = load_yaml(path.read_text())
+    inventory["all"]["children"]["servers"]["hosts"]["web-01"]["vm_spread_group"] = "{{ group_name }}"
+    write_private(path, dump_yaml(inventory))
+    (path.parent / "host_vars").mkdir()
+    (path.parent / "host_vars" / "web-00.yml").write_text("vm_extra_disks: []\nunrelated: 1\n")
+    data = get(ui, "/api/servers").json()
+    assert data["rows"][1]["vm_spread_group"] == ""
+    assert "kept as written" in data["notes"][1]["vm_spread_group"]
+    assert "host_vars/web-00 sets this" in data["notes"][0]["vm_extra_disks"] and len(data["notes"][0]) == 1
+    swapped = {"server_count": "2", "servers-0-name": "web-01", "servers-0-ansible_host": "10.0.0.11",
+               "servers-0-pve_vmid": "4001", "servers-1-name": "web-00", "servers-1-ansible_host": "10.0.0.10",
+               "servers-1-pve_vmid": "4000"}
+    assert post(ui, "/servers", swapped).status_code == 200
+    hosts = load_yaml(path.read_text())["all"]["children"]["servers"]["hosts"]
+    assert hosts["web-01"]["vm_spread_group"] == "{{ group_name }}" and "vm_spread_group" not in hosts["web-00"]
+    assert post(ui, "/servers", {**swapped, "servers-0-vm_spread_group": "lab"}).status_code == 200
+    assert load_yaml(path.read_text())["all"]["children"]["servers"]["hosts"]["web-01"]["vm_spread_group"] == "lab"
+    assert get(ui, "/api/servers").json()["notes"][0] == {}
 
 
 # --- SSH key and host key ------------------------------------------------------------------------------------

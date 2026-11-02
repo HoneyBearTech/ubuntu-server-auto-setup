@@ -12,6 +12,7 @@ const label = (c: FieldMeta, choice: string) => c.choice_labels?.[choice] ?? cho
 interface Row {
   key: number;
   values: Record<string, string>;
+  notes: Record<string, string>; // the server's notes (ServersData.notes), which go with its row
 }
 
 function ServersForm({ data, reload, status, setStatus }: {
@@ -26,7 +27,7 @@ function ServersForm({ data, reload, status, setStatus }: {
   const defaults: Record<string, string> = { vm_os: data.default_os, vm_install_method: data.default_install_method };
   const blank = () => Object.fromEntries(columns.map((c) => [c.name, ""]));
   const [rows, setRows] = useState<Row[]>(() =>
-    (data.rows.length ? data.rows : [blank()]).map((values, key) => ({ key, values })));
+    (data.rows.length ? data.rows : [blank()]).map((values, key) => ({ key, values, notes: data.notes?.[key] ?? {} })));
   const nextKey = useRef(rows.length);
   const [errors, setErrors] = useState<Errors>({});
   const [focus, setFocus] = useState<string | null>(null);
@@ -38,13 +39,13 @@ function ServersForm({ data, reload, status, setStatus }: {
   }, [focus]);
 
   const add = () => {
-    setRows([...rows, { key: nextKey.current++, values: blank() }]);
+    setRows([...rows, { key: nextKey.current++, values: blank(), notes: {} }]);
     setErrors({});
     setFocus(`servers-${rows.length}-${columns[0].name}`);
   };
   const remove = (index: number) => {
     const kept = rows.filter((_, i) => i !== index);
-    setRows(kept.length ? kept : [{ key: nextKey.current++, values: blank() }]);
+    setRows(kept.length ? kept : [{ key: nextKey.current++, values: blank(), notes: {} }]);
     setErrors({});
     setStatus({ kind: "info", message: "Row removed. Save to keep the change." });
     setFocus(kept.length ? `servers-${Math.min(index, kept.length - 1)}-${columns[0].name}` : "add-row");
@@ -94,10 +95,12 @@ function ServersForm({ data, reload, status, setStatus }: {
                     const id = `servers-${i}-${c.name}`;
                     const error = errors[id];
                     const value = row.values[c.name] ?? "";
+                    const note = row.notes[c.name];
+                    const described = [error ? `${id}-error` : "", note ? `${id}-note` : ""].filter(Boolean).join(" ");
                     const common = {
                       id, name: id, "aria-label": `${c.label}, row ${i + 1}`,
                       "aria-invalid": error ? true : undefined,
-                      "aria-describedby": error ? `${id}-error` : undefined,
+                      "aria-describedby": described || undefined,
                     };
                     return (
                       <td key={c.name}>
@@ -145,6 +148,7 @@ function ServersForm({ data, reload, status, setStatus }: {
                                    : c.name === "pve_node" ? data.default_node || undefined : undefined}
                                  spellCheck={false} autoComplete="off" />
                         )}
+                        {note ? <p className="note" id={`${id}-note`}>{note}</p> : null}
                         {error ? (
                           <p className="error" id={`${id}-error`}>
                             <span className="visually-hidden">Error: </span>{error}
@@ -172,7 +176,10 @@ function ServersForm({ data, reload, status, setStatus }: {
             address. MAC address (optional): the first card's, for a DHCP reservation. Node: the Proxmox node the VM
             is created on; the default is the node on the Proxmox page{nodes.length ? ""
               : " (test the connection there to pick from the cluster's nodes)"}. Extra network
-            cards: {help("vm_extra_nics")} Extra firewall rules: {help("firewall_ports")} OS: the operating
+            cards: {help("vm_extra_nics")} Extra disks: {help("vm_extra_disks")} Spread
+            group: {help("vm_spread_group")} A value set by hand in the inventory that a field can't show is kept as
+            it was until you enter one there; a value in host_vars/&lt;server&gt; next to the inventory applies over
+            this page's, and the page notes it. Extra firewall rules: {help("firewall_ports")} OS: the operating
             system, from the releases this version supports; the default is the one on the Defaults page. Install
             method: the Ubuntu installer (Ubuntu only) or the vendor's cloud image (every release; the ISO storage
             must allow Import content); the default is the one on the Defaults page. Rocky Linux 10 and CentOS
