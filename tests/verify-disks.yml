@@ -22,7 +22,7 @@
           - create | length == 1
           # The installer sees the system disk only.
           - create[0] | dict2items | map(attribute='key') | select('match', '^scsi[0-9]+$') | list == ['scsi0']
-          - create[0].tags == 'ubuntu,ansible,usas-k8s-lab-agent'
+          - create[0].tags == 'ubuntu,ansible,usas-k8s-lab-agent,pve-test'
           # Added with the installer's CD-ROMs taken out, in one update.
           - vm.config_updates | length == 1
           - vm.config_updates[0].delete == 'ide2,ide3'
