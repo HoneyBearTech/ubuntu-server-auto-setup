@@ -174,7 +174,7 @@ be tagged; replace them with yours.
 
   ```bash
   qm config 9001 | grep -E '^scsi1:'          # ...,serial=usas-data,size=4G
-  ssh sysadmin@192.0.2.10 'findmnt -o SOURCE,FSTYPE,LABEL,OPTIONS /srv/data; ls -l /dev/disk/by-id | grep usas-data'
+  ssh sysadmin@192.0.2.10 'findmnt -o SOURCE,FSTYPE,LABEL,OPTIONS /srv/data; lsblk -o PATH,SERIAL | grep usas-data'
   ```
 
 - [ ] **An extra network card on a VLAN**, if the release touches networking: `test-01` with

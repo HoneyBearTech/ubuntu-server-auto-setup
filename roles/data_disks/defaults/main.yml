@@ -3,8 +3,8 @@
 # each { size_gb, storage, label, mount, fs }. Each is found by its serial (usas-<label>), formatted while it is
 # still blank and mounted by its label.
 vm_extra_disks: []
-# Where the server lists its disks by serial: QEMU's SCSI disks appear as scsi-0QEMU_QEMU_HARDDISK_<serial>.
-data_disks_by_id_dir: /dev/disk/by-id
-data_disks_by_id_prefix: scsi-0QEMU_QEMU_HARDDISK_
+# How the server lists its disks with their serials. Proxmox puts the drive's name (drive-scsi1) in a SCSI disk's
+# device ID, which is what /dev/disk/by-id is named after, and the serial in its unit serial: lsblk reports that.
+data_disks_lsblk_argv: [lsblk, --json, --nodeps, --output, "PATH,SERIAL"]
 # nofail: a missing disk doesn't stop the server from booting.
 data_disks_mount_options: defaults,nofail

@@ -14,6 +14,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `known_hosts`, so that VM's run stopped with "No ED25519 host key is known" (seen with five new VMs). Each
   write replaced the whole file while another was writing it; they now take turns, as do the baseline's entries
   for a new SSH port.
+- **Extra disks:** the baseline couldn't find a `vm_extra_disks` disk on a Proxmox VM ("has no disk with the
+  serial usas-<label>"), so it stopped there. It looked for a `/dev/disk/by-id` link named after the serial, but
+  Proxmox names those links after the drive (`drive-scsi1`), and only some systems add one for the serial. Each
+  disk is now found by the serial `lsblk` reports.
 
 ## [0.8.0] - 2026-11-01
 
