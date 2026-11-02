@@ -28,7 +28,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   differently (`ens18` on Ubuntu, `eth0` on AlmaLinux and Rocky Linux), so `make kubernetes` refused a mixed set of
   servers. Each server now has a kube-vip DaemonSet of its own, with its own interface: `k8s_api_vip_interface` if
   set (in a server's `host_vars`, for that server alone), else the server's interface for its default route. A
-  cluster built with 0.8.0 moves over on its next `make kubernetes`, with the VIP answering throughout.
+  cluster built with 0.8.0 moves over on its next `make kubernetes`: k3s replaces the old DaemonSet with the new
+  ones as it applies the new manifest, and the VIP is unanswered for a few seconds while a new kube-vip takes it
+  (one missed probe, under 5 s, on a real three-server cluster).
 
 ## [0.8.0] - 2026-11-02
 
