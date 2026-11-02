@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .schema import Field, Invalid, Schema, parse_value, token_vault_name
-from .store import Cluster, Config
+from .store import MEMBER_GROUPS, Cluster, Config
 
 MAX_CLUSTERS = 16
 # The Proxmox tag proxmox_vm gives a member's VM (K1): usas-k8s-<cluster>-<role>.
@@ -209,13 +209,19 @@ def apply_renames(config: Config, parsed: Parsed) -> None:
                 config.secrets[after] = config.secrets.pop(before)
 
 
-def drain(config: Config, cluster: Cluster | None, default: Any) -> bool:
-    """Whether a fleet update drains a member of cluster first (updates_k8s_drain, set for the cluster by hand or
-    the role's default)."""
-    if cluster is not None:
-        for values in (cluster.values, cluster.extra_vars, *cluster.member_vars.values()):
-            if isinstance(values, dict) and DRAIN_VAR in values:
-                return values[DRAIN_VAR] is True or str(values[DRAIN_VAR]).lower() == "true"
+def drain(config: Config, cluster: Cluster | None, default: Any, vmid: int | None = None) -> bool:
+    """Whether a fleet update drains the member of cluster with that VM ID first (updates_k8s_drain), as Ansible
+    reads it: set on the member in its member group, else on that group, else on the cluster, else the default."""
+    if cluster is None:
+        return default is True
+    layers: list[Any] = []
+    server = next((s for s in config.servers if vmid is not None and s.get("pve_vmid") == vmid), None)
+    if server is not None and server.get("k8s_cluster") == cluster.name:
+        kind = next((k for k, role in MEMBER_GROUPS.items() if role == server.get("k8s_role")), "")
+        layers += [cluster.member_host_vars.get(server["name"]), cluster.member_vars.get(kind)]
+    for values in (*layers, cluster.extra_vars, cluster.values):
+        if isinstance(values, dict) and DRAIN_VAR in values:
+            return values[DRAIN_VAR] is True or str(values[DRAIN_VAR]).lower() == "true"
     return default is True
 
 
@@ -245,7 +251,9 @@ def drain_warnings(config: Config, targets: list[tuple[int, str]], tags: dict[in
         if not member["inventory"] or cluster is None:
             found.append(f"{name} is tagged as a member of Kubernetes cluster {member['cluster']}, which the "
                          "inventory doesn't have: it is updated without being drained first.")
-        elif not drain(config, cluster, default):
-            found.append(f"{name} is a {member['role']} of Kubernetes cluster {member['cluster']}, and draining "
-                         f"is off ({DRAIN_VAR}): its pods aren't moved before the update, and a reboot stops them.")
+        elif not drain(config, cluster, default, vmid):
+            article = "an" if member["role"] == "agent" else "a"
+            found.append(f"{name} is {article} {member['role']} of Kubernetes cluster {member['cluster']}, and "
+                         f"draining is off ({DRAIN_VAR}): its pods aren't moved before the update, and a reboot stops "
+                         "them.")
     return found

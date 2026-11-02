@@ -342,7 +342,7 @@ Each item of `vm_extra_disks` is a mapping with these keys (up to 29 disks):
 removes the installer's CD-ROMs, so the installer never sees them and can't put the system on one. They are
 added to new VMs only: for an existing VM, add the disk in Proxmox with the serial `usas-<label>` (or leave it
 out of `vm_extra_disks`). The baseline (`data_disks` role, tag `data_disks`) finds each disk by its serial
-(`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_usas-<label>`), formats it only while `blkid` finds nothing on it,
+(the `SERIAL` column of `lsblk`; Proxmox names `/dev/disk/by-id`'s links after the drive, not the serial), formats it only while `blkid` finds nothing on it,
 and mounts it by label with `nofail`, so a missing disk doesn't stop the server from booting. A disk that holds
 anything else (another file system or label, or a partition table) is left as it is and the run stops, naming
 what it found. A disk that isn't attached stops the run too.
@@ -355,8 +355,8 @@ check, not a Proxmox HA rule: the token has no privilege to make one. To keep th
 too, add an HA node affinity rule (Proxmox VE 9) or HA group (Proxmox VE 8) for them by hand.
 
 Until the web UI has fields for them, a web UI save keeps only what it can show, so set `vm_extra_disks` and
-`vm_spread_group` in `host_vars/<server>.yml` next to the inventory (the UI doesn't write that folder); the
-`k8s_*` groups need an inventory of your own for now.
+`vm_spread_group` in `host_vars/<server>.yml` next to the inventory (the UI doesn't write that folder). The
+`k8s_*` groups are the UI's own (Defaults, Kubernetes clusters), and it keeps what was set in them by hand.
 
 ### Kubernetes nodes
 
@@ -418,7 +418,7 @@ A server that leaves every `k8s_*` group keeps what the role set up; remove its 
 | --- | --- | --- |
 | `k8s_version` | `""` | The k3s release: one of the k3s catalog's (`roles/k3s/vars/catalog.yml`), required. |
 | `k8s_api_vip` | `""` | The API's address on the LAN, an IPv4 address no other host has. kube-vip holds it on one server at a time (by ARP) and moves it when that server stops; the other members join through it, and it's in the API's certificate. Empty: no kube-vip, and every member joins through the first server's address. |
-| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server. Empty: the first server's interface for its default route. |
+| `k8s_api_vip_interface` | `""` | The interface kube-vip puts the VIP on, the same name on every server (`ens18` on Ubuntu's cloud image, `eth0` on AlmaLinux's and Rocky Linux's: give one cluster's servers one OS family). Empty: the first server's interface for its default route. A server without it is refused before anything changes. |
 | `k8s_lb_pool` | `""` | The addresses LoadBalancer services get from kube-vip's cloud provider: a range (`192.0.2.20-192.0.2.29`) or a network (`192.0.2.32/28`). Needs `k8s_api_vip` and `servicelb` in `k8s_disable`. |
 | `k8s_tls_san` | `[]` | More DNS names or IPv4 addresses the API's certificate is valid for. |
 | `k8s_disable` | `[servicelb]` | k3s' packaged components to leave out: any of `servicelb`, `traefik`, `local-storage`, `metrics-server`. |
@@ -725,7 +725,7 @@ away; new keys can appear in any release, so ignore keys you don't know.
 ```json
 {
   "schema": 1,
-  "version": "0.7.0",
+  "version": "0.8.0",
   "setup": {"done": 5, "total": 5},
   "running": {"playbook": "site", "check": false, "started": 1792750000},
   "last_run": {"playbook": "baseline", "check": false, "started": 1792740000, "status": "succeeded",

@@ -10,15 +10,17 @@
 
 # Each disk by its serial (usas-<label>, set by proxmox_vm), so a disk is never mistaken for another one
 # whatever order the kernel finds them in.
+- name: List the disks with their serials
+  ansible.builtin.command:
+    argv: "{{ data_disks_lsblk_argv }}"
+  register: data_disks_lsblk
+  changed_when: false
+  check_mode: false
+  when: data_disks_list | length > 0
+
 - name: Find each extra disk by its serial
-  ansible.builtin.stat:
-    path: "{{ data_disks_by_id_dir }}/{{ data_disks_by_id_prefix }}usas-{{ item.label }}"
-    follow: true
-    get_checksum: false
-  register: data_disks_found
-  loop: "{{ data_disks_list }}"
-  loop_control:
-    label: "{{ item.label }}"
+  ansible.builtin.set_fact:
+    data_disks_found: "{{ data_disks_lsblk.stdout | default('') | data_disks_find(data_disks_list) }}"
 
 - name: Fail if a disk isn't attached
   vars:
@@ -27,7 +29,7 @@
     that: data_disks_missing | length == 0
     fail_msg: >-
       {{ inventory_hostname }} has no disk with the serial usas-{{ data_disks_missing | join(', usas-') }}
-      (looked for {{ data_disks_by_id_dir }}/{{ data_disks_by_id_prefix }}usas-...). provision-vms.yml adds
+      (looked for it in lsblk's SERIAL column). provision-vms.yml adds
       vm_extra_disks only when it creates the VM; for an existing VM, add the disk in Proxmox with that serial, or
       remove it from vm_extra_disks.
     quiet: true

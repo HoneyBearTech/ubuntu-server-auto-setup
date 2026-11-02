@@ -1,11 +1,14 @@
-"""Filters for the baseline's extra disks: what blkid found on each, and so whether it may be formatted.
+"""Filters for the baseline's extra disks: which device each one is, by its serial, and what blkid found on it,
+and so whether it may be formatted.
 
 tests/fuzz/fuzz_data_disks.py checks that a disk is only ever "blank" when blkid found nothing on it.
 """
 
+import json
+
 DOCUMENTATION = """
 name: data_disks
-short_description: Read blkid's findings on the extra disks
+short_description: Find the extra disks by serial and read blkid's findings on them
 description: See the module docstring and roles/data_disks/tasks/main.yml.
 """
 
@@ -14,13 +17,41 @@ def _text(value):
     return "" if value is None else str(value)
 
 
+def data_disks_find(lsblk, disks):
+    """Each disk's device, from `lsblk --json --nodeps --output PATH,SERIAL`: the disk whose serial is usas-<label>.
+
+    Returns {"results": [...]} with one entry per disk, in the order of disks, shaped like a stat loop's results:
+    {"item": disk, "stat": {"exists": bool, "path": device}}. A serial that two disks share finds neither, so a
+    disk is never mistaken for another one; lsblk output that can't be read finds none.
+    """
+    try:
+        devices = json.loads(_text(lsblk) or "{}").get("blockdevices") or []
+    except (ValueError, AttributeError):
+        devices = []
+    paths, shared = {}, set()
+    for device in devices if isinstance(devices, list) else []:
+        if isinstance(device, dict) and device.get("serial") and device.get("path"):
+            serial = _text(device["serial"]).strip()
+            if serial in paths:
+                shared.add(serial)
+            paths[serial] = _text(device["path"])
+    for serial in shared:
+        del paths[serial]
+    results = []
+    for disk in disks:
+        path = paths.get(f"usas-{_text(disk.get('label'))}")
+        results.append({"item": disk, "stat": {"exists": path is not None, "path": path or ""}})
+    return {"results": results}
+
+
 def data_disks_state(probes, disks):
     """Each disk with what `blkid -p -o export` found on it: {"label", "mount", "fs", "device", "state", "found"}.
 
-    probes are the loop results of that command (one per disk, in the order of disks, "item" being the stat result
-    whose "item" is the disk); disks the checked vm_extra_disks. state is "blank" when blkid found nothing (exit 2
-    and no output), "ready" when it found the disk's own file system with its label, "other" for anything else,
-    which is then described in found. A probe that didn't run (check mode, a skipped item) counts as "other".
+    probes are the loop results of that command (one per disk, in the order of disks, "item" being the
+    data_disks_find result whose "item" is the disk); disks the checked vm_extra_disks. state is "blank" when
+    blkid found nothing (exit 2 and no output), "ready" when it found the disk's own file system with its label,
+    "other" for anything else, which is then described in found. A probe that didn't run (check mode, a skipped
+    item) counts as "other".
     """
     states = []
     for probe, disk in zip(probes, disks, strict=False):
@@ -55,4 +86,4 @@ def data_disks_state(probes, disks):
 
 class FilterModule:
     def filters(self):
-        return {"data_disks_state": data_disks_state}
+        return {"data_disks_find": data_disks_find, "data_disks_state": data_disks_state}
