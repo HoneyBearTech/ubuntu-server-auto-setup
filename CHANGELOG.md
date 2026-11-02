@@ -29,6 +29,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   where a save from the web UI's Servers page drops them (it has no fields for them). The guide now says to put
   them in `host_vars/<server>.yml` with the web UI, as interfaces.md did, and what a save keeps; interfaces.md no
   longer says the `k8s_*` groups need an inventory of your own.
+- **Kubernetes, check mode:** a check run on a cluster not built yet (`make kubernetes --check`, which the guide
+  runs first, and the web UI's check before every real run) failed on the first server with "Could not find the
+  requested service k3s", so the web UI never offered the install. Check mode no longer asks systemd to start a
+  unit that it would only write.
 
 ## [0.8.0] - 2026-11-01
 
