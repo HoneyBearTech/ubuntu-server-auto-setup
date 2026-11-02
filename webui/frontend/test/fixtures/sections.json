@@ -1592,7 +1592,7 @@
     "name": "k8s_api_vip_interface",
     "label": "VIP network interface",
     "kind": "text",
-    "help": "The network interface kube-vip puts the address on, the same name on every server. Empty: the first server's interface for its default route.",
+    "help": "The network interface kube-vip puts the address on; set in a server's host_vars, that server's alone. Empty: each server's own interface for its default route, so servers whose cards have different names (ens18 on Ubuntu's cloud image, eth0 on AlmaLinux's and Rocky Linux's) need nothing set.",
     "required": false,
     "advanced": true,
     "variable": "k8s_api_vip_interface",

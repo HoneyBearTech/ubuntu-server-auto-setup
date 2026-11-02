@@ -12,8 +12,9 @@ k8s_version: ""
 # The API's address on the LAN, an IPv4 address no other host has: kube-vip holds it on one server at a time and
 # moves it when that server stops. Empty: no kube-vip, and every member joins through the first server's address.
 k8s_api_vip: ""
-# The network interface kube-vip puts the address on, the same name on every server. Empty: the first server's
-# interface for its default route.
+# The network interface kube-vip puts the address on; set in a server's host_vars, that server's alone. Empty: each
+# server's own interface for its default route, so servers whose cards have different names (ens18 on Ubuntu's
+# cloud image, eth0 on AlmaLinux's and Rocky Linux's) need nothing set.
 k8s_api_vip_interface: ""
 # The addresses LoadBalancer services get, from kube-vip's cloud provider: a range (192.0.2.20-192.0.2.29) or a
 # network (192.0.2.32/28). Empty: none. Needs k8s_api_vip (kube-vip announces them) and servicelb in k8s_disable.

@@ -1,7 +1,8 @@
 ---
 # Checks the cluster tests/kubernetes.sh built (cluster ci, tests/inventory/k3s.yml): every node Ready, three etcd
-# members, the servers tainted, ServiceLB off, kube-vip holding the VIP and a LoadBalancer address from the pool,
-# the files' modes, the binary's hash, the tokens where they belong, and the read-only kubeconfig's rights.
+# members, the servers tainted, ServiceLB off, kube-vip on each server with its own interface, holding the VIP, and a
+# LoadBalancer address from the pool, the files' modes, the binary's hash, the tokens where they belong, and the
+# read-only kubeconfig's rights.
 # tokens_file is the test's tokens (-e tokens_file=...); verify_version the release every node must run
 # (v1.36.5+k3s1 unless -e verify_version=... says otherwise, after an upgrade), and no node is left cordoned. k3s by
 # its full path: sudo's secure_path on the RHEL family leaves /usr/local/bin out.
@@ -141,6 +142,25 @@
         objects: "{{ (verify_objects.stdout | from_json)['items'] }}"
         traefik: >-
           {{ objects | selectattr('kind', 'eq', 'Service') | selectattr('metadata.name', 'eq', 'traefik') | first }}
+
+    # One DaemonSet per server, with that server's interface (verify_vip_interfaces), and not the single one of before.
+    - name: Check that kube-vip runs on each server with its own interface
+      ansible.builtin.assert:
+        that:
+          - kube_vip | map(attribute='metadata.name') | sort
+            == verify_vip_interfaces.keys() | map('regex_replace', '^', 'kube-vip-ds-') | sort
+          - ds.spec.template.spec.containers[0].env | selectattr('name', 'eq', 'vip_interface') | map(attribute='value')
+            | list == [item.value]
+        quiet: true
+      loop: "{{ verify_vip_interfaces | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
+      vars:
+        verify_vip_interfaces: {k3s-s1: eth0, k3s-s2: eth0, k3s-s3: ens18}
+        kube_vip: >-
+          {{ (verify_objects.stdout | from_json)['items'] | selectattr('kind', 'eq', 'DaemonSet')
+             | selectattr('metadata.name', 'match', '^kube-vip-ds') | list }}
+        ds: "{{ kube_vip | selectattr('metadata.name', 'eq', 'kube-vip-ds-' ~ item.key) | first }}"
 
     - name: Copy the read-only kubeconfig to the server
       ansible.builtin.copy:
