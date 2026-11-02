@@ -8,6 +8,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-01
+
 Kubernetes clusters: servers in a `k8s_<cluster>_servers` or `_agents` group become a k3s cluster. The baseline
 prepares them (k3s' ports open between the members only, kernel settings, swap off, Longhorn's prerequisites and
 k3s' SELinux policy), and a new playbook installs k3s from a binary pinned by its checksum, joins the servers one
@@ -1082,7 +1084,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.8.0
 [0.7.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.7.0
 [0.6.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0
 [0.5.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.5.0
