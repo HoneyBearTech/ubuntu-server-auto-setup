@@ -21,8 +21,10 @@
   when: not ansible_check_mode
 
 # A cluster built before kube-vip had one DaemonSet per server has it as one DaemonSet, kube-vip-ds, with one interface name for every
-# server. It's removed once each server's own DaemonSet runs a ready kube-vip: they share its lease, so one of them
-# takes the API's address within seconds of the old holder letting it go.
+# server, from the same manifest file: k3s deletes it as it applies the new file, and the per-server ones share its
+# lease, so one of them takes the API's address within seconds of the old holder letting it go (a real cluster
+# missed one probe, under 5 s). Here each server's own DaemonSet must run a ready kube-vip, and kube-vip-ds is
+# removed if it's still there (made some other way).
 - name: Move kube-vip to one DaemonSet per server
   when: k8s_api_vip != '' and not ansible_check_mode
   block:
