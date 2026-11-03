@@ -8,13 +8,6 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
-### Fixed
-
-- **Provisioning:** VMs are created one at a time. Proxmox copies a cloud image into a new VM's disk under the
-  storage's cluster-wide lock, and with five cloud-image VMs on one shared storage at once, one failed waiting for
-  it (`cfs-lock 'storage-<name>' error: got lock request timeout`); `proxmox_kvm` then waited out its 900 s
-  timeout and reported only the task's first log line. A rerun creates the missing VM.
-
 ## [0.8.1] - 2026-11-02
 
 ### Added
@@ -38,6 +31,10 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   cluster built with 0.8.0 moves over on its next `make kubernetes`: k3s replaces the old DaemonSet with the new
   ones as it applies the new manifest, and the VIP is unanswered for a few seconds while a new kube-vip takes it
   (one missed probe, under 5 s, on a real three-server cluster).
+- **Provisioning:** VMs are created one at a time. Proxmox copies a cloud image into a new VM's disk under the
+  storage's cluster-wide lock, and with five cloud-image VMs on one shared storage at once, one failed waiting for
+  it (`cfs-lock 'storage-<name>' error: got lock request timeout`); `proxmox_kvm` then waited out its 900 s
+  timeout and reported only the task's first log line. A rerun creates the missing VM.
 
 ## [0.8.0] - 2026-11-02
 
