@@ -454,10 +454,11 @@ What the playbook does:
   is one DaemonSet per server (`kube-system/kube-vip-ds-<server>`), each pinned to its server and with that
   server's interface, all sharing one lease (`kube-system/plndr-cp-lock`). With `k8s_lb_pool`, kube-vip also
   announces the addresses the cloud provider hands out.
+  A cluster built with 0.8.0 has a single DaemonSet instead, `kube-system/kube-vip-ds`, with one interface name for
+  every server, from the same manifest: k3s deletes it as it applies the new one, so the VIP is unanswered for a
+  few seconds until one of the per-server kube-vips (which share its lease) takes it.
 - **Finally** it checks that every member is a Ready node and that kube-vip is ready on every server, then removes
-  `kube-system/kube-vip-ds`, the single DaemonSet with one interface name for every server that a cluster built
-  from 0.8.0's release candidate has (the per-server ones share its lease, so one of them takes the VIP within
-  seconds), and, with `k8s_fetch_readonly_kubeconfig`, writes the
+  `kube-system/kube-vip-ds` if it's still there, and, with `k8s_fetch_readonly_kubeconfig`, writes the
   read-only kubeconfig: a ServiceAccount (`kube-system/usas-readonly`) bound to the `view` ClusterRole, plus reading
   nodes. Deleting its Secret (`usas-readonly-token`) revokes the token; the next run makes a new one.
 
@@ -733,7 +734,7 @@ away; new keys can appear in any release, so ignore keys you don't know.
 ```json
 {
   "schema": 1,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "setup": {"done": 5, "total": 5},
   "running": {"playbook": "site", "check": false, "started": 1792750000},
   "last_run": {"playbook": "baseline", "check": false, "started": 1792740000, "status": "succeeded",

@@ -8,6 +8,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-02
+
 ### Added
 
 - New VMs are also tagged in Proxmox with the node they're created on (`pve_node`, in lower case), so after a
@@ -26,7 +28,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   differently (`ens18` on Ubuntu, `eth0` on AlmaLinux and Rocky Linux), so `make kubernetes` refused a mixed set of
   servers. Each server now has a kube-vip DaemonSet of its own, with its own interface: `k8s_api_vip_interface` if
   set (in a server's `host_vars`, for that server alone), else the server's interface for its default route. A
-  cluster built with 0.8.0 moves over on its next `make kubernetes`, with the VIP answering throughout.
+  cluster built with 0.8.0 moves over on its next `make kubernetes`: k3s replaces the old DaemonSet with the new
+  ones as it applies the new manifest, and the VIP is unanswered for a few seconds while a new kube-vip takes it
+  (one missed probe, under 5 s, on a real three-server cluster).
+- **Provisioning:** VMs are created one at a time. Proxmox copies a cloud image into a new VM's disk under the
+  storage's cluster-wide lock, and with five cloud-image VMs on one shared storage at once, one failed waiting for
+  it (`cfs-lock 'storage-<name>' error: got lock request timeout`); `proxmox_kvm` then waited out its 900 s
+  timeout and reported only the task's first log line. A rerun creates the missing VM.
 
 ## [0.8.0] - 2026-11-02
 
@@ -1129,7 +1137,8 @@ Ansible playbooks.
 - `setup.sh`, `setupLibrary.sh`, the bash test-library submodule (`.gitmodules`), and the CircleCI and old
   GitHub Actions configurations that tested them.
 
-[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.8.1
 [0.8.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.8.0
 [0.7.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.7.0
 [0.6.0]: https://github.com/HoneyBearTech/ubuntu-server-auto-setup/releases/tag/v0.6.0
