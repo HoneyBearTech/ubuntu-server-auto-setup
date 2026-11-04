@@ -8,6 +8,7 @@ import http.cookiejar
 import json
 import re
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -76,6 +77,26 @@ def check(condition: bool, message: str, detail: object = "") -> None:
             print(text[:3000], file=sys.stderr)
         sys.exit(1)
     print(f"ok: {message}")
+
+
+def docker(*args: str) -> str:
+    return subprocess.run(["docker", *args], check=True, capture_output=True, text=True).stdout  # noqa: S603, S607
+
+
+def follow(ui: UI, run_path: str, seconds: int) -> tuple[str, str]:
+    """A run's event stream until it ends (reconnecting when it is quiet too long), and the log lines in it."""
+    deadline, stream = time.time() + seconds, ""
+    while time.time() < deadline:
+        try:
+            with ui.opener.open(ARGS.url + run_path + "/stream", timeout=120) as resp:
+                stream = resp.read().decode()
+        except (TimeoutError, urllib.error.URLError):
+            continue
+        if "event: end" in stream:
+            break
+        time.sleep(1)
+    lines = [line[6:] for line in stream.splitlines() if line.startswith("data: ")]
+    return stream, "\n".join(lines)
 
 
 def mock_call(mock: str, method: str, path: str, data: dict | None = None):
@@ -153,6 +174,38 @@ def check_vms(ui: UI) -> None:
     check(TOKEN_SECRET not in json.dumps(data), "the list doesn't contain the token secret")
 
 
+def check_baseline(ui: UI) -> None:
+    """The baseline through the Run page against srv-02, the systemd container (tests/images/ubuntu-target)."""
+    # What provisioning leaves behind for a server it installed: the UI's key in the admin user's authorized_keys
+    # (the installer's answers) and the server's host key in the UI's known_hosts, here read from the server itself.
+    public = ui.get("/ssh")[1].get("public_key", "")
+    docker("exec", ARGS.srv, "sh", "-c", f"echo '{public}' > /home/sysadmin/.ssh/authorized_keys && "
+           "chown sysadmin: /home/sysadmin/.ssh/authorized_keys && chmod 600 /home/sysadmin/.ssh/authorized_keys")
+    keytype, blob = docker("exec", ARGS.srv, "cat", "/etc/ssh/ssh_host_ed25519_key.pub").split()[:2]
+    docker("exec", ARGS.app, "sh", "-c",
+           f"umask 077 && echo '{ARGS.address} {keytype} {blob}' >> /data/ssh/known_hosts")
+
+    status, data = ui.post("/run", {"playbook": "baseline", "limit": "srv-02"})
+    run_path = data.get("redirect", "")
+    check(re.fullmatch(r"/runs/[0-9-]+[a-f0-9]{6}", run_path) is not None, "the baseline run starts", data)
+    stream, log = follow(ui, run_path, 900)
+    check("event: end\ndata: succeeded" in stream, "the baseline run succeeds and the stream reports it", log[-3000:])
+    check(re.search(r"srv-02\s*:\s*ok=[1-9]\d*\s+changed=\d+\s+unreachable=0\s+failed=0", log) is not None,
+          "the play recap has srv-02 with failed=0", log[-3000:])
+    check(TOKEN_SECRET not in log and "not a template" not in log, "the log doesn't contain a secret", log[-3000:])
+    status, data = ui.get("/runs")
+    latest = data["runs"][0]
+    check((latest["status"], latest["action"]) == ("succeeded", "baseline"), "the baseline run is in the history",
+          data)
+    status, data = ui.get(run_path)
+    check("PLAY RECAP" in data.get("log", "") and "srv-02" in data["log"] and data["run"]["done"],
+          "the baseline run's log is kept", data)
+
+    check("Status: active" in docker("exec", ARGS.srv, "ufw", "status"), "the server's firewall is on")
+    check(public in docker("exec", ARGS.srv, "cat", "/home/sysadmin/.ssh/authorized_keys"),
+          "the UI's key stays in the admin user's authorized_keys")
+
+
 def main() -> None:
     ui = UI(ARGS.url)
     check_shell(ui)
@@ -208,13 +261,14 @@ def main() -> None:
     check(page.get("public_key", "").startswith("ssh-ed25519 "), "the UI creates its SSH key", page)
 
     defaults = {
-        "github_user": "test", "github_keys_url": "http://pve-mock:8081/{{ github_user }}.keys",
+        "github_user": "test", "github_keys_url": "http://pve-mock:8081/test.keys",
         "admin_extra_ssh_keys": "", "authorize_ui_key": "on", "admin_user": "sysadmin",
         "admin_password": "admin password {{ not a template }}", "timezone": "America/Chicago",
         "net_gateway": "10.10.10.1", "net_prefix": "24", "net_dns": "10.10.10.1", "net_search": "example.lan",
         "autoinstall_storage_layout": "lvm",
     }
-    status, data = ui.post("/defaults", {"action": "preview", **defaults})
+    status, data = ui.post("/defaults", {"action": "preview", **defaults,
+                                         "github_keys_url": "http://pve-mock:8081/{{ github_user }}.keys"})
     check(any(k.get("comment") == "smoke@ubuntu-server-auto-setup" for k in data.get("preview", [])),
           "the keys preview lists the published key", data)
     status, data = ui.post("/defaults", {"action": "save", **defaults, "net_gateway": "10.10.10.300"})
@@ -223,10 +277,11 @@ def main() -> None:
     status, data = ui.post("/defaults", {"action": "save", **defaults})
     check(data.get("message") == "Saved the defaults.", "the defaults are saved", data)
 
-    status, data = ui.post("/servers", {"server_count": "1", "servers-0-name": "srv-01",
+    status, data = ui.post("/servers", {"server_count": "2", "servers-0-name": "srv-01",
                                         "servers-0-ansible_host": "10.10.10.61", "servers-0-pve_vmid": "4061",
-                                        "servers-0-firewall_ports": "443/tcp"})
-    check(data.get("message") == "Saved 1 server(s).", "the servers table is saved", data)
+                                        "servers-0-firewall_ports": "443/tcp", "servers-1-name": "srv-02",
+                                        "servers-1-ansible_host": ARGS.address, "servers-1-pve_vmid": "4062"})
+    check(data.get("message") == "Saved 2 server(s).", "the servers table is saved", data)
     hardening = {"ssh_port": "22", "ssh_permit_root_login": "no", "fail2ban_sshd_mode": "normal",
                  "fail2ban_maxretry": "5", "fail2ban_findtime": "10m", "fail2ban_bantime": "1h",
                  "fail2ban_bantime_maxtime": "1w", "firewall_ssh_sources": "any"}
@@ -250,15 +305,7 @@ def main() -> None:
     check(re.fullmatch(r"/runs/[0-9-]+[a-f0-9]{6}", run_path) is not None, "the run starts", data)
     check(ui.page(run_path)[0] == 200, "the run's page opens")
 
-    deadline, stream = time.time() + 180, ""
-    while time.time() < deadline:
-        with ui.opener.open(ARGS.url + run_path + "/stream", timeout=200) as resp:
-            stream = resp.read().decode()
-        if "event: end" in stream:
-            break
-        time.sleep(1)
-    lines = [line[6:] for line in stream.splitlines() if line.startswith("data: ")]
-    log = "\n".join(lines)
+    stream, log = follow(ui, run_path, 180)
     check("event: end\ndata: succeeded" in stream, "the run succeeds and the stream reports it", log)
     check("VM 4061 already exists; skipping install for srv-01" in log, "the playbook skipped the existing VM", log)
     check("ok=" in log and "failed=0" in log, "the log streams the play recap", log)
@@ -270,6 +317,7 @@ def main() -> None:
     check("PLAY RECAP" in data.get("log", "") and data["run"]["done"], "the run's log is kept", data)
 
     check_vms(ui)
+    check_baseline(ui)
 
     state = mock_call(ARGS.mock, "GET", "/mock/state")
     calls = [r for r in state["data"]["requests"] if r["path"] == "/cluster/resources"]
@@ -301,5 +349,8 @@ if __name__ == "__main__":
     parser.add_argument("--ca", required=True)
     parser.add_argument("--keys", required=True)
     parser.add_argument("--version", default="", help="the version the image must show (default: any)")
+    parser.add_argument("--app", required=True, help="the web UI's container")
+    parser.add_argument("--srv", required=True, help="the server's container (srv-02)")
+    parser.add_argument("--address", required=True, help="the server's address on the test network")
     ARGS = parser.parse_args()
     main()

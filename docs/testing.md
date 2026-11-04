@@ -17,7 +17,7 @@ uncordoned once, servers first, the API answering on the VIP throughout; a secon
 on the new release change nothing, going back is refused; at least 80% task coverage of `k3s` | `make test-kubernetes` (`OS=debian-13` or `OS=rocky-9` picks the release) | every pull request and push to `main` (in the required "Integration tests" check) |
 | Web UI unit tests | the server against the real roles and ansible-core: sign-in, guards, the API behind every page and form and its validation, the inventory and Vault it writes, runs, the page shell; and the app: every page against a stand-in API, accessibility (axe-core and structure), the colour tokens' contrast, the theme, the router, the log; at least 80% statement coverage each | `make webui-test` | every pull request and push to `main` (required) |
 | Web UI browser tests | the app in Chromium against the server and the mock Proxmox API: the whole setup and a run by keyboard only; Tab order, visible focus and no keyboard traps on every page; focus after each action, the phone menu, the run's live status; axe-core's WCAG 2.1 A and AA rules with real layout (and so contrast) on every page in every theme | `make webui-browser` | every pull request and push to `main` (in the required "Web UI tests" check) |
-| Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including a real `ansible-playbook` run; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
+| Image smoke test | the container image built from the checkout, driven like a browser against the mock Proxmox API, including real `ansible-playbook` runs: provisioning, and the baseline on a systemd container; then `start.ps1` | `make smoke` (needs Docker) | every pull request and push to `main`, and on the release image before it is pushed |
 | VMs page integration | the image, the mock Proxmox API and two Ubuntu 26.04 systemd containers standing in for VMs the project didn't create: host-key pinning, a check run, the real run after a confirmation, a second check run that changes nothing, a guest claiming another VM's address refused, an updates check, install and second check on the second container, the audit log, and no secret on the VMs | `make webui-vms` (needs Docker) | every pull request (not a required check) |
 | Fuzzing | the code that turns inventory values into files and commands, and the OS catalog tool's parsers, with arbitrary inputs | `make fuzz` (Linux x86-64) | every pull request and push to `main`, ten minutes per target weekly |
 | OS catalog tool | `tools/update_os_catalog.py` and `tools/update_k3s_catalog.py` offline, against made-up vendor indexes signed with a throwaway key: the newest build is chosen, signatures by other keys, changed checksum files and missing signatures are refused, unsafe values are refused, the catalog file reads back the same; at least 80% statement coverage | `make catalog-test` (needs `gpg`) | every pull request and push to `main`, in "Lint + syntax check" (required) |
@@ -496,7 +496,8 @@ for the settings pages (`test/fixtures/sections.json`):
 coverage (`vite.config.ts`; about 98% at the time of writing).
 
 **The smoke test** (`tests/webui-smoke.sh`, `make smoke`) builds the image, starts it next to
-`tests/mock_pve.py` on a private Docker network with the hardening from `docker-compose.yml` (read-only
+`tests/mock_pve.py` and an Ubuntu 26.04 systemd container (`tests/images/ubuntu-target`, stage `target`) on a
+private Docker network with the hardening from `docker-compose.yml` (read-only
 root, no capabilities), and drives it with `tests/webui_smoke.py` (standard library only) the way the app
 does: the page shell links the app the image built, its script, stylesheet and fonts are served, and
 nothing is inline; a wrong setup code, a post without its CSRF token and one from another origin are
@@ -504,9 +505,13 @@ refused; the first password is set; the theme is remembered;
 the connection test fails on the mock's certificate until its CA is saved, then passes; every page is
 saved; invalid values are refused with the roles' patterns; a provisioning run for a VM that already exists
 goes through `ansible-playbook`, which reads the token from the Vault and calls the mock API over verified
-TLS; its log streams, contains no secret and lands in the history; adding a passkey starts with a
-challenge for `localhost` that needs user verification. Finally it checks that the Vault in the
-volume is encrypted, that no file there is readable by others, and that the process isn't root. CI then
+TLS; its log streams, contains no secret and lands in the history. The systemd container is a second server,
+`srv-02`, left as provisioning leaves a server it installed (the UI's key in `sysadmin`'s `authorized_keys`, its
+host key in the UI's `known_hosts`): a baseline run started with `POST /run` streams a play recap with
+`failed=0` for it, contains no secret, lands in the history with its log, turns the server's firewall on and
+keeps the UI's key. Adding a passkey starts with a challenge for `localhost` that needs user verification.
+Finally it checks that the Vault in the volume is encrypted, that no file there is readable by others, that
+the process isn't root, and that the token secret didn't reach the server. CI then
 starts the same image with `start.ps1` under PowerShell 7.
 
 **The VMs page's runs** (`tests/webui-vms.sh`, `make webui-vms`) start the image, the mock (with
@@ -569,7 +574,7 @@ make test
 A run takes about 10 minutes. On failure the logs stay in the temporary directory the script prints.
 Ports 2201, 2211, 2222, 8006 and 8081 on `127.0.0.1` must be free (2341, 2342, 2345 to 2350 for `make test-updates`, 2241 to 2244 and the network `10.217.30.0/24` for `make test-kubernetes`). The web UI's tests need the Python
 packages and Node 24 with the app's packages (`make app` installs them; then `make webui-test`); the smoke
-test needs Docker and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
+test needs Docker (privileged containers, for systemd) and ports 18006 and 18080 (`make smoke`). The browser tests (which build the app first) need the
 app's packages and the collections installed as above, Playwright's Chromium once (`cd webui/frontend && npx playwright install
 chromium`), and ports 18106, 18180 and 18181 (`make webui-browser`; `APP_PORT`, `MOCK_PORT` and
 `KEYS_PORT` change them).
