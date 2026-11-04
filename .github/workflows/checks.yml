@@ -382,9 +382,10 @@ jobs:
         with:
           persist-credentials: false
 
-      # Builds the image from this checkout, starts it next to the mock Proxmox API (tests/mock_pve.py) and
-      # drives the web UI: first-run setup, sign-in, the connection test with the CA, saving every page, and
-      # a provisioning run through ansible-playbook that the mock answers.
+      # Builds the image from this checkout, starts it next to the mock Proxmox API (tests/mock_pve.py) and a
+      # systemd container and drives the web UI: first-run setup, sign-in, the connection test with the CA,
+      # saving every page, a provisioning run through ansible-playbook that the mock answers, and a baseline
+      # run against the systemd container.
       - name: Build the image and run the smoke test
         run: tests/webui-smoke.sh
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Smoke test of the container image: starts the image and the mock Proxmox API (tests/mock_pve.py) on a
-# private Docker network, then drives the web UI like a browser (tests/webui_smoke.py): first-run setup,
-# sign-in, the Proxmox connection test with the mock's CA certificate, the GitHub keys preview, saving every
-# page, a provisioning run that the mock answers, and the VMs page against the mock's fixture VMs and guest
-# agents. Needs Docker and Python 3 (standard library only).
+# Smoke test of the container image: starts the image, the mock Proxmox API (tests/mock_pve.py) and an Ubuntu
+# 26.04 systemd container standing in for a server the project installed (tests/images/ubuntu-target, stage
+# "target") on a private Docker network, then drives the web UI like a browser (tests/webui_smoke.py): first-run
+# setup, sign-in, the Proxmox connection test with the mock's CA certificate, the GitHub keys preview, saving
+# every page, a provisioning run that the mock answers, the VMs page against the mock's fixture VMs and guest
+# agents, and a baseline run against the systemd container. Needs Docker and Python 3 (standard library only).
 # Usage: tests/webui-smoke.sh [image]   (default: builds the image from this checkout as usas:smoke)
 # EXPECT_VERSION=<version> also checks the version the UI shows (the release passes its tag's).
 set -euo pipefail
@@ -14,6 +15,7 @@ IMAGE="${1:-}"
 NET=usas-smoke
 APP=usas-smoke-app
 MOCK=usas-smoke-pve
+SRV=usas-smoke-srv
 APP_PORT="${APP_PORT:-18080}"
 MOCK_PORT="${MOCK_PORT:-18006}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/usas-smoke.XXXXXX")"
@@ -24,7 +26,7 @@ cleanup() {
     echo "--- app log"; docker logs "$APP" 2>&1 | tail -n 80 || true
     echo "--- mock log"; docker logs "$MOCK" 2>&1 | tail -n 20 || true
   fi
-  docker rm -f "$APP" "$MOCK" >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$MOCK" "$SRV" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$TMP"
   [ "$status" -eq 0 ] && echo "Smoke test passed" || echo "Smoke test FAILED" >&2
@@ -35,6 +37,9 @@ if [ -z "$IMAGE" ]; then
   IMAGE=usas:smoke
   docker build -q -t "$IMAGE" . >/dev/null
 fi
+# The server is the integration tests' "target" stage, tagged for this test only so a make test running next to it
+# keeps its own image.
+docker build -q --target target -t usas-smoke-srv:latest tests/images/ubuntu-target >/dev/null
 
 # The mock's certificate names it as the containers see it (pve-mock), and 127.0.0.1 for the test driver.
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=pve-mock \
@@ -43,9 +48,15 @@ ssh-keygen -q -t ed25519 -N '' -C smoke@ubuntu-server-auto-setup -f "$TMP/id_ed2
 cp "$TMP/id_ed25519.pub" "$TMP/test.keys"
 chmod 755 "$TMP" && chmod 644 "$TMP"/*
 
-docker rm -f "$APP" "$MOCK" >/dev/null 2>&1 || true
+docker rm -f "$APP" "$MOCK" "$SRV" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create "$NET" >/dev/null
+# A server as the installer leaves it: the admin user sysadmin with passwordless sudo, named like its inventory host.
+docker run -d --name "$SRV" --hostname srv-02 --network "$NET" --privileged --cgroupns=host \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock usas-smoke-srv:latest >/dev/null
+docker exec "$SRV" sh -c "echo '127.0.1.1 srv-02' >> /etc/hosts"
+ADDRESS="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$SRV")"
+test -n "$ADDRESS"
 # The mock runs in the app image (it has Python), as the image's user, with the test files mounted read-only.
 docker run -d --name "$MOCK" --network "$NET" --network-alias pve-mock -p "127.0.0.1:$MOCK_PORT:8006" \
   -v "$ROOT/tests/mock_pve.py:/mock/mock_pve.py:ro" -v "$TMP:/certs:ro" --entrypoint python "$IMAGE" \
@@ -66,7 +77,7 @@ test -n "$code"
 
 python3 tests/webui_smoke.py --url "http://localhost:$APP_PORT" --setup-code "$code" \
   --mock "https://127.0.0.1:$MOCK_PORT" --ca "$TMP/api.crt" --keys "$TMP/test.keys" \
-  --version "${EXPECT_VERSION:-}"
+  --version "${EXPECT_VERSION:-}" --app "$APP" --srv "$SRV" --address "$ADDRESS"
 
 # The image runs the playbooks with the repository's ansible.cfg, and its 30-second connection timeout.
 docker exec "$APP" ansible-config dump --only-changed | grep -Eq '^DEFAULT_TIMEOUT\(/app/ansible.cfg\) = 30$'
@@ -89,6 +100,10 @@ test "$(docker exec "$APP" id -u)" != 0
 docker exec "$APP" sh -c 'head -c 14 /data/inventory/group_vars/all/vault.yml' | grep -q '^\$ANSIBLE_VAULT'
 if docker exec "$APP" sh -c 'grep -rl 00000000-0000-4000-8000-000000000000 /data' 2>/dev/null; then
   echo "ERROR: the token secret is in a plain file in /data" >&2
+  exit 1
+fi
+if docker exec "$SRV" sh -c 'grep -rIl 00000000-0000-4000-8000-000000000000 /etc /home /root /var/log' 2>/dev/null; then
+  echo "ERROR: the baseline run left the token secret on the server" >&2
   exit 1
 fi
 if [ -n "$(docker exec "$APP" find /data -type f -perm /077)" ]; then
