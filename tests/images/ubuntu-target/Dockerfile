@@ -17,7 +17,7 @@ ARG OS=ubuntu-26.04
 FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c AS ubuntu-26.04
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 AS ubuntu-24.04
 FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS ubuntu-22.04
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS debian-13
+FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS debian-13
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS debian-12
 FROM quay.io/centos/centos:stream10@sha256:511d358446140e9c4ba16451affb103a14237cbf40059b18adeaef6e3080a72b AS centos-stream-10
 FROM quay.io/centos/centos:stream9@sha256:99a7748660352b7d87e5689805ddafa6209d6019d0c5b642b5354656dff02be3 AS centos-stream-9
