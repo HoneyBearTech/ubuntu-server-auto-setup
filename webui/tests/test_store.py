@@ -82,6 +82,36 @@ def test_user_values_are_tagged_unsafe(store, settings):
     assert "firewall_allow: '{{ webui_firewall_allow + (webui_firewall_allow_host | default([])) }}'" in text
 
 
+def test_the_keys_url_placeholder_is_left_for_ansible(store, settings):
+    # The Keys URL may hold {{ github_user }}: it's written as a template so the roles fill it in, but only when
+    # the whole URL matches the field's pattern; any other template text stays data.
+    config = sample(store)
+    config.values.update({"github_user": "octocat", "github_keys_url": "http://mirror.lan/{{ github_user }}.keys"})
+    store.save(config)
+    text = settings.inventory_file.read_text()
+    assert "github_keys_url: http://mirror.lan/{{ github_user }}.keys" in text
+    assert store.load().values["github_keys_url"] == "http://mirror.lan/{{ github_user }}.keys"
+    for url in ("http://mirror.lan/{{ lookup('pipe', 'id') }}.keys", "http://mirror.lan/{{ github_user }}{{ x }}",
+                "http://mirror.lan/{% if 1 %}{{ github_user }}{% endif %}"):
+        config.values["github_keys_url"] = url
+        store.save(config)
+        assert "github_keys_url: !unsafe " in settings.inventory_file.read_text(), url
+
+
+@pytest.mark.skipif(not Path(ANSIBLE).exists(), reason="ansible isn't installed")
+def test_ansible_fills_in_the_keys_url_placeholder(store, settings, tmp_path):
+    config = sample(store)
+    config.values.update({"github_user": "octocat", "github_keys_url": "http://mirror.lan/{{ github_user }}.keys"})
+    store.save(config)
+    env = {**os.environ, "ANSIBLE_CONFIG": str(REPO / "ansible.cfg")}
+    result = subprocess.run(
+        [ANSIBLE, "-i", str(settings.inventory_file), "--vault-password-file", str(settings.vault_password_file),
+         "web-01", "-c", "local", "-m", "ansible.builtin.debug", "-a", "var=github_keys_url"],
+        capture_output=True, text=True, env=env, cwd=tmp_path, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "http://mirror.lan/octocat.keys" in result.stdout
+
+
 def test_the_ui_key_is_authorized_unless_turned_off(store, settings):
     settings.ssh_dir.mkdir()
     settings.ssh_key.with_suffix(".pub").write_text("ssh-ed25519 AAAAUIKEY ubuntu-server-auto-setup-webui\n")

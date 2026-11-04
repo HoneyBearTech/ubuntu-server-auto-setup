@@ -8,6 +8,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web UI:** a Keys URL saved with the `{{ github_user }}` placeholder (a mirror such as
+  `http://mirror.lan/{{ github_user }}.keys`) is filled in again during runs; it was passed to the roles as
+  literal text, and the authorized-keys download failed. Any other template text in the field is still kept as
+  data.
+
 ### Changed
 
 - **OS catalog:** newer cloud images pinned for Debian 12 (20261026-2643) and 13 (20261103-2651), CentOS Stream 9

@@ -3,8 +3,9 @@
 The inventory (inventory/hosts.yml) is an ordinary Ansible inventory: the same playbooks can use it from the
 command line (with the Vault password file). Every value a user typed is written with the ``!unsafe`` tag, so
 Ansible never treats it as a template, whatever it contains; only the few templates the UI itself writes
-(such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings. The secrets (the admin password,
-the API token, and the mail relay password, webhook URL and disk passphrase when set) are in
+(such as ``admin_password: "{{ vault_admin_password }}"``) are plain strings, and so is a keys URL with the
+``{{ github_user }}`` placeholder, whose pattern lets no other template text through. The secrets (the admin
+password, the API token, and the mail relay password, webhook URL and disk passphrase when set) are in
 inventory/group_vars/all/vault.yml, encrypted with Ansible Vault, and so are the Kubernetes clusters' join tokens.
 
 A Kubernetes cluster is the group k8s_<cluster> (a child of servers) with the cluster's settings as its vars and
@@ -47,6 +48,9 @@ SERVER_HOST_VARS = ("pve_vmid", "vm_cores", "vm_memory_mb", "vm_disk_gb", "net_m
 SERVER_TEXT_VARS = ("pve_node", "vm_os", "vm_install_method", "vm_spread_group")
 # Host variables whose value, if the field can't show it, is kept as written (a server's "kept").
 SERVER_KEPT_VARS = ("vm_spread_group", "vm_extra_disks")
+# Fields written as plain strings, so Ansible fills in their placeholder, when the whole value matches the field's
+# pattern (which allows no other template text); any other value is written as !unsafe.
+TEMPLATE_FIELDS = ("github_keys_url",)
 # Names an inventory written before 0.7.0 may hold, and the fields they now fill (the playbooks read both until 1.0).
 OLD_NAMES = {"ufw_ssh_limit": "firewall_ssh_limit", "ufw_ssh_sources": "firewall_ssh_sources"}
 # The servers' group, and its name before 0.7.0: an older inventory is read from it and written back as servers.
@@ -426,7 +430,10 @@ class Store:
             # always written because the inventory's ansible_user refers to it.
             if value is None or (value == f.default and name != "admin_user"):
                 continue
-            all_vars[name] = _mark(value)
+            if name in TEMPLATE_FIELDS and isinstance(value, str) and re.match(f.ui_pattern or "(?!)", value):
+                all_vars[name] = value
+            else:
+                all_vars[name] = _mark(value)
 
         extra_keys = list(config.values.get("admin_extra_ssh_keys") or [])
         ui_key = self.ui_public_key()
