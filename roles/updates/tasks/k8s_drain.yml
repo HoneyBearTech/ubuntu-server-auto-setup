@@ -1,12 +1,18 @@
 ---
 # Before a Kubernetes member's reboot (apply.yml): cordon and drain its node from a server of its cluster, the
 # server itself or, for an agent, the cluster's first server (the waves never reboot that one at the same time).
-# A drain that fails uncordons the node again and fails the server's update before the reboot.
+# A server that holds the API's address (k8s_api_vip, kube-vip's lease) then hands it to another server of its
+# cluster, with the k3s role's handover (roles/k3s/tasks/vip_handover.yml), and the run waits until the API answers
+# there: the waves never reboot two servers of a cluster together, so the others are up. A cluster's only server
+# keeps the address. A drain or handover that fails uncordons the node again and fails the server's update before
+# the reboot.
 - name: Drain the node
   vars:
     updates_k8s_from: >-
       {{ inventory_hostname if usas_updates_result.k8s.role == 'server'
       else groups['k8s_' ~ usas_updates_result.k8s.cluster ~ '_servers'] | first }}
+    updates_k8s_other_servers: >-
+      {{ groups['k8s_' ~ usas_updates_result.k8s.cluster ~ '_servers'] | reject('eq', inventory_hostname) | list }}
   block:
     - name: Cordon the node
       ansible.builtin.command:
@@ -34,6 +40,18 @@
       changed_when: true
       delegate_to: "{{ updates_k8s_from }}"
 
+    - name: Hand the API's address to another server before the reboot
+      ansible.builtin.include_role:
+        name: k3s
+        tasks_from: vip_handover
+      vars:
+        k3s_helper: "{{ updates_k8s_other_servers | first }}"
+        k3s_vip_node: "{{ updates_k8s_node_name }}"
+      when:
+        - usas_updates_result.k8s.role == 'server'
+        - k8s_api_vip | default('') | length > 0
+        - updates_k8s_other_servers | length > 0
+
   rescue:
     - name: Uncordon the node after the failed drain
       ansible.builtin.command:
@@ -54,6 +72,8 @@
     - name: Fail the update before the reboot
       ansible.builtin.fail:
         msg: >-
-          couldn't drain node {{ updates_k8s_node_name }} from {{ updates_k8s_from }}, so it wasn't rebooted:
+          {{ "couldn't hand the API's address over to another server" if ansible_failed_task.name | default('')
+          is search("API's address|API answers")
+          else "couldn't drain node " ~ updates_k8s_node_name ~ ' from ' ~ updates_k8s_from }}, so it wasn't rebooted:
           {{ (ansible_failed_result.stderr | default('') or ansible_failed_result.msg | default('failed'))
           | usas_clean_text(200) }}

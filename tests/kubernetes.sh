@@ -10,7 +10,8 @@
 # Argo CD and a root Application that syncs a test repository from a Git server container, tests/verify-argocd.yml),
 # the tokens and Argo CD's initial password in no log, a second run that changes nothing (and leaves the root
 # Application alone when its settings change), a cluster with the single kube-vip DaemonSet of before moved to one
-# per server with the VIP answering throughout; then the upgrade to the catalog's next release (--tags upgrade): the
+# per server with the VIP answering throughout, an updates run (playbooks/updates.yml) that reboots the server holding
+# the VIP and hands it over first; then the upgrade to the catalog's next release (--tags upgrade): the
 # refusals (without the tag, a minor skipped, another run's lock), every node cordoned, drained, upgraded and
 # uncordoned once, servers first, the API answering on the VIP throughout, a second upgrade that changes nothing,
 # and going back refused. OS picks the release (ubuntu-26.04 by default; CI also runs debian-13
@@ -434,6 +435,45 @@ daemonsets="$(docker exec k3s-s1 k3s kubectl --namespace=kube-system get daemons
 [ "$daemonsets" = "daemonset.apps/kube-vip-ds-k3s-s1 daemonset.apps/kube-vip-ds-k3s-s2 daemonset.apps/kube-vip-ds-k3s-s3 " ] \
   || { echo "ERROR: kube-vip's DaemonSets after the move: $daemonsets" >&2; exit 1; }
 case "$(vip_holder)" in k3s-s1|k3s-s2|k3s-s3) ;; *) echo "ERROR: no server holds the VIP after the move" >&2; exit 1;; esac
+cool_down
+
+step "an updates run that reboots the server holding the VIP hands the VIP to another server first"
+# A kernel in /boot newer than the running one asks for the reboot, which restarts the container (Docker starts it
+# again, as a server comes back); every package update is left out, so the reboot is all the run does.
+holder="$(vip_holder)"
+docker update --restart=always "$holder" >/dev/null
+docker exec "$holder" touch /boot/vmlinuz-999.0.0-usas-test
+# The container shares the Docker host's kernel and boot_id: its PID 1's start time says it restarted.
+boot="$(docker exec "$holder" ps -o lstart= -p 1)"
+start_probe
+play playbooks/updates.yml --limit "$holder" -e updates_reboot=if_required -e updates_os_reboot_check=kernel \
+  -e '{"updates_exclude_packages": ["*"]}' -e "updates_report_dir=$TEST_TMP/reports" \
+  -e 'updates_boot_time_command="ps -o lstart= -p 1"' -e updates_reboot_timeout=300
+stop_probe
+docker exec "$holder" rm /boot/vmlinuz-999.0.0-usas-test
+docker update --restart=no "$holder" >/dev/null
+[ "$(docker exec "$holder" ps -o lstart= -p 1)" != "$boot" ] || { echo "ERROR: $holder didn't reboot" >&2; exit 1; }
+python3 - "$LAST_LOG" "$holder" <<'EOF2'
+import re, sys
+holder, task, done = sys.argv[2], "", []
+for line in open(sys.argv[1]):
+    found = re.match(r"^TASK \[(?:[a-z0-9_]+ : )?(.*)\] \*", line)
+    if found:
+        task = found[1]
+    found = re.match(r"^(changed|ok): \[([a-z0-9-]+)", line)
+    if found and found[2] == holder:
+        done.append((found[1], task))
+order = [task for state, task in done if state == "changed"]
+for name in ("Drain the node before the reboot", "Stop kube-vip here until another server holds the API's address",
+             "Reboot to finish the updates", "Uncordon the node"):
+    assert name in order, (name, order)
+assert order.index("Stop kube-vip here until another server holds the API's address") < order.index("Reboot to finish the updates"), order
+assert ("ok", "Wait until the API answers on its address") in done, done
+print(f"{holder} was drained, handed the VIP over, rebooted and uncordoned, in that order")
+EOF2
+case "$(vip_holder)" in "$holder") echo "ERROR: $holder still holds the VIP after its update" >&2; exit 1;; k3s-s*) ;;
+  *) echo "ERROR: no server holds the VIP after the update" >&2; exit 1;; esac
+vip_gaps 30 "the reboot of the server that held the VIP"
 cool_down
 
 step "another release is refused without --tags upgrade, and --tags upgrade only on its own"

@@ -10,6 +10,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- **Fleet updates, Kubernetes members:** before rebooting a server that holds its cluster's API address
+  (`k8s_api_vip`), the updates playbook hands the address to another server and waits until the API answers
+  there, as `make kubernetes-upgrade` does, instead of leaving the API unanswered for a few seconds during the
+  reboot. A handover that fails uncordons the node and fails the server without a reboot
+  ([docs/updates.md](docs/updates.md#kubernetes-members)).
+
 - **OS catalog:** newer cloud images pinned for Debian 12 (20261026-2643) and 13 (20261103-2651), CentOS Stream 9
   and 10 (20261103.0) and AlmaLinux 9 (9.8-20261102), each checked against the vendor's signed checksums.
 

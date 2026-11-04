@@ -134,8 +134,12 @@ keeps its quorum and the server that drains an agent is up.
   every volume whole; after `updates_k8s_longhorn_timeout` (1800 s) the server fails. Detached volumes are left
   out.
 - The node's name in Kubernetes is the server's inventory name, or `updates_k8s_node_name`.
-- A reboot moves the API's address (kube-vip) by itself: kube-vip stops with the server, unlike when only k3s
-  restarts, as during an upgrade.
+- A server that holds the API's address (`k8s_api_vip`, kube-vip's lease `kube-system/plndr-cp-lock`) hands it
+  to another server of its cluster after the drain, as an [upgrade](interfaces.md#upgrades) does: its kube-vip
+  stops until another server holds the address, and the run waits until the API answers there, with k3s'
+  certificate, before the reboot. The waves never reboot two servers of a cluster together, so the others are
+  up. A handover that doesn't finish within a minute uncordons the node again and fails the server without a
+  reboot. A cluster's only server, a cluster without `k8s_api_vip` and agents have nothing to hand over.
 
 The report says "drained, uncordoned" (or "left cordoned") and "Longhorn healthy". `false` reboots a member
 without draining it, so its pods stop with it.
