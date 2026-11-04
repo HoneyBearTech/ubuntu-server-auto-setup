@@ -8,6 +8,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Changed
+
+- **OS catalog:** newer cloud images pinned for Debian 12 (20261026-2643) and 13 (20261103-2651), CentOS Stream 9
+  and 10 (20261103.0) and AlmaLinux 9 (9.8-20261102), each checked against the vendor's signed checksums.
+
 ## [0.8.1] - 2026-11-02
 
 ### Added
