@@ -1,6 +1,6 @@
 ---
-# From the server the node is drained from: the API answers on its address (k8s_api_vip), with the certificate
-# k3s signed for it. upgrade.yml checks this after handing the address over and after a server's upgrade.
+# From k3s_helper, another server: the API answers on its address (k8s_api_vip), with the certificate k3s signed
+# for it. vip_handover.yml checks this after handing the address over, and upgrade.yml after a server's upgrade.
 - name: Wait until the API answers on its address
   ansible.builtin.uri:
     url: https://{{ k8s_api_vip }}:{{ k3s_api_port }}/ping

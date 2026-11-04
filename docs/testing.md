@@ -308,6 +308,12 @@ with one interface name (`eth0`, so on the first two servers only), holding the 
 control node asks the VIP's `/ping` every half second: the VIP may not go unanswered for more than 30 s, and
 afterwards only the per-server DaemonSets are left.
 
+Then fleet updates: `playbooks/updates.yml`, limited to the server that holds the VIP, with every package update
+left out and a kernel in `/boot` newer than the running one, so the run only reboots it (Docker starts the
+container again). Its log must show the node drained, kube-vip stopped there and the API answering on the VIP
+from another server, all before the reboot, then the node uncordoned; afterwards another server holds the VIP,
+and the VIP may not go unanswered for more than 30 s.
+
 Then the upgrade from v1.36.5+k3s1 to v1.37.1+k3s1, both in the catalog. Refused before anything changes: a run
 without `--tags upgrade` on the new release, `--tags upgrade` with another tag, a release two minors ahead (from
 a test catalog), and a run while a lock made by hand (another run's) is in the cluster, which stays there. Then

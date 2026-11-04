@@ -1,0 +1,26 @@
+---
+# On a server about to stop (an upgrade's restart of k3s, an update's reboot) whose API still answers: if it holds
+# the API's address (the VIP), hand it to another server and wait, from k3s_helper (another server), until the API
+# answers there. The lease kube-vip holds the address with names the node that has it (k3s_vip_node, the server's
+# node name). Its kube-vip is stopped (the kubelet starts it again, as a follower) until another holds it. Used by
+# upgrade.yml and by the updates role (roles/updates/tasks/k8s_drain.yml).
+- name: Stop kube-vip here until another server holds the API's address
+  ansible.builtin.shell:
+    executable: /bin/sh
+    cmd: |
+      holder="$({{ k3s_binary }} kubectl --namespace=kube-system get lease plndr-cp-lock \
+        -o 'jsonpath={.spec.holderIdentity}' 2>/dev/null || true)"
+      if [ "$holder" != '{{ k3s_vip_node | default(inventory_hostname) }}' ]; then echo "held by another server"; exit 0; fi
+      ids="$({{ k3s_binary }} crictl ps --name '^kube-vip$' --state running --quiet)"
+      if [ -n "$ids" ]; then {{ k3s_binary }} crictl stop --timeout 5 $ids >/dev/null; fi
+      echo "stopped kube-vip"
+      exit 1
+  register: k3s_vip_moved
+  until: k3s_vip_moved.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: k3s_vip_moved.attempts | default(1) > 1
+  when: not ansible_check_mode
+
+- name: Wait until the API answers on its address
+  ansible.builtin.include_tasks: upgrade_vip.yml
