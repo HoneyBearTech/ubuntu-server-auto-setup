@@ -261,14 +261,13 @@ def main() -> None:
     check(page.get("public_key", "").startswith("ssh-ed25519 "), "the UI creates its SSH key", page)
 
     defaults = {
-        "github_user": "test", "github_keys_url": "http://pve-mock:8081/test.keys",
+        "github_user": "test", "github_keys_url": "http://pve-mock:8081/{{ github_user }}.keys",
         "admin_extra_ssh_keys": "", "authorize_ui_key": "on", "admin_user": "sysadmin",
         "admin_password": "admin password {{ not a template }}", "timezone": "America/Chicago",
         "net_gateway": "10.10.10.1", "net_prefix": "24", "net_dns": "10.10.10.1", "net_search": "example.lan",
         "autoinstall_storage_layout": "lvm",
     }
-    status, data = ui.post("/defaults", {"action": "preview", **defaults,
-                                         "github_keys_url": "http://pve-mock:8081/{{ github_user }}.keys"})
+    status, data = ui.post("/defaults", {"action": "preview", **defaults})
     check(any(k.get("comment") == "smoke@ubuntu-server-auto-setup" for k in data.get("preview", [])),
           "the keys preview lists the published key", data)
     status, data = ui.post("/defaults", {"action": "save", **defaults, "net_gateway": "10.10.10.300"})

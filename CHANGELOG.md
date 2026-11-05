@@ -8,6 +8,13 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web UI:** a Keys URL saved with the `{{ github_user }}` placeholder (a mirror such as
+  `http://mirror.lan/{{ github_user }}.keys`) is filled in again during runs; it was passed to the roles as
+  literal text, and the authorized-keys download failed. Any other template text in the field is still kept as
+  data.
+
 ### Changed
 
 - **Fleet updates, Kubernetes members:** before rebooting a server that holds its cluster's API address
