@@ -1,5 +1,5 @@
 # Lint tooling, and the web UI's linter and test runner. Install with: pip install -r requirements-dev.txt
-ansible-lint>=25.9
+ansible-lint>=26.11.0
 yamllint>=1.37
 ruff>=0.17.2
 black>=26.10.1  # through ansible-lint; 26.10.1 fixes GHSA-cg8m-r9f2-5wm2
