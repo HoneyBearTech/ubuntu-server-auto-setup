@@ -6,7 +6,7 @@
 # signed like Ubuntu signs it (SHA256SUMS.gpg) with a test key made here. The private key stays in this build stage;
 # the node gets only the public keyring and its fingerprint, which tests/run.sh hands to the role. tampered/
 # is a mirror that swapped in another checksum but kept the signature; unsigned/ has no signature at all.
-FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS release
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS release
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends xorriso gpg gpg-agent \
@@ -30,7 +30,7 @@ RUN mkdir -p /srv/iso-tree/casper /srv/ubuntu/tampered /srv/ubuntu/unsigned /srv
  && cp SHA256SUMS.gpg tampered/ \
  && cp SHA256SUMS unsigned/
 
-FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 ENV DEBIAN_FRONTEND=noninteractive
 # The empty package lists are dated in the past: Ansible's apt module judges the cache's age by that
 # directory, and would otherwise skip the update the role asks for and find no packages to install.
