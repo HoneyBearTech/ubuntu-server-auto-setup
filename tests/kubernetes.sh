@@ -159,6 +159,26 @@ none_has() {
 }
 
 step "Setting up keys, tokens, the network and the containers"
+# The four containers run as the Docker host's root, so their systemd, kubelets and containerd count against one
+# per-user inotify limit, fs.inotify.max_user_instances. When it is used up, a kubelet can't start ("inotify_init:
+# too many open files"), k3s restarts in a loop and its node never registers. The setting is the Docker host's
+# own kernel's, so only CI (CI=true) raises it; elsewhere on Linux the test says so and goes on. Off Linux the
+# containers run in Docker's own VM, whose setting this script can't see, so there it does nothing.
+INOTIFY_INSTANCES=8192
+if [ "$(uname -s)" = Linux ]; then
+  inotify_now="$(cat /proc/sys/fs/inotify/max_user_instances)"
+  if [ "$inotify_now" -ge "$INOTIFY_INSTANCES" ]; then
+    echo "fs.inotify.max_user_instances is $inotify_now"
+  elif [ "${CI:-}" = "true" ]; then
+    sudo -n sysctl -q -w "fs.inotify.max_user_instances=$INOTIFY_INSTANCES" \
+      || { echo "ERROR: couldn't raise fs.inotify.max_user_instances from $inotify_now to $INOTIFY_INSTANCES" >&2; exit 1; }
+    echo "fs.inotify.max_user_instances raised from $inotify_now to $INOTIFY_INSTANCES"
+  else
+    echo "WARNING: fs.inotify.max_user_instances is $inotify_now, below $INOTIFY_INSTANCES. If a node never becomes" \
+      "Ready and k3s' journal says \"too many open files\", raise it:" \
+      "sudo sysctl -w fs.inotify.max_user_instances=$INOTIFY_INSTANCES" >&2
+  fi
+fi
 ssh-keygen -q -t ed25519 -N '' -C test@ubuntu-server-auto-setup -f "$TEST_TMP/id_ed25519"
 printf 'vault_k8s_token_ci: %s\nvault_k8s_agent_token_ci: %s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" \
   >"$TEST_TMP/tokens.yml"
