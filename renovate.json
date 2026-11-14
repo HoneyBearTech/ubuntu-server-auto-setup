@@ -1,0 +1,224 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "assignees": [
+    "HoneyBearTech"
+  ],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ]
+  },
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**",
+    "tests/!(images)/**"
+  ],
+  "dockerfile": {
+    "managerFilePatterns": [
+      "/^Dockerfile$/",
+      "/^tests\\/images\\/(pve-node|ubuntu-target)\\/Dockerfile$/"
+    ]
+  },
+  "docker-compose": {
+    "managerFilePatterns": [
+      "/^docker-compose\\.ya?ml$/"
+    ]
+  },
+  "github-actions": {
+    "managerFilePatterns": [
+      "/^\\.github\\/workflows\\/.*\\.ya?ml$/"
+    ]
+  },
+  "npm": {
+    "managerFilePatterns": [
+      "/^webui\\/frontend\\/package\\.json$/"
+    ]
+  },
+  "ansible-galaxy": {
+    "managerFilePatterns": [
+      "/^requirements\\.ya?ml$/"
+    ],
+    "rangeStrategy": "widen"
+  },
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/^requirements-(ci|webui)\\.txt$/"
+    ],
+    "lockFileMaintenance": {
+      "enabled": true
+    }
+  },
+  "pip_requirements": {
+    "managerFilePatterns": [
+      "/^requirements(-dev|-fuzz)?\\.txt$/",
+      "/^requirements-fuzz\\.in$/"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Digest-pinned images in docker run commands in workflow shell blocks",
+      "managerFilePatterns": [
+        "/^\\.github\\/workflows\\/(checks|release)\\.yml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>rhysd/actionlint|hadolint/hadolint|ghcr\\.io/google/osv-scanner|aquasec/trivy|ghcr\\.io/gitleaks/gitleaks):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Docker image updates always wait for the maintainer: image tags don't follow semver",
+      "matchDatasources": [
+        "docker"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "requirements-ci.txt and requirements-webui.txt are pip-compile outputs: the pip-compile manager regenerates them whole, so their pins are never edited one at a time",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "requirements-ci.txt",
+        "requirements-webui.txt"
+      ],
+      "enabled": false
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "GitHub Actions minor and patch updates"
+    },
+    {
+      "description": "init, analyze and upload-sarif must share one version: analyze refuses a configuration written by a different init",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "/^github\\/codeql-action(\\/|$)/"
+      ],
+      "groupName": "codeql-action"
+    },
+    {
+      "description": "The web UI's development tools: one pull request for their minor and patch updates",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "frontend-dev"
+    },
+    {
+      "description": "react and react-dom must have the exact same version, and the type packages follow them. After frontend-dev, so the type packages land here: the last matching rule wins",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "react"
+    },
+    {
+      "description": "@types/node describes the Node.js release the app is built and tested with; its major version moves with that by hand, not on its own",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "ansible-core 2.20 supports Python 3.12 to 3.14 on the control node: the image and CI stay below 3.15 until ansible-core moves too",
+      "matchDepNames": [
+        "python"
+      ],
+      "allowedVersions": "/^3\\.(?:\\d|1[0-4])(?:[.-]|$)/"
+    },
+    {
+      "description": "The image runs ansible-core 2.20 (requirements.txt caps it below 2.21); a newer line is tested and moved by hand, together with the Python it supports",
+      "matchPackageNames": [
+        "ansible-core"
+      ],
+      "allowedVersions": "<2.21"
+    },
+    {
+      "description": "Node.js long-term-support releases only (even numbers); odd releases reach end of life within months",
+      "matchDepNames": [
+        "node"
+      ],
+      "matchManagers": [
+        "dockerfile",
+        "github-actions"
+      ],
+      "allowedVersions": "/^v?\\d*[02468](?:[.-]|$)/"
+    },
+    {
+      "description": "The test target image has one stage per Ubuntu LTS release: only the digests move, never the release",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The same for the test target image's other stages (one per Rocky Linux and AlmaLinux release)",
+      "matchFileNames": [
+        "tests/images/ubuntu-target/Dockerfile"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The project's own image, published by the release workflow",
+      "matchPackageNames": [
+        "honeybeartech/ubuntu-server-auto-setup"
+      ],
+      "enabled": false
+    }
+  ]
+}

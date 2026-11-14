@@ -17,6 +17,11 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- Dependency updates are proposed by Renovate (`renovate.json`) instead of Dependabot, with the same limits
+  (Python below 3.15 and ansible-core below 2.21, Node.js long-term-support releases, test images by digest only)
+  and groups. Renovate also watches the Ansible collections and the tool images the checks run. None of its
+  pull requests merge automatically ([docs/dependencies.md](docs/dependencies.md#tracking-dependencies)).
+
 - **Fleet updates, Kubernetes members:** before rebooting a server that holds its cluster's API address
   (`k8s_api_vip`), the updates playbook hands the address to another server and waits until the API answers
   there, as `make kubernetes-upgrade` does, instead of leaving the API unanswered for a few seconds during the

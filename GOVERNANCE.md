@@ -31,10 +31,9 @@ reasoning, and may change course. Because the code is MIT-licensed, you can alwa
 | Contributor | Anyone who opens an issue or pull request | Follow [CONTRIBUTING.md](CONTRIBUTING.md) (coding standards, testing, sign-off) and the [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately. |
 | Security reporter | Anyone who reports a vulnerability | Report privately and allow time for a fix before disclosing, as described in [SECURITY.md](SECURITY.md). |
 
-Automated tools also take part: Dependabot proposes updates to the Python packages, the GitHub Actions and
-the test images. Its patch and minor updates (except Docker base images) are approved by a workflow and merge
-automatically once every required check passes; major updates and base-image updates wait for the
-maintainer. CI, CodeQL, secret scanning and OpenSSF
+Automated tools also take part: Renovate proposes updates to the Python and npm packages, the Ansible
+collections, the GitHub Actions and the base images. None of its pull requests merge automatically: each
+waits for the maintainer. CI, CodeQL, secret scanning and OpenSSF
 Scorecard check every change.
 
 ## Access to sensitive resources
@@ -49,7 +48,7 @@ Who can change the code, releases and project settings, as of the date of this f
 | Signing version tags | the maintainer | personal SSH key |
 | The [OpenSSF Best Practices entry](https://www.bestpractices.dev/projects/15740) | the maintainer | GitHub sign-in |
 | Security advisories and private vulnerability reports | the maintainer | GitHub |
-| Automated changes | Dependabot (pull requests only). Its patch and minor updates are approved by `.github/workflows/dependabot-auto-merge.yml`, which runs only for Dependabot's own pull requests, and merge only after every required check passes | GitHub |
+| Automated changes | Renovate (pull requests only, configured in `renovate.json`); the maintainer reviews and merges each one. `.github/workflows/dependabot-auto-merge.yml` acts only on pull requests Dependabot itself opens, and does nothing for Renovate's | GitHub |
 
 There are no other collaborators. Workflows use the per-job `GITHUB_TOKEN`, read-only unless a job asks
 for more. The only stored secrets are the Docker Hub user name and access token, held in the `release`

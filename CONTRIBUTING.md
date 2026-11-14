@@ -160,7 +160,7 @@ A check on every pull request fails if a commit lacks the sign-off. To fix it, a
   the required CI checks and has one approval; pushing to it dismisses earlier approvals. Pull requests are
   squash-merged. While the project has a single maintainer, the maintainer's own pull requests are merged
   with the administrator bypass, which works only through a pull request (never a direct push), after the
-  same checks pass. Dependabot's patch and minor updates are approved by a workflow.
+  same checks pass. Renovate's dependency updates are not merged automatically: each waits for the maintainer.
 - Keep each pull request focused on one change, and describe what it does and why.
 - Update `README.md`, `docs/` and the role's `defaults/main.yml` when you change a variable or user-visible
   behaviour (and the web UI's field in `webui/usas_web/schema.py` if it has one), and add a line to
