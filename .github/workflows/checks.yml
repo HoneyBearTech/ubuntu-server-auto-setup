@@ -239,6 +239,15 @@ jobs:
       - name: Load the kernel modules k3s needs
         run: sudo modprobe -a br_netfilter overlay
 
+      # The four nodes' kubelets, containerd and systemd all take inotify instances from the runner's one
+      # kernel. The ubuntu-26.04 runner image keeps the kernel default of 128 per user, too few for four
+      # nodes: an agent's kubelet then fails with "inotify_init: too many open files" and never registers.
+      # A real server is a VM with its own kernel, so the k3s role leaves these alone.
+      - name: Raise the runner's inotify limits
+        run: |
+          sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches
+          sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+
       # Four containers (three servers and an agent) prepared by the baseline, then playbooks/kubernetes.yml: the
       # refusals, the etcd port check, the cluster through kube-vip's VIP, the tokens in no log, a second run that
       # changes nothing; fails below 80% task coverage of the k3s role.
