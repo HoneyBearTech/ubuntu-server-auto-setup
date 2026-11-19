@@ -4,7 +4,9 @@
 # of each of its update groups, updates_node_max_parallel that may reboot on its Proxmox node, one server of a
 # Kubernetes cluster and never a server with that cluster's agents). The waves are set
 # on every server (run_once); in an apply the servers join usas_updates_waves in wave order, and the apply play
-# takes its serial from the waves' sizes. Nothing here connects to a server.
+# takes its serial from the waves' sizes. Nothing here connects to a server. Inventory order comes from
+# groups['all']: this play's own host list (usas_updates_ready, from group_by) is in the order the servers'
+# group_by results came back, which can change from run to run.
 - name: Note what the waves need to know about the server
   ansible.builtin.set_fact:
     updates_wave_host:
@@ -17,7 +19,7 @@
 - name: Plan the waves
   ansible.builtin.set_fact:
     usas_update_waves: >-
-      {{ ansible_play_hosts | map('extract', hostvars, 'updates_wave_host') | list
+      {{ groups['all'] | select('in', ansible_play_hosts) | map('extract', hostvars, 'updates_wave_host') | list
       | usas_update_plan(updates_serial, updates_group_max_parallel, updates_node_max_parallel) }}
   run_once: true
 

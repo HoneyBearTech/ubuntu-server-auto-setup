@@ -14,6 +14,9 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   `http://mirror.lan/{{ github_user }}.keys`) is filled in again during runs; it was passed to the roles as
   literal text, and the authorized-keys download failed. Any other template text in the field is still kept as
   data.
+- **Updates:** servers are planned into waves in inventory order again. The plan used the order in which the
+  servers finished their checks, which can change from run to run, so a Kubernetes agent could be updated in
+  the wave before its server.
 
 ### Changed
 
