@@ -46,9 +46,9 @@ updates:
       codeql-action:
         patterns: ["github/codeql-action*"]
 
-  # Base images of the web UI image (Dockerfile) and of the integration-test containers, pinned by digest.
+  # Base images of the web UI image (Dockerfile) and of the Proxmox test container, pinned by digest.
   - package-ecosystem: "docker"
-    directories: ["/", "/tests/images/pve-node", "/tests/images/ubuntu-target"]
+    directories: ["/", "/tests/images/pve-node"]
     schedule:
       interval: "weekly"
     assignees: ["HoneyBearTech"]
@@ -62,6 +62,17 @@ updates:
       # never LTS and reach end of life within months (25 did in June 2026).
       - dependency-name: "node"
         versions: [">= 25, < 26", ">= 27, < 28", ">= 29, < 30"]
+
+  # Base images of the integration-test target container, pinned by digest. Checked daily: quay.io moves the
+  # CentOS Stream tags about once a week and deletes the digest a tag left within days, after which the image
+  # no longer builds, so their update pull requests need merging within days of opening. Like every Docker
+  # base-image update, they wait for the maintainer.
+  - package-ecosystem: "docker"
+    directory: "/tests/images/ubuntu-target"
+    schedule:
+      interval: "daily"
+    assignees: ["HoneyBearTech"]
+    ignore:
       # The test target image has one stage per Ubuntu LTS release it tests (22.04, 24.04, 26.04): only their
       # digests may move, never their release (a new LTS gets a stage of its own).
       - dependency-name: "ubuntu"

@@ -83,7 +83,8 @@ stay in the image's build stage.
 
 - **Dependabot** proposes updates weekly for `requirements*.txt`, the web UI app's npm packages (the
   development tools' minor and patch updates grouped in one pull request), the GitHub Actions and the
-  Docker base images (the `Dockerfile`, including the Node build stage, and the test images),
+  Docker base images (the `Dockerfile`, including the Node build stage, and the test images; the test
+  target image daily, because quay.io deletes the CentOS Stream digest a tag left within days of moving it),
   and security updates as soon as an advisory appears. Patch and minor updates are approved by
   `.github/workflows/dependabot-auto-merge.yml` and merge automatically once every required check passes,
   including the integration tests that run every playbook. Major updates, updates without a version
