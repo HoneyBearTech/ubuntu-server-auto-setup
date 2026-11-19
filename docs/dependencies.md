@@ -88,7 +88,8 @@ stay in the image's build stage.
   and security updates as soon as an advisory appears. Patch and minor updates are approved by
   `.github/workflows/dependabot-auto-merge.yml` and merge automatically once every required check passes,
   including the integration tests that run every playbook. Major updates, updates without a version
-  level, and every Docker base-image update wait for the maintainer, who also tries runtime-package majors against a
+  level, and every Docker base-image update wait for the maintainer (except the test target image's CentOS
+  Stream digests, which merge on their own like patch updates, since quay.io deletes the old ones within days), who also tries runtime-package majors against a
   disposable VM.
 - **Ansible collections** have no Dependabot support. The maintainer checks the collections' changelogs
   and security advisories at least monthly and before every release, and widens the ranges in

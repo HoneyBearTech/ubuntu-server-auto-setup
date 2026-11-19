@@ -35,8 +35,9 @@ dependency updates can merge.
   can't start. Only CI needs it: a real server is a VM with its own kernel.
 - Don't pin the runner back to ubuntu-24.04: the servers the project targets run 26.04, and the old image will
   be retired.
-- Considered letting the CentOS Stream digest updates merge on their own once the checks pass, like patch
-  updates. Not done here: it widens what merges without the maintainer's review, so it's the maintainer's call.
-  Until then, those update pull requests need merging within a few days.
+- The CentOS Stream digest updates of the test target image merge on their own once every required check
+  passes, like patch updates (the maintainer's decision, in a follow-up pull request). They are the only Docker
+  updates that do: the image is test-only, only the digest moves and never the tag, and the integration tests
+  still build and run it before the merge.
 - The one failed assertion in the AlmaLinux 10 updates job on one pull request (the update wave numbers)
   passed everywhere else; treated as flaky unless it comes back.

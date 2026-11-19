@@ -65,8 +65,8 @@ updates:
 
   # Base images of the integration-test target container, pinned by digest. Checked daily: quay.io moves the
   # CentOS Stream tags about once a week and deletes the digest a tag left within days, after which the image
-  # no longer builds, so their update pull requests need merging within days of opening. Like every Docker
-  # base-image update, they wait for the maintainer.
+  # no longer builds. Those digest updates merge on their own once every required check passes
+  # (.github/workflows/dependabot-auto-merge.yml); the other images' updates wait for the maintainer.
   - package-ecosystem: "docker"
     directory: "/tests/images/ubuntu-target"
     schedule:
