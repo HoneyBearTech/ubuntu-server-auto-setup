@@ -158,7 +158,8 @@ jobs:
   baseline:
     name: Integration tests (baseline, ${{ matrix.os }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 like the updates jobs: a run takes 20 to 25 minutes, and on a slow day for the runners 30 cancelled it.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
