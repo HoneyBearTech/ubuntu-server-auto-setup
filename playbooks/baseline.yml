@@ -4,6 +4,13 @@
   hosts: servers:ubuntu_servers:usas_vms
   become: true
   gather_facts: false
+  # Two of dnf-plugins-core's plugins, copr and debuginfo-install, use dnf.cli without importing it. Loaded
+  # before a plugin that does (dnf loads them in directory order), they fail to import, yet dnf still runs
+  # their class, and the next transaction that removes or upgrades a package fails with "... is a built-in
+  # class". The dnf module (and package, on the RHEL family) skips them; dnf on the command line is unchanged.
+  module_defaults:
+    ansible.builtin.dnf:
+      disable_plugin: [copr, debuginfo-install]
   pre_tasks:
     - name: Note old names the inventory still uses
       ansible.builtin.import_tasks: tasks/deprecations.yml
