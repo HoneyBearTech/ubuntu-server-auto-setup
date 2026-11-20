@@ -24,11 +24,14 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
-- **Dependency updates:** Renovate (`renovate.json`) proposes them in place of Dependabot, with the same
+- **Dependency updates:** Renovate (`renovate.json`) proposes them in place of Dependabot, moving the pins in
+  `requirements-ci.txt` and `requirements-webui.txt` (never the hand-set floors in `requirements.txt`,
+  `requirements-dev.txt` or the `.in` files), with the same
   groups and limits (Python below 3.15 and ansible-core below 2.21, Node.js long-term-support releases only,
   the test images by digest only) and also watches the Ansible collections and the tool images the checks run.
   Patch and minor updates of the Python and npm packages and the GitHub Actions merge by themselves after a
-  3-day wait once every required check passes (security fixes skip the wait), and so do the CentOS Stream
+  3-day wait once every required check passes (security fixes skip the wait; the wait covers the updated
+  package, not the other pins moved in the same lock-file update), and so do the CentOS Stream
   digests of the test image, with no wait; major updates and every other image update wait for the maintainer
   ([docs/dependencies.md](docs/dependencies.md#tracking-dependencies)). Dependabot's alerts stay on; its update
   pull requests and `.github/dependabot.yml` are gone.

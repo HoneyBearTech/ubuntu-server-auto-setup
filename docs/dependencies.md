@@ -90,8 +90,8 @@ stay in the image's build stage.
 
   | Files | Renovate manager | Notes |
   | --- | --- | --- |
-  | `requirements-ci.txt`, `requirements-webui.txt` (compiled from `requirements-ci.in` and `requirements-webui.in`, which include `requirements.txt` and `requirements-dev.txt`) | pip-compile | Regenerated whole with the command in each file's header on every update, so the pins and hashes stay consistent; never edited one pin at a time. Renovate's periodic refresh of the whole lock file is off |
-  | `requirements.txt`, `requirements-dev.txt`, `requirements-fuzz.in`, `requirements-fuzz.txt` | pip_requirements | A lower bound moves up to the new release; ansible-core stays below 2.21 |
+  | `requirements-ci.txt`, `requirements-webui.txt` (compiled from `requirements-ci.in` and `requirements-webui.in`, which include `requirements.txt` and `requirements-dev.txt`) | pip-compile | Renovate moves a pin in these two lock files to the new release and runs `pip-compile` with `--upgrade-package=<name>==<version>`, so hashes and the other pins stay consistent. It never edits the `.in` files, `requirements.txt` or `requirements-dev.txt`: their lower bounds are security floors set by hand ([`tests/check_floors.py`](../tests/check_floors.py)), and a fix for a control-node or development package arrives as a lock-file update. ansible-core stays below 2.21. Renovate's periodic refresh of the whole lock file is off |
+  | `requirements-fuzz.txt` | pip_requirements | The hash-pinned `atheris`. Renovate may propose a new pin, but the hashes must be rewritten, so the maintainer reviews it; `requirements-fuzz.in`'s floor moves by hand |
   | `webui/frontend/package.json` and its lock file | npm | `react`, `react-dom` and their type packages move together; the development tools' minor and patch updates come as one pull request; `@types/node` majors are left to the maintainer |
   | `.github/workflows/*.yml` | GitHub Actions | Minor and patch updates of the actions grouped; the three `github/codeql-action` actions always move together; `python-version` and `node-version` of the jobs follow the same limits as the images |
   | The digest-pinned images in `docker run` commands in `checks.yml` and `release.yml` (actionlint, hadolint, osv-scanner, Trivy, gitleaks) | regex custom manager | Tag and digest move together |
@@ -102,15 +102,17 @@ stay in the image's build stage.
 
   **What merges by itself.** Patch and minor updates of the Python and npm packages and the GitHub Actions
   merge (squash) once every required check passes, including the integration tests that run every playbook,
-  after a 3-day wait from the release, so a bad release has time to be pulled. A security fix skips the wait
-  and merges the same way only if it is a patch or minor update. The CentOS Stream digests of the test target
+  after a 3-day wait from the release of the updated package, so a bad release has time to be pulled. The
+  wait covers that package only: other pins that `pip-compile` or `npm` move in the same lock-file update are
+  not age-checked. A security fix skips the wait and merges the same way, as Dependabot's did, only if it is a
+  patch or minor update. Related packages (a monorepo's) arrive in one pull request. The CentOS Stream digests of the test target
   image (`tests/images/ubuntu-target/Dockerfile`) merge the same way with no wait, because quay.io deletes the
   old digest within days and the integration tests break on CentOS Stream until the new one is in.
 
   **What waits for the maintainer.** Major updates; every other image update (all the other images, their
   digests and tags, including the web UI image's Python and Node.js base images and the tool images in the
   workflows); the `python-version` and `node-version` of the CI jobs; and anything Renovate can't classify as
-  a patch or minor update. The maintainer also tries runtime-package majors against a disposable VM.
+  a patch or minor update, and a new `atheris` pin. The maintainer also tries runtime-package majors against a disposable VM.
 - **Ansible collections**: Renovate's pull request for a new major version is only a prompt. The maintainer
   checks the collections' changelogs and security advisories at least monthly and before every release, and
   widens the ranges in `requirements.yml` when a new major version has been tested.

@@ -31,9 +31,10 @@ reasoning, and may change course. Because the code is MIT-licensed, you can alwa
 | Contributor | Anyone who opens an issue or pull request | Follow [CONTRIBUTING.md](CONTRIBUTING.md) (coding standards, testing, sign-off) and the [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately. |
 | Security reporter | Anyone who reports a vulnerability | Report privately and allow time for a fix before disclosing, as described in [SECURITY.md](SECURITY.md). |
 
-Automated tools also take part: Renovate proposes updates to the Python and npm packages, the Ansible
-collections, the GitHub Actions and the base images. Its patch and minor updates of the Python and npm packages
-and the GitHub Actions merge by themselves after a 3-day wait, and the CentOS Stream digests of the test image
+Automated tools also take part: Renovate proposes updates to the pins in the Python lock files, the npm
+packages, the Ansible collections, the GitHub Actions and the base images (the hand-set floors in
+`requirements.txt` and `requirements-dev.txt` are never edited by it). Its patch and minor updates of the Python and npm packages
+and the GitHub Actions merge by themselves after a 3-day wait (security fixes skip it), and the CentOS Stream digests of the test image
 with no wait, once every required check passes; major updates, every other image update and anything Renovate
 can't classify wait for the maintainer. CI, CodeQL, secret scanning and OpenSSF
 Scorecard check every change.
