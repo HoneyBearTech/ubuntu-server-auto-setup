@@ -24,6 +24,19 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ### Changed
 
+- **Dependency updates:** Renovate (`renovate.json`) proposes them in place of Dependabot, moving the pins in
+  `requirements-ci.txt` and `requirements-webui.txt` (never the hand-set floors in `requirements.txt`,
+  `requirements-dev.txt` or the `.in` files), with the same
+  groups and limits (Python below 3.15 and ansible-core below 2.21, Node.js long-term-support releases only,
+  the test images by digest only) and also watches the Ansible collections and the tool images the checks run.
+  Patch and minor updates of the Python and npm packages and the GitHub Actions merge by themselves after a
+  3-day wait once every required check passes (security fixes skip the wait; the wait covers the updated
+  package only: an automatic update may also move other pins its new version requires, sometimes to a new
+  major, and every required check still gates it), and so do the CentOS Stream
+  digests of the test image, with no wait; major updates and every other image update wait for the maintainer
+  ([docs/dependencies.md](docs/dependencies.md#tracking-dependencies)). Dependabot's alerts stay on; its update
+  pull requests and `.github/dependabot.yml` are gone.
+
 - **Fleet updates, Kubernetes members:** before rebooting a server that holds its cluster's API address
   (`k8s_api_vip`), the updates playbook hands the address to another server and waits until the API answers
   there, as `make kubernetes-upgrade` does, instead of leaving the API unanswered for a few seconds during the

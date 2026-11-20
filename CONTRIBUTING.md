@@ -156,11 +156,12 @@ A check on every pull request fails if a commit lacks the sign-off. To fix it, a
 
 ## Pull requests
 
-- `main` is protected: changes land only through a pull request that is up to date with `main`, has passed
-  the required CI checks and has one approval; pushing to it dismisses earlier approvals. Pull requests are
-  squash-merged. While the project has a single maintainer, the maintainer's own pull requests are merged
-  with the administrator bypass, which works only through a pull request (never a direct push), after the
-  same checks pass. Dependabot's patch and minor updates are approved by a workflow.
+- `main` is protected: changes land only through a pull request that is up to date with `main` and has
+  passed every required CI check; no approving review is required. Pull requests are squash-merged. The
+  maintainer's own pull requests are merged after the same checks pass. Renovate's patch and minor updates of
+  the packages and Actions, and the CentOS Stream digests of the test image, merge on their own once every
+  required check passes (after a 3-day wait, except the digests); the other updates wait for the maintainer
+  ([docs/dependencies.md](docs/dependencies.md#tracking-dependencies)).
 - Keep each pull request focused on one change, and describe what it does and why.
 - Update `README.md`, `docs/` and the role's `defaults/main.yml` when you change a variable or user-visible
   behaviour (and the web UI's field in `webui/usas_web/schema.py` if it has one), and add a line to

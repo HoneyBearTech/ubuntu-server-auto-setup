@@ -1,7 +1,7 @@
 # The web UI image: ansible-core, the collections, the playbooks and roles, and the web UI, running as a
 # non-root user with everything it writes in /data. Build it with `docker build -t usas .`; run it as in the
 # README: docker run -d -p 127.0.0.1:8080:8080 -v usas-data:/data honeybeartech/ubuntu-server-auto-setup
-# Base images are pinned by digest; Dependabot keeps them current (.github/dependabot.yml).
+# Base images are pinned by digest; Renovate keeps them current (renovate.json).
 
 # The web UI's app (webui/frontend), built into static files. Only those files reach the runtime image: no
 # Node, npm or node_modules. npm ci installs exactly the lock file's versions and checks each package's
