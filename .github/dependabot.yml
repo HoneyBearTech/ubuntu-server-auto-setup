@@ -77,3 +77,11 @@ updates:
       # digests may move, never their release (a new LTS gets a stage of its own).
       - dependency-name: "ubuntu"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Likewise one stage per CentOS Stream, Rocky Linux and AlmaLinux release (9 and 10): moving a stage to
+      # another release, such as rocky-9 to rockylinux:10, would drop that release from the tests.
+      - dependency-name: "centos/centos"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "rockylinux/rockylinux"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "almalinux"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
