@@ -31,7 +31,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
   the test images by digest only) and also watches the Ansible collections and the tool images the checks run.
   Patch and minor updates of the Python and npm packages and the GitHub Actions merge by themselves after a
   3-day wait once every required check passes (security fixes skip the wait; the wait covers the updated
-  package, not the other pins moved in the same lock-file update), and so do the CentOS Stream
+  package only: an automatic update may also move other pins its new version requires, sometimes to a new
+  major, and every required check still gates it), and so do the CentOS Stream
   digests of the test image, with no wait; major updates and every other image update wait for the maintainer
   ([docs/dependencies.md](docs/dependencies.md#tracking-dependencies)). Dependabot's alerts stay on; its update
   pull requests and `.github/dependabot.yml` are gone.

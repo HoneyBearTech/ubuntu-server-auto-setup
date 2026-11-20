@@ -103,8 +103,11 @@ stay in the image's build stage.
   **What merges by itself.** Patch and minor updates of the Python and npm packages and the GitHub Actions
   merge (squash) once every required check passes, including the integration tests that run every playbook,
   after a 3-day wait from the release of the updated package, so a bad release has time to be pulled. The
-  wait covers that package only: other pins that `pip-compile` or `npm` move in the same lock-file update are
-  not age-checked. A security fix skips the wait and merges the same way, as Dependabot's did, only if it is a
+  wait covers that package only. Major updates Renovate proposes wait for the maintainer, but an automatic
+  patch or minor update may bring along other pins its new version requires, sometimes a new major of a
+  dependency: `pip-compile` and `npm` move them in the same lock-file update, with no age or update-type check
+  of their own (Dependabot's auto-merge did the same). Every required check, including the integration tests
+  and the image smoke test, still gates the merge. A security fix skips the wait and merges the same way, as Dependabot's did, only if it is a
   patch or minor update. Related packages (a monorepo's) arrive in one pull request. The CentOS Stream digests of the test target
   image (`tests/images/ubuntu-target/Dockerfile`) merge the same way with no wait, because quay.io deletes the
   old digest within days and the integration tests break on CentOS Stream until the new one is in.

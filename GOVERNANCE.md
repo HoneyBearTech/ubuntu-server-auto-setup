@@ -35,7 +35,8 @@ Automated tools also take part: Renovate proposes updates to the pins in the Pyt
 packages, the Ansible collections, the GitHub Actions and the base images (the hand-set floors in
 `requirements.txt` and `requirements-dev.txt` are never edited by it). Its patch and minor updates of the Python and npm packages
 and the GitHub Actions merge by themselves after a 3-day wait (security fixes skip it), and the CentOS Stream digests of the test image
-with no wait, once every required check passes; major updates, every other image update and anything Renovate
+with no wait, once every required check passes (an automatic update may bring along other pins its new version requires,
+sometimes a new major); major updates Renovate proposes, every other image update and anything Renovate
 can't classify wait for the maintainer. CI, CodeQL, secret scanning and OpenSSF
 Scorecard check every change.
 
