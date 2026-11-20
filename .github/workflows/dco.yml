@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           unsigned=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '
             .[]
-            | select((.author.login // "") | IN("dependabot[bot]", "renovate[bot]") | not)
+            | select((.author.login // "") | IN("renovate[bot]") | not)
             | select((.parents | length) < 2)
             | select(.commit.message | split("\n") | any(test("^Signed-off-by: [^<>]+ <[^<>]+>\\s*$")) | not)
             | "\(.sha[0:12]) \(.commit.message | split("\n")[0])"')
