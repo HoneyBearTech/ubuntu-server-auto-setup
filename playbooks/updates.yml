@@ -16,6 +16,14 @@
   become: true
   ignore_unreachable: true
   pre_tasks:
+    # The waves are planned in this order (roles/updates/tasks/plan.yml): the groups above in turn, each in the
+    # order the inventory lists it.
+    - name: Note the order the servers come in
+      ansible.builtin.set_fact:
+        usas_updates_order: "{{ ansible_play_hosts_all }}"
+      run_once: true
+      tags: [always]
+
     - name: Note old names the inventory still uses
       ansible.builtin.import_tasks: tasks/deprecations.yml
 
@@ -84,6 +92,10 @@
   gather_facts: false
   become: true
   ignore_unreachable: true
+  # As in playbooks/baseline.yml: dnf's copr and debuginfo-install plugins can break a transaction.
+  module_defaults:
+    ansible.builtin.dnf:
+      disable_plugin: [copr, debuginfo-install]
   tasks:
     - name: Update the server
       ansible.builtin.include_role:
