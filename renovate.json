@@ -60,17 +60,18 @@
     "managerFilePatterns": [
       "/^requirements-(ci|webui)\\.txt$/"
     ],
-    "rangeStrategy": "bump",
+    "rangeStrategy": "update-lockfile",
     "lockFileMaintenance": {
       "enabled": false
     }
   },
   "pip_requirements": {
     "managerFilePatterns": [
-      "/^requirements(-dev|-fuzz)?\\.txt$/",
-      "/^requirements-fuzz\\.in$/"
+      "/^requirements-fuzz\\.txt$/"
     ],
-    "rangeStrategy": "bump"
+    "includePaths": [
+      "requirements-fuzz.txt"
+    ]
   },
   "customManagers": [
     {
@@ -87,17 +88,6 @@
     }
   ],
   "packageRules": [
-    {
-      "description": "requirements-ci.txt and requirements-webui.txt are pip-compile outputs: the pip-compile manager regenerates them whole, so their pins are never edited one at a time",
-      "matchManagers": [
-        "pip_requirements"
-      ],
-      "matchFileNames": [
-        "requirements-ci.txt",
-        "requirements-webui.txt"
-      ],
-      "enabled": false
-    },
     {
       "matchManagers": [
         "github-actions"
@@ -282,6 +272,23 @@
       ],
       "automerge": true,
       "minimumReleaseAge": null
+    },
+    {
+      "description": "requirements.txt and requirements-dev.txt are included (-r) by the two pip-compile inputs, so pip-compile sees their packages as indirect dependencies of the lock files, which Renovate turns off by default. Turn them on: every pin in requirements-ci.txt and requirements-webui.txt may move (the .in files and the hand-set floors never change)",
+      "matchManagers": [
+        "pip-compile"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "enabled": true
+    },
+    {
+      "description": "requirements-fuzz.txt pins atheris by hash, and a pin edit there needs its hashes rewritten with hashin, which would also add hashes for files the pin leaves out on purpose (only the Linux x86-64 wheels): so the maintainer reviews it",
+      "matchFileNames": [
+        "requirements-fuzz.txt"
+      ],
+      "automerge": false
     }
   ],
   "platformCommit": "enabled",
