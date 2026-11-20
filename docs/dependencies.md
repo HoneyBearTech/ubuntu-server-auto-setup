@@ -42,7 +42,7 @@ copied into the repository ("vendored").
 | Chromium for the browser tests (Playwright's headless build) | the version of `@playwright/test` in `package-lock.json` | that Playwright release's browser build, downloaded over HTTPS from Playwright's servers (not hash-pinned by this repository); CI caches it by Playwright version | `npx playwright install --with-deps --only-shell chromium` (CI); `npx playwright install chromium` locally |
 | Integration-test base images (Debian, Ubuntu 26.04) | `tests/images/*/Dockerfile` | image digests (`@sha256:…`) | Docker, in `make test`; the Kubernetes tests' Git server is a stage of the Ubuntu target image (`git-server`), with Git and Python from Ubuntu's archive |
 | Operating system images (Ubuntu installer ISOs and cloud images, Debian, CentOS Stream, Rocky Linux and AlmaLinux cloud images) | `roles/os_catalog/vars/catalog.yml` (the OS catalog), built by `tools/update_os_catalog.py` | exact URL and checksum per image; the vendors' signatures checked against pinned fingerprints when the catalog is built (`tools/os-catalog-keys/`) | downloaded by the Proxmox node during a run; the weekly OS catalog workflow reports new builds and gone pins |
-| k3s, kube-vip and kube-vip's cloud provider, on Kubernetes members | `roles/k3s/vars/catalog.yml` (the k3s catalog), built by `tools/update_k3s_catalog.py` | k3s' binary by exact URL and SHA-256 per architecture, from k3s' own `sha256sum-<arch>.txt`; the two images by digest (`@sha256:…`). Neither project signs what it publishes, so the pins rest on HTTPS and review; the weekly OS catalog workflow checks them again and opens an issue when a pin changes upstream or a newer release is out (Dependabot can't read the catalog) | the `k3s` role (`get_url` with the checksum; containerd, from k3s' own manifests directory) |
+| k3s, kube-vip and kube-vip's cloud provider, on Kubernetes members | `roles/k3s/vars/catalog.yml` (the k3s catalog), built by `tools/update_k3s_catalog.py` | k3s' binary by exact URL and SHA-256 per architecture, from k3s' own `sha256sum-<arch>.txt`; the two images by digest (`@sha256:…`). Neither project signs what it publishes, so the pins rest on HTTPS and review; the weekly OS catalog workflow checks them again and opens an issue when a pin changes upstream or a newer release is out (Renovate can't read the catalog) | the `k3s` role (`get_url` with the checksum; containerd, from k3s' own manifests directory) |
 | Helm and Argo CD's chart (`argo-cd`), on a cluster's first server with `k8s_bootstrap_argocd` | `roles/k3s/vars/catalog.yml` (`k3s_helm`, `k3s_argocd_chart`), built by `tools/update_k3s_catalog.py` | Helm's archive per architecture and the chart by exact URL and SHA-256, each hash taken from a file signed upstream (Helm's maintainers' keys, Argo's chart repository key, in `tools/k3s-catalog-keys/`, fingerprints in the tool) and checked again weekly; Argo CD's images by the tags the chart names | the `k3s` role (`get_url` with the checksum; Helm installs the chart from the checked file) |
 | The images k3s and Argo CD pull themselves: k3s' system components (CoreDNS, Traefik, metrics-server, local-path-provisioner, the pause image; `docker.io/rancher/...`) and Argo CD's (`quay.io`, `ghcr.io`, `ecr-public.aws.com`) | the pinned k3s release (its `k3s-images.txt`) and the pinned Argo CD chart | the tags that release and chart name, not digests: the release and the chart are pinned by SHA-256, the images they name by tag only, and none of them is signed upstream | containerd on the members, from k3s' own manifests and the chart |
 | k3s' SELinux policy (`k3s-selinux`), on RHEL-family Kubernetes members | Rancher's stable repository (`rpm.rancher.io`), set up by the `kubernetes_node` role | Rancher's signing key, pinned by fingerprint; `gpgcheck=1` (the repository's metadata isn't signed) | dnf |
@@ -81,30 +81,52 @@ stay in the image's build stage.
 
 ## Tracking dependencies
 
-- **Dependabot** proposes updates weekly for `requirements*.txt`, the web UI app's npm packages (the
-  development tools' minor and patch updates grouped in one pull request), the GitHub Actions and the
-  Docker base images (the `Dockerfile`, including the Node build stage, and the test images; the test
-  target image daily, because quay.io deletes the CentOS Stream digest a tag left within days of moving it),
-  and security updates as soon as an advisory appears. Patch and minor updates are approved by
-  `.github/workflows/dependabot-auto-merge.yml` and merge automatically once every required check passes,
-  including the integration tests that run every playbook. Major updates, updates without a version
-  level, and every Docker base-image update wait for the maintainer (except the test target image's CentOS
-  Stream digests, which merge on their own like patch updates, since quay.io deletes the old ones within days), who also tries runtime-package majors against a
-  disposable VM.
-- **Ansible collections** have no Dependabot support. The maintainer checks the collections' changelogs
-  and security advisories at least monthly and before every release, and widens the ranges in
-  `requirements.yml` when a new major version has been tested.
+- **Renovate** ([`renovate.json`](../renovate.json)) proposes the updates, in pull requests labelled
+  `dependencies`, weekly (before 6am on Monday, `America/Chicago`), and security fixes as soon as an advisory
+  appears (labelled `security`). The test target image is checked daily, because quay.io deletes the CentOS
+  Stream digest a tag left within days of moving it. Renovate's pull requests are branches of this repository,
+  so their checks run with the repository's secrets, including pull requests that update the GitHub Actions
+  in the workflow files; every required check still has to pass before anything merges.
+
+  | Files | Renovate manager | Notes |
+  | --- | --- | --- |
+  | `requirements-ci.txt`, `requirements-webui.txt` (compiled from `requirements-ci.in` and `requirements-webui.in`, which include `requirements.txt` and `requirements-dev.txt`) | pip-compile | Regenerated whole with the command in each file's header on every update, so the pins and hashes stay consistent; never edited one pin at a time. Renovate's periodic refresh of the whole lock file is off |
+  | `requirements.txt`, `requirements-dev.txt`, `requirements-fuzz.in`, `requirements-fuzz.txt` | pip_requirements | A lower bound moves up to the new release; ansible-core stays below 2.21 |
+  | `webui/frontend/package.json` and its lock file | npm | `react`, `react-dom` and their type packages move together; the development tools' minor and patch updates come as one pull request; `@types/node` majors are left to the maintainer |
+  | `.github/workflows/*.yml` | GitHub Actions | Minor and patch updates of the actions grouped; the three `github/codeql-action` actions always move together; `python-version` and `node-version` of the jobs follow the same limits as the images |
+  | The digest-pinned images in `docker run` commands in `checks.yml` and `release.yml` (actionlint, hadolint, osv-scanner, Trivy, gitleaks) | regex custom manager | Tag and digest move together |
+  | `Dockerfile`, `tests/images/pve-node/Dockerfile`, `tests/images/ubuntu-target/Dockerfile` | Dockerfile | Python stays below 3.15 (ansible-core 2.20 supports 3.12 to 3.14), Node.js on long-term-support releases (even numbers); the test target image's stages keep their release and only their digests move |
+  | `requirements.yml` | Ansible Galaxy | Proposes widening a range when a collection has a new major version |
+
+  The rest of `tests/` is not scanned, and the project's own image in `docker-compose.yml` is not updated.
+
+  **What merges by itself.** Patch and minor updates of the Python and npm packages and the GitHub Actions
+  merge (squash) once every required check passes, including the integration tests that run every playbook,
+  after a 3-day wait from the release, so a bad release has time to be pulled. A security fix skips the wait
+  and merges the same way only if it is a patch or minor update. The CentOS Stream digests of the test target
+  image (`tests/images/ubuntu-target/Dockerfile`) merge the same way with no wait, because quay.io deletes the
+  old digest within days and the integration tests break on CentOS Stream until the new one is in.
+
+  **What waits for the maintainer.** Major updates; every other image update (all the other images, their
+  digests and tags, including the web UI image's Python and Node.js base images and the tool images in the
+  workflows); the `python-version` and `node-version` of the CI jobs; and anything Renovate can't classify as
+  a patch or minor update. The maintainer also tries runtime-package majors against a disposable VM.
+- **Ansible collections**: Renovate's pull request for a new major version is only a prompt. The maintainer
+  checks the collections' changelogs and security advisories at least monthly and before every release, and
+  widens the ranges in `requirements.yml` when a new major version has been tested.
 - **Every pull request** runs **dependency review**, which fails when the change adds or updates a
   dependency with a known vulnerability of moderate or higher severity, or with a license outside the
   allowlist.
 - **GitHub's dependency graph** and Dependabot security alerts watch the default branch between changes.
+  Dependabot's alerts stay on (Renovate reads them for its security fixes); its update pull requests and
+  security updates are off.
 - **osv-scanner** checks every requirements file and the app's `package-lock.json` on every pull request
   and push, including the lower bounds in `requirements.txt` and what they pull in (the
   `Vulnerability scan (OSV)` check), and
   `tests/check_floors.py` checks every lower bound itself against OSV in the same check. The lower bounds are
   kept above versions with known vulnerabilities, so `make deps` can't keep an affected copy. The npm
   packages have no ranges to check: every version is exact.
-- **The k3s catalog** (k3s, kube-vip, its cloud provider, Helm and Argo CD's chart) has no Dependabot support
+- **The k3s catalog** (k3s, kube-vip, its cloud provider, Helm and Argo CD's chart) has no Renovate support
   either. The weekly "OS catalog" workflow runs `tools/update_k3s_catalog.py --check` and opens or updates one
   issue when a pin no longer matches upstream, a download is gone, or newer releases are out (k3s' newest
   patch of its two newest minor lines among them); the maintainer adds it with `make k3s-catalog` in a pull request. A new pin
