@@ -21,7 +21,7 @@ RUN npm run build \
  && cp node_modules/@fontsource/atkinson-hyperlegible-next/LICENSE /build/licenses/atkinson-hyperlegible-next.txt \
  && cp node_modules/@fontsource/atkinson-hyperlegible-mono/LICENSE /build/licenses/atkinson-hyperlegible-mono.txt
 
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS build
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
 COPY requirements.txt requirements-webui.in requirements-webui.txt requirements.yml ./
@@ -38,7 +38,7 @@ RUN scripts/retry.sh /opt/venv/bin/ansible-galaxy collection install -r requirem
 # pip vendors, which scanners rightly report when they fall behind).
 RUN /opt/venv/bin/python -m pip uninstall --yes pip
 
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS runtime
 # Security fixes published since the pinned base image. A release passes its run ID, so a build cache
 # can't reuse an older upgrade layer.
 ARG SECURITY_UPDATES=
