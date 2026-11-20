@@ -84,6 +84,10 @@
   gather_facts: false
   become: true
   ignore_unreachable: true
+  # As in playbooks/baseline.yml: dnf's copr and debuginfo-install plugins can break a transaction.
+  module_defaults:
+    ansible.builtin.dnf:
+      disable_plugin: [copr, debuginfo-install]
   tasks:
     - name: Update the server
       ansible.builtin.include_role:
