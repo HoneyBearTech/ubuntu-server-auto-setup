@@ -28,7 +28,8 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 - **OS catalog:** the newest cloud images pinned again for Ubuntu 22.04 (20261109) and 26.04 (20261108), Debian 12
   (20261117-2665) and 13 (20261116-2664), CentOS Stream 9 and 10 (20261118.0), Rocky Linux 9 (9.9-20261112.0) and
   10 (10.3-20261112.0) and AlmaLinux 9 (9.9-20261116) and 10 (10.3-20261116.0), each checked against the vendor's
-  signed checksums.
+  checksums (and their signatures for Ubuntu, Rocky Linux and AlmaLinux; Debian and CentOS Stream publish none, so
+  theirs come over HTTPS). Rocky Linux and AlmaLinux move to point releases 9.9 and 10.3.
 
 ## [0.8.1] - 2026-11-02
 
