@@ -8,6 +8,12 @@ steps when upgrading (for example a renamed variable); those are listed under "U
 
 ## [Unreleased]
 
+### Security
+
+- **Lint tools:** wcmatch, which ansible-lint uses, moves to 11.2, which fixes GHSA-53pm-wgxf-c6qf (slow matching
+  of untrusted names against patterns with several `*`); bracex, which wcmatch 11.2 needs, moves to 3.2.3.
+  Development and CI only; nothing on a managed server uses them.
+
 ### Fixed
 
 - **Web UI:** a Keys URL saved with the `{{ github_user }}` placeholder (a mirror such as
