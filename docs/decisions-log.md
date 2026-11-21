@@ -4,6 +4,22 @@ Why things in ubuntu-server-auto-setup are the way they are: each entry gives th
 considered and not done, and review findings that were declined, with why. Newest first. What shipped when is in the
 [pass map](pass-map.md).
 
+## 2026-11-21: fix the wcmatch advisory in the lint tools
+
+Job `wcmatch-advisory`, [#217](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pull/217).
+
+**Decision:** GHSA-53pm-wgxf-c6qf (published 2026-11-20) is fixed by hand: a `wcmatch>=11.2` floor in
+`requirements-dev.txt`, like the `black` and `pygments` floors, and a lock update of only wcmatch and bracex in
+`requirements-ci.txt` (`pip-compile --upgrade-package`). **Why:** the advisory failed the OSV check on every pull
+request, and Renovate never edits `requirements-dev.txt`, whose lower bounds are set by hand.
+
+- **bracex 3.2.3, not the newest 3.2.4:** wcmatch 11.2 needs bracex 3.2 or later; 3.2.4 was less than a day old,
+  and dependency updates here wait 3 days after a release. 3.2.3 is a week old and has no known advisory.
+- **Nothing shipped changes:** wcmatch is a lint dependency; the runtime lock, the image and the managed servers
+  don't use it.
+- **Seen, not changed:** ansible-lint logs that it can't load `build-installer.yml`, `provision-vms.yml` and
+  `baseline.yml` for its syntax check, on `main` as on this branch, and still passes; a separate look if wanted.
+
 ## 2026-11-20: move dependency updates from Dependabot to Renovate
 
 Job `renovate-migrate`, [#213](https://github.com/HoneyBearTech/ubuntu-server-auto-setup/pull/213).
